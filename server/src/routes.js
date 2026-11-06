@@ -2,13 +2,16 @@ import express from 'express';
 import multer from 'multer';
 import nodemailer from 'nodemailer';
 import MailComposer from 'nodemailer/lib/mail-composer/index.js';
+import addressparser from 'nodemailer/lib/addressparser/index.js';
 import { simpleParser } from 'mailparser';
-import rateLimit from 'express-rate-limit';
 import { config } from './config.js';
-import { setSession, clearSession, requireAuth } from './session.js';
+import { clearSession, requireAuth } from './session.js';
 import { getClient, closeClient, withMailbox, specialFolder, makeClient } from './imap.js';
 import { parseQuery } from './search.js';
-import { rolesFor } from './db.js';
+import { rolesFor, q } from './db.js';
+import { applyEnforcedSignature } from './signatures.js';
+import { addJob, listJobs, getJob, deleteJob } from './jobs.js';
+import { config as appConfig } from './config.js';
 
 export const api = express.Router();
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: config.maxAttachmentMb * 1024 * 1024 } });
@@ -64,7 +67,7 @@ async function fetchSummaries(client, range, opts = {}) {
     } catch { /* partial source may not parse */ }
     out.push(summarize(msg, snippet));
   }
-  return out.sort((a, b) => new Date(b.date) - new Date(a.date));
+  return out.sort((a, b) => b.uid - a.uid);
 }
 
 function uidList(uids) {
@@ -83,31 +86,7 @@ function transport(user) {
   });
 }
 
-// ---------- auth ----------
-const loginLimiter = rateLimit({ windowMs: 15 * 60 * 1000, limit: 20, standardHeaders: true, legacyHeaders: false });
-
-api.post('/login', loginLimiter, wrap(async (req, res) => {
-  const email = String(req.body?.email || '').trim().toLowerCase();
-  const password = String(req.body?.password || '');
-  if (!email || !password) return res.status(400).json({ error: 'Email and password are required' });
-  const domain = email.split('@')[1];
-  if (config.allowedDomains.length && !config.allowedDomains.includes(domain)) {
-    return res.status(403).json({ error: 'This email domain is not allowed on this server' });
-  }
-  const client = makeClient({ email, password });
-  try {
-    await client.connect();
-    await client.logout();
-  } catch (err) {
-    const authFail = err.authenticationFailed || /auth/i.test(err.responseText || err.message);
-    return res.status(authFail ? 401 : 502).json({
-      error: authFail ? 'Wrong email or password' : `Could not reach mail server (${err.code || err.message})`,
-    });
-  }
-  setSession(res, { email, password, name: String(req.body?.name || '') });
-  res.json({ email });
-}));
-
+// ---------- auth (login lives in security.js) ----------
 api.use(requireAuth);
 
 api.post('/logout', wrap(async (req, res) => {
@@ -116,7 +95,11 @@ api.post('/logout', wrap(async (req, res) => {
   res.json({ ok: true });
 }));
 
-api.get('/me', (req, res) => res.json({ email: req.user.email, name: req.user.name, ...rolesFor(req.user.email) }));
+api.get('/me', (req, res) => res.json({
+  email: req.user.email, name: req.user.name, ...rolesFor(req.user.email),
+  orgDomains: q.all("SELECT d.domain FROM domains d WHERE d.status = 'active' AND d.org_id = (SELECT org_id FROM domains WHERE domain = ?)", req.user.email.split('@')[1]).map((d) => d.domain),
+  clientSettings: { imapHost: appConfig.imap.host, imapPort: appConfig.imap.port, smtpHost: appConfig.smtp.host, smtpPort: appConfig.smtp.port, smtpSecure: appConfig.smtp.secure },
+}));
 
 // ---------- folders ----------
 api.get('/folders', wrap(async (req, res) => {
@@ -210,6 +193,23 @@ async function loadMessage(user, folder, uid, { markSeen = true } = {}) {
   });
 }
 
+// Read SPF/DKIM/DMARC results added by mailcow (rspamd) and look for impersonation tricks.
+function senderSecurity(parsed) {
+  const raw = [].concat(parsed.headers.get('authentication-results') || []).map(String).join(' ').toLowerCase();
+  const pick = (k) => (new RegExp(`\\b${k}=(\\w+)`).exec(raw) || [])[1] || null;
+  const from = parsed.from?.value?.[0] || {};
+  const nameAddr = /[\w.+-]+@[\w-]+\.[\w.-]+/.exec(from.name || '')?.[0]?.toLowerCase();
+  const replyTo = parsed.replyTo?.value?.[0]?.address?.toLowerCase();
+  const fromDomain = from.address?.split('@')[1]?.toLowerCase();
+  const spam = parsed.headers.get('x-spam-flag') === 'YES' || /yes/i.test(String(parsed.headers.get('x-spam') || ''));
+  return {
+    spf: pick('spf'), dkim: pick('dkim'), dmarc: pick('dmarc'),
+    spoofedName: !!(nameAddr && nameAddr !== from.address?.toLowerCase()),
+    replyToDiffers: !!(replyTo && fromDomain && replyTo.split('@')[1] !== fromDomain),
+    spam,
+  };
+}
+
 function fullMessage(folder, msg, parsed) {
   const base = summarize(msg, snippetFrom(parsed.text || ''));
   return {
@@ -221,6 +221,7 @@ function fullMessage(folder, msg, parsed) {
     html: parsed.html || null,
     text: parsed.text || '',
     listUnsubscribe: parsed.headers.get('list-unsubscribe') || null,
+    security: senderSecurity(parsed),
     attachments: (parsed.attachments || []).map((a, i) => ({
       index: i,
       filename: a.filename || `attachment-${i + 1}`,
@@ -390,8 +391,24 @@ async function forwardedAttachments(user, body) {
 
 api.post('/send', upload.array('attachments'), wrap(async (req, res) => {
   const files = [...(req.files || []), ...(await forwardedAttachments(req.user, req.body))];
-  const mail = buildMail(req.user, req.body, files);
+  let mail = buildMail(req.user, req.body, files);
   if (!mail.to && !mail.cc && !mail.bcc) return res.status(400).json({ error: 'Add at least one recipient' });
+  mail = await applyEnforcedSignature(req.user, mail, !!(req.body.inReplyTo || req.body.forwardUid));
+
+  // Schedule send: store the finished message and send it later from the job worker
+  const sendAt = Number(req.body.sendAt || 0);
+  if (sendAt && sendAt > Date.now() + 30000) {
+    if (sendAt > Date.now() + 365 * 864e5) return res.status(400).json({ error: 'Pick a time within the next year' });
+    const raw = await compile({ ...mail, date: new Date(sendAt) });
+    const envelope = { from: req.user.email, to: [mail.to, mail.cc, mail.bcc].filter(Boolean).flatMap((v) => addressparser(v)).map((a) => a.address).filter(Boolean) };
+    const id = addJob(req.user, 'send', sendAt, { raw: raw.toString('base64'), envelope, replyFolder: req.body.replyFolder, replyUid: req.body.replyUid },
+      { subject: mail.subject, to: mail.to || mail.cc || mail.bcc });
+    if (req.body.draftUid) {
+      const drafts = await specialFolder(req.user, '\\Drafts');
+      if (drafts) await withMailbox(req.user, drafts, (c) => c.messageDelete(String(req.body.draftUid), { uid: true })).catch(() => {});
+    }
+    return res.json({ ok: true, scheduled: true, id, sendAt });
+  }
   const info = await transport(req.user).sendMail(mail);
 
   // mailcow (Postfix) does not store sent mail itself; append a copy to Sent.
@@ -499,3 +516,59 @@ api.get('/events', wrap(async (req, res) => {
   }
 }));
 
+
+// ---------- scheduled send ----------
+api.get('/scheduled', (req, res) => res.json(listJobs(req.user.email, 'send')));
+api.delete('/scheduled', wrap(async (req, res) => {
+  const job = getJob(req.user.email, req.query.id);
+  if (!job || job.type !== 'send') return res.status(404).json({ error: 'Not found' });
+  if (job.status === 'running') return res.status(409).json({ error: 'It is being sent right now' });
+  // Return the message to Drafts so the user can edit it
+  if (req.query.toDrafts === '1') {
+    const drafts = await specialFolder(req.user, '\\Drafts', { create: true });
+    const client = await getClient(req.user);
+    await client.append(drafts, Buffer.from(JSON.parse(job.payload).raw, 'base64'), ['\\Draft', '\\Seen']);
+  }
+  deleteJob(req.user.email, job.id);
+  res.json({ ok: true });
+}));
+
+// ---------- snooze ----------
+api.post('/snooze', wrap(async (req, res) => {
+  const { folder = 'INBOX', uids, until } = req.body;
+  const at = Number(until);
+  if (!at || at < Date.now() + 60000) return res.status(400).json({ error: 'Pick a time in the future' });
+  const client = await getClient(req.user);
+  const list = await client.list();
+  let snoozed = list.find((f) => f.path.toLowerCase() === 'snoozed')?.path;
+  if (!snoozed) snoozed = (await client.mailboxCreate('Snoozed')).path;
+  const range = uidList(uids);
+  const info = await withMailbox(req.user, folder, async (c) => {
+    const out = [];
+    for await (const m of c.fetch(range, { envelope: true }, { uid: true })) out.push({ subject: m.envelope.subject, id: m.envelope.messageId });
+    return out;
+  });
+  const r = await withMailbox(req.user, folder, (c) => c.messageMove(range, snoozed, { uid: true }));
+  let newUids = r?.uidMap ? [...r.uidMap.values()] : [];
+  if (!newUids.length) {
+    // Server without UIDPLUS: find the moved messages by Message-ID
+    newUids = await withMailbox(req.user, snoozed, async (c) => {
+      const found = [];
+      for (const { id } of info.filter((x) => x.id)) found.push(...((await c.search({ header: { 'Message-ID': id } }, { uid: true })) || []));
+      return found;
+    });
+  }
+  if (!newUids.length) return res.status(500).json({ error: 'Could not snooze: the messages were moved to the Snoozed folder but could not be tracked' });
+  const subjects = info.map((x) => x.subject);
+  const id = addJob(req.user, 'snooze', at, { folder: snoozed, uids: newUids, back: folder }, { subject: subjects[0] || '', count: newUids.length, uids: newUids, back: folder });
+  res.json({ ok: true, id, until: at, folder: snoozed });
+}));
+api.get('/snoozed', (req, res) => res.json(listJobs(req.user.email, 'snooze')));
+api.post('/snoozed/wake', wrap(async (req, res) => {
+  const job = getJob(req.user.email, req.body.id);
+  if (!job || job.type !== 'snooze') return res.status(404).json({ error: 'Not found' });
+  q.run("UPDATE jobs SET run_at = 0, status = 'pending' WHERE id = ?", job.id);
+  const { tick } = await import('./jobs.js');
+  await tick();
+  res.json({ ok: true });
+}));

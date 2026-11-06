@@ -9,7 +9,27 @@ function AddrList({ label, list }) {
   return <div className="addr-line"><span>{label}</span> {list.map((a, i) => <span key={i} title={a.address}>{a.name || a.address}{i < list.length - 1 ? ', ' : ''}</span>)}</div>;
 }
 
-function ThreadMessage({ m, expanded, onToggle, onReply, prefs, setPrefs, last }) {
+function SecurityBanner({ m, sender, orgDomains }) {
+  const sec = m.security || {};
+  const issues = [];
+  if (sec.dmarc === 'fail') issues.push(`This message claims to be from ${sender.address?.split('@')[1]} but failed the domain's own authenticity check.`);
+  else if (sec.spf === 'fail' && sec.dkim !== 'pass') issues.push('We couldn\'t confirm this message really came from the sender\'s domain.');
+  if (sec.spoofedName) issues.push(`The sender's name shows a different email address than the one it was really sent from (${sender.address}).`);
+  if (sec.replyToDiffers) issues.push(`Replies will go to ${m.replyTo?.[0]?.address}, not to ${sender.address}.`);
+  if (orgDomains.length && orgDomains.some((d) => sender.address?.toLowerCase().endsWith(`@${d}`)) && (sec.spf === 'fail' || sec.dmarc === 'fail')) {
+    issues.unshift('⚠ This looks like it is from your own organization, but it was not sent from our servers. It may be a phishing attempt.');
+  }
+  if (!issues.length) return null;
+  return (
+    <div className="sec-banner">
+      <Icon name="alert" size={18} />
+      <div><b>Be careful with this message</b>{issues.map((t, i) => <div key={i}>{t}</div>)}
+        <small>Don't click links, open attachments or reply with personal information unless you're sure it's genuine.</small></div>
+    </div>
+  );
+}
+
+function ThreadMessage({ m, expanded, onToggle, onReply, prefs, setPrefs, last, orgDomains, onBlock }) {
   const sender = m.from?.[0] || {};
   const trusted = prefs.showImages === 'always' || prefs.trustedSenders.includes(sender.address?.toLowerCase());
   const [allow, setAllow] = useState(trusted);
@@ -17,6 +37,7 @@ function ThreadMessage({ m, expanded, onToggle, onReply, prefs, setPrefs, last }
   const [details, setDetails] = useState(false);
   const [menu, setMenu] = useState(false);
   const files = (m.attachments || []).filter((a) => !a.inline);
+  const external = orgDomains.length > 0 && sender.address && !orgDomains.some((d) => sender.address.toLowerCase().endsWith(`@${d}`));
   const lu = m.listUnsubscribe;
   const unsubUrl = !lu ? null : typeof lu === 'object' ? lu.url || null : (/<(https?:[^>]+)>/.exec(lu) || [])[1] || null;
 
@@ -35,7 +56,10 @@ function ThreadMessage({ m, expanded, onToggle, onReply, prefs, setPrefs, last }
       <header className="tmsg-head" onClick={last ? undefined : onToggle}>
         <span className="avatar lg" style={{ background: avatarColor(sender.address) }}>{initials(sender)}</span>
         <div className="who">
-          <div><b>{personName(sender)}</b> <span className="muted">&lt;{sender.address}&gt;</span></div>
+          <div><b>{personName(sender)}</b> <span className="muted">&lt;{sender.address}&gt;</span>
+            {external && <span className="ext-tag" title="This message came from outside your organization">External</span>}
+            {m.security?.dkim === 'pass' && m.security?.dmarc === 'pass' && <span className="verified" title="Sender's domain verified (DKIM + DMARC)"><Icon name="lock" size={12} /></span>}
+          </div>
           <div className="muted small" onClick={(e) => { e.stopPropagation(); setDetails((d) => !d); }} style={{ cursor: 'pointer' }}>
             to {[...(m.to || []), ...(m.cc || [])].map(personName).join(', ') || 'undisclosed recipients'} <Icon name="down" size={12} />
           </div>
@@ -55,6 +79,7 @@ function ThreadMessage({ m, expanded, onToggle, onReply, prefs, setPrefs, last }
             <button className="icon-btn" onClick={() => setMenu((x) => !x)} title="More"><Icon name="more" /></button>
             {menu && (
               <div className="menu right">
+                {sender.address && <button onClick={() => { setMenu(false); onBlock(sender.address); }}><Icon name="block" /> Block {sender.address}</button>}
                 <button onClick={() => window.open(`/api/raw?folder=${encodeURIComponent(m.folder)}&uid=${m.uid}`, '_blank')}><Icon name="external" /> View source</button>
                 <button onClick={() => { const f = document.querySelector(`[data-msg="${m.folder}:${m.uid}"] iframe`); f?.contentWindow?.print(); }}><Icon name="print" /> Print</button>
               </div>
@@ -62,6 +87,7 @@ function ThreadMessage({ m, expanded, onToggle, onReply, prefs, setPrefs, last }
           </div>
         </div>
       </header>
+      <SecurityBanner m={m} sender={sender} orgDomains={orgDomains} />
       {blocked > 0 && !allow && (
         <div className="img-banner">
           <Icon name="shield" size={16} /> Pictures were blocked to protect your privacy.
@@ -87,7 +113,7 @@ function ThreadMessage({ m, expanded, onToggle, onReply, prefs, setPrefs, last }
   );
 }
 
-export default function ReadingPane({ folder, msg, me, prefs, setPrefs, conversation, onReply, act, categories, onClose, isJunk }) {
+export default function ReadingPane({ folder, msg, me, prefs, setPrefs, conversation, onReply, act, categories, onClose, isJunk, orgDomains = [] }) {
   const [thread, setThread] = useState(null);
   const [error, setError] = useState('');
   const [expanded, setExpanded] = useState(new Set());
@@ -121,6 +147,7 @@ export default function ReadingPane({ folder, msg, me, prefs, setPrefs, conversa
         <h1>{msg.subject}</h1>
         <div className="reading-tools">
           {msg.categories?.map((c) => <span key={c} className="cat" style={{ '--c': catColor(c) }}>{c}</span>)}
+          <button className="icon-btn" title="Snooze (b)" onClick={() => act.snooze(msg.uid)}><Icon name="clock" /></button>
           <button className="icon-btn" title="Archive (e)" onClick={() => act.archive(msg.uid)}><Icon name="archive" /></button>
           <button className="icon-btn" title="Delete (#)" onClick={() => act.del(msg.uid)}><Icon name="trash" /></button>
           <button className="icon-btn" title={msg.flagged ? 'Unflag' : 'Flag (s)'} onClick={() => act.flag(msg.uid)}>
@@ -139,7 +166,7 @@ export default function ReadingPane({ folder, msg, me, prefs, setPrefs, conversa
           return (
             <ThreadMessage key={k} m={m} last={i === thread.messages.length - 1} expanded={expanded.has(k)} prefs={prefs} setPrefs={setPrefs}
               onToggle={() => setExpanded((s) => { const n = new Set(s); n.has(k) ? n.delete(k) : n.add(k); return n; })}
-              onReply={onReply} />
+              onReply={onReply} orgDomains={orgDomains} onBlock={act.block} />
           );
         })}
         {thread && (

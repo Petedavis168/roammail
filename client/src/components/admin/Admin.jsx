@@ -4,6 +4,7 @@ import { Icon } from '../../icons.jsx';
 import { useToast } from '../Toast.jsx';
 import { DomainWizard, DomainStatus, Copy, setSuper } from './DomainSetup.jsx';
 import { avatarColor, initials, fmtDate } from '../../util.js';
+import OrgSignature from './Signature.jsx';
 
 const genPassword = () => {
   const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnpqrstuvwxyz23456789';
@@ -65,7 +66,7 @@ function Users({ org, domains }) {
           <div className="tr" key={u.email}>
             <span className="user-cell">
               <span className="avatar" style={{ background: avatarColor(u.email) }}>{initials({ name: u.name, address: u.email })}</span>
-              <span><span><b>{u.name || u.email.split('@')[0]}</b>{u.admin && <span className="badge">Admin</span>}</span><small>{u.email}</small></span>
+              <span><span><b>{u.name || u.email.split('@')[0]}</b>{u.admin && <span className="badge">Admin</span>}</span><small>{u.email}{u.title ? ` · ${u.title}` : ''}</small></span>
             </span>
             <span><div className="meter"><div style={{ width: `${Math.min(100, (u.usedMb / Math.max(1, u.quotaMb)) * 100)}%` }} /></div>
               <small className="muted">{u.usedMb >= 1024 ? `${(u.usedMb / 1024).toFixed(1)} GB` : `${u.usedMb} MB`} of {u.quotaMb >= 1024 ? `${(u.quotaMb / 1024).toFixed(0)} GB` : `${u.quotaMb} MB`}</small></span>
@@ -90,6 +91,7 @@ function Users({ org, domains }) {
             <div><span>Password</span><b className="mono">{created.password}</b><Copy text={created.password} /></div>
             <div><span>Sign in at</span><b className="mono">{location.origin}</b><Copy text={location.origin} /></div>
           </div>
+          {!created.reset && <SigPreview orgId={org.id} email={created.email} />}
           <Copy text={`Your email is ready!\nSign in at: ${location.origin}\nEmail: ${created.email}\nPassword: ${created.password}\nIt also works in Outlook, Apple Mail and phone apps.`} />
           <span className="muted small"> ← copy everything as a message</span>
         </Modal>
@@ -98,8 +100,29 @@ function Users({ org, domains }) {
   );
 }
 
+function SigPreview({ orgId, email }) {
+  const [html, setHtml] = useState(null);
+  useEffect(() => {
+    api.get(`/api/admin/orgs/${orgId}/signature`).then((s) => (s.mode !== 'off' && s.html
+      ? api.post(`/api/admin/orgs/${orgId}/signature/preview`, { html: s.html, email }).then((r) => setHtml(r.html)) : null)).catch(() => {});
+  }, [orgId, email]);
+  if (!html) return null;
+  return <div className="new-sig"><small className="muted">Their company signature is ready:</small><div className="sig-preview" dangerouslySetInnerHTML={{ __html: html }} /></div>;
+}
+
+function ProfileFields({ f, setF }) {
+  return (
+    <div className="two-col">
+      <label>Job title<input value={f.title || ''} onChange={(e) => setF({ ...f, title: e.target.value })} placeholder="Sales Manager" /></label>
+      <label>Department<input value={f.department || ''} onChange={(e) => setF({ ...f, department: e.target.value })} placeholder="Sales" /></label>
+      <label>Phone<input value={f.phone || ''} onChange={(e) => setF({ ...f, phone: e.target.value })} /></label>
+      <label>Mobile<input value={f.mobile || ''} onChange={(e) => setF({ ...f, mobile: e.target.value })} /></label>
+    </div>
+  );
+}
+
 function AddUser({ domain, onClose, onCreated }) {
-  const [f, setF] = useState({ name: '', localPart: '', password: genPassword(), quotaMb: 5120, admin: false });
+  const [f, setF] = useState({ name: '', localPart: '', password: genPassword(), quotaMb: 5120, admin: false, title: '', department: '', phone: '', mobile: '', welcome: true });
   const [err, setErr] = useState('');
   const [busy, setBusy] = useState(false);
   const submit = async (e) => {
@@ -113,11 +136,13 @@ function AddUser({ domain, onClose, onCreated }) {
         <label>Full name<input required autoFocus value={f.name} onChange={(e) => setF({ ...f, name: e.target.value, localPart: f.localPart || '' })}
           onBlur={() => !f.localPart && f.name && setF((x) => ({ ...x, localPart: x.name.toLowerCase().trim().split(/\s+/)[0].replace(/[^a-z0-9._-]/g, '') }))} /></label>
         <label>Email address<div className="addr-input"><input required value={f.localPart} onChange={(e) => setF({ ...f, localPart: e.target.value.toLowerCase() })} /><span>@{domain}</span></div></label>
+        <ProfileFields f={f} setF={setF} />
         <label>Temporary password<div className="addr-input"><input required minLength={10} value={f.password} onChange={(e) => setF({ ...f, password: e.target.value })} className="mono" />
           <button type="button" className="btn sm" onClick={() => setF({ ...f, password: genPassword() })}>Generate</button></div></label>
         <label>Mailbox size<select value={f.quotaMb} onChange={(e) => setF({ ...f, quotaMb: Number(e.target.value) })}>
           {[1024, 2048, 5120, 10240, 20480].map((m) => <option key={m} value={m}>{m / 1024} GB</option>)}</select></label>
         <label className="check"><input type="checkbox" checked={f.admin} onChange={(e) => setF({ ...f, admin: e.target.checked })} /> Make this person an admin (can manage users &amp; domains)</label>
+        <label className="check"><input type="checkbox" checked={f.welcome} onChange={(e) => setF({ ...f, welcome: e.target.checked })} /> Put a welcome &amp; getting-started email in their inbox</label>
         {err && <div className="form-error">{err}</div>}
         <div className="step-actions"><button type="button" className="btn" onClick={onClose}>Cancel</button><button className="btn primary" disabled={busy}>{busy ? 'Creating…' : 'Create user'}</button></div>
       </form>
@@ -126,11 +151,12 @@ function AddUser({ domain, onClose, onCreated }) {
 }
 
 function EditUser({ u, onClose, onSave }) {
-  const [f, setF] = useState({ name: u.name, quotaMb: u.quotaMb, active: u.active, admin: u.admin });
+  const [f, setF] = useState({ name: u.name, quotaMb: u.quotaMb, active: u.active, admin: u.admin, title: u.title, department: u.department, phone: u.phone, mobile: u.mobile });
   return (
     <Modal title={`Edit ${u.email}`} onClose={onClose}>
       <form className="form" onSubmit={(e) => { e.preventDefault(); onSave(f); }}>
         <label>Full name<input value={f.name} onChange={(e) => setF({ ...f, name: e.target.value })} /></label>
+        <ProfileFields f={f} setF={setF} />
         <label>Mailbox size<select value={f.quotaMb} onChange={(e) => setF({ ...f, quotaMb: Number(e.target.value) })}>
           {[...new Set([1024, 2048, 5120, 10240, 20480, u.quotaMb])].sort((a, b) => a - b).map((m) => <option key={m} value={m}>{(m / 1024).toFixed(m % 1024 ? 1 : 0)} GB</option>)}</select></label>
         <label className="check"><input type="checkbox" checked={f.admin} onChange={(e) => setF({ ...f, admin: e.target.checked })} /> Admin</label>
@@ -139,6 +165,15 @@ function EditUser({ u, onClose, onSave }) {
       </form>
     </Modal>
   );
+}
+
+function SignatureTab({ org }) {
+  const [users, setUsers] = useState([]);
+  useEffect(() => {
+    Promise.all(org.domains.filter((d) => d.status === 'active').map((d) => api.get('/api/admin/users', { domain: d.domain }).catch(() => [])))
+      .then((r) => setUsers(r.flat()));
+  }, [org.id]);
+  return <OrgSignature org={org} users={users} />;
 }
 
 // ------------------------------------------------------------------ aliases
@@ -212,7 +247,7 @@ function Activity({ org }) {
   const [rows, setRows] = useState(null);
   useEffect(() => { api.get(`/api/admin/orgs/${org.id}/audit`).then(setRows).catch(() => setRows([])); }, [org.id]);
   const label = { 'user.create': 'created user', 'user.update': 'updated user', 'user.delete': 'deleted user', 'alias.create': 'created alias', 'alias.delete': 'deleted alias',
-    'domain.add': 'added domain', 'domain.activate': 'activated domain', 'domain.delete': 'removed domain', 'domain.route53': 'set up DNS for', 'org.create': 'created organization', 'org.update': 'renamed organization' };
+    'signature.update': 'updated the company signature', 'domain.add': 'added domain', 'domain.activate': 'activated domain', 'domain.delete': 'removed domain', 'domain.route53': 'set up DNS for', 'org.create': 'created organization', 'org.update': 'renamed organization' };
   return (
     <div className="table">
       {rows?.length === 0 && <div className="list-msg muted">No activity yet.</div>}
@@ -296,7 +331,7 @@ export default function Admin({ me, refreshMe, onExit }) {
   }
 
   const tabs = [
-    ...(org ? [['users', 'Users', 'users'], ['aliases', 'Aliases', 'mail'], ['domains', 'Domains', 'globe'], ['activity', 'Activity', 'refresh']] : []),
+    ...(org ? [['users', 'Users', 'users'], ['signature', 'Signature', 'pen'], ['aliases', 'Aliases', 'mail'], ['domains', 'Domains', 'globe'], ['activity', 'Activity', 'refresh']] : []),
     ...(me.superAdmin ? [['platform', 'Platform (super-admin)', 'shield'], ['new', 'New business', 'plus']] : []),
   ];
   const current = tabs.some((t) => t[0] === tab) ? tab : tabs[0][0];
@@ -317,6 +352,7 @@ export default function Admin({ me, refreshMe, onExit }) {
       <section className="admin-main">
         <h1>{current === 'platform' ? 'Platform' : current === 'new' ? 'Add a business' : org?.name} <small className="muted">{tabs.find((t) => t[0] === current)?.[1]}</small></h1>
         {current === 'users' && org && <Users key={org.id} org={org} domains={org.domains} />}
+        {current === 'signature' && org && <SignatureTab key={org.id} org={org} />}
         {current === 'aliases' && org && <Aliases key={org.id} domains={org.domains} />}
         {current === 'domains' && org && <Domains key={org.id} org={org} reload={load} refreshMe={refreshMe} goUsers={() => setTab('users')} />}
         {current === 'activity' && org && <Activity org={org} />}

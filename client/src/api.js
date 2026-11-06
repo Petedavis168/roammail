@@ -10,7 +10,7 @@ async function request(method, url, body, { form } = {}) {
   if (!res.ok) {
     const err = new Error(data?.error || `Request failed (${res.status})`);
     err.status = res.status;
-    if (res.status === 401 && !url.endsWith('/login')) window.dispatchEvent(new Event('auth:expired'));
+    if (res.status === 401 && !/\/login(\/2fa)?$/.test(url)) window.dispatchEvent(new Event('auth:expired'));
     throw err;
   }
   return data;
@@ -22,6 +22,7 @@ export const api = {
   get: (url, params) => request('GET', params ? `${url}?${qs(params)}` : url),
   post: (url, body) => request('POST', url, body),
   patch: (url, body) => request('PATCH', url, body),
+  put: (url, body) => request('PUT', url, body),
   del: (url, params) => request('DELETE', params ? `${url}?${qs(params)}` : url),
   form: (url, form) => request('POST', url, undefined, { form }),
 

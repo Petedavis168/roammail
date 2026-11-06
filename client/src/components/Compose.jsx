@@ -4,6 +4,10 @@ import { Icon } from '../icons.jsx';
 import { fmtAddr, fmtDate, fmtSize, escapeHtml } from '../util.js';
 import RecipientInput from './RecipientInput.jsx';
 import { useToast } from './Toast.jsx';
+import { signatureHtml, defaultChoice } from '../signatures.js';
+import { presets, fmtWhen, localInputValue } from '../snooze.js';
+
+const sigBlock = (html) => (html ? `<div class="signature" data-sig="1"><br>${html}</div>` : '');
 
 const prefix = (p, s = '') => (new RegExp(`^${p}:`, 'i').test(s.trim()) ? s : `${p}: ${s}`);
 
@@ -32,7 +36,7 @@ function quoteHtml(msg, mode) {
   return `<br><br><div>On ${escapeHtml(fmtDate(msg.date, true))}, ${escapeHtml((msg.from || []).map(fmtAddr).join(', '))} wrote:</div><blockquote style="margin:0 0 0 .8ex;border-left:2px solid #ccc;padding-left:1ex">${inner}</blockquote>`;
 }
 
-function Composer({ c, me, prefs, onClose, onSend, focusIndex, setFocus, count }) {
+function Composer({ c, me, prefs, sigData, onClose, onSend, focusIndex, setFocus, count }) {
   const toast = useToast();
   const init = c.initial;
   const [to, setTo] = useState(init.to || []);
@@ -50,7 +54,27 @@ function Composer({ c, me, prefs, onClose, onSend, focusIndex, setFocus, count }
   const editor = useRef();
   const fileInput = useRef();
   const dirty = useRef(false);
-  const sig = prefs.signature ? `<br><br><div class="signature">-- <br>${prefs.signature.split('\n').map(escapeHtml).join('<br>')}</div>` : '';
+  const isReply = !!init.mode;
+  const [sigChoice, setSigChoice] = useState(() => defaultChoice(sigData, isReply));
+  const [sigMenu, setSigMenu] = useState(false);
+  const [sendMenu, setSendMenu] = useState(false);
+  const [pickTime, setPickTime] = useState(false);
+  const [customTime, setCustomTime] = useState(() => localInputValue(new Date(Date.now() + 3600e3)));
+  const sig = sigBlock(signatureHtml(sigData, sigChoice));
+  const enforced = sigData?.org?.mode === 'enforced' && (!isReply || sigData.org.onReplies) ? sigData.org : null;
+
+  const chooseSignature = (choice) => {
+    setSigChoice(choice); setSigMenu(false);
+    const ed = editor.current; if (!ed) return;
+    const html = sigBlock(signatureHtml(sigData, choice));
+    const cur = ed.querySelector('.signature, [data-sig]');
+    if (cur) { if (html) cur.outerHTML = html; else cur.remove(); }
+    else if (html) {
+      const quote = [...ed.children].find((el) => /wrote:|Forwarded message/.test(el.textContent || '') || el.tagName === 'BLOCKQUOTE');
+      if (quote) quote.insertAdjacentHTML('beforebegin', html); else ed.insertAdjacentHTML('beforeend', html);
+    }
+    markDirty();
+  };
 
   // Fill the editor (fetching the full original if we only have a list summary)
   useEffect(() => {
@@ -103,14 +127,14 @@ function Composer({ c, me, prefs, onClose, onSend, focusIndex, setFocus, count }
     if (draft.uid && draft.folder) await api.remove(draft.folder, [draft.uid], true).catch(() => {});
     onClose();
   };
-  const send = () => {
+  const send = (sendAt) => {
     if (!to.length && !cc.length && !bcc.length) return toast('Add at least one recipient', { error: true });
     const bad = [...to, ...cc, ...bcc].find((a) => !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(a.address));
     if (bad) return toast(`"${bad.address}" isn't a valid email address`, { error: true });
     if (!subject.trim() && !confirm('Send this message without a subject?')) return;
     const text = (editor.current?.innerText || '').toLowerCase();
     if (/\b(attached|attachment|enclosed)\b/.test(text.split('wrote:')[0]) && !files.length && !init.forwardUid && !confirm('You mentioned an attachment but none is attached. Send anyway?')) return;
-    onSend(payload());
+    onSend({ ...payload(), sendAt: typeof sendAt === 'number' ? sendAt : undefined });
   };
 
   const addFiles = (list) => {
@@ -152,6 +176,12 @@ function Composer({ c, me, prefs, onClose, onSend, focusIndex, setFocus, count }
             }} />
           {dragging && <div className="drop-zone">Drop files to attach</div>}
         </div>
+        {enforced && (
+          <div className="enforced-sig" title="Your organization adds this signature to every email">
+            <small className="muted">Added automatically by {enforced.company || 'your organization'}</small>
+            <div dangerouslySetInnerHTML={{ __html: enforced.html }} />
+          </div>
+        )}
         {files.length > 0 && (
           <div className="c-files">
             {files.map((f, i) => (
@@ -162,7 +192,24 @@ function Composer({ c, me, prefs, onClose, onSend, focusIndex, setFocus, count }
         )}
         {init.forwardUid && <div className="muted small c-note">Original attachments will be included.</div>}
         <div className="composer-foot">
-          <button className="btn primary" onClick={send} title="Send (Ctrl+Enter)"><Icon name="send" size={16} /> Send</button>
+          <div className="split-send dd">
+            <button className="btn primary" onClick={() => send()} title="Send (Ctrl+Enter)"><Icon name="send" size={16} /> Send</button>
+            <button className="btn primary caret" title="Schedule send" onClick={() => setSendMenu((x) => !x)}><Icon name="down" size={14} /></button>
+            {sendMenu && (
+              <div className="menu up" onMouseLeave={() => { setSendMenu(false); setPickTime(false); }}>
+                <div className="menu-head"><b>Schedule send</b></div>
+                {presets('send').map(([l, d]) => (
+                  <button key={l} onClick={() => { setSendMenu(false); send(d.getTime()); }}>{l}<small className="muted right">{fmtWhen(d)}</small></button>
+                ))}
+                {!pickTime ? <button onClick={() => setPickTime(true)}><Icon name="draft" /> Pick date &amp; time</button> : (
+                  <div className="pick-time">
+                    <input type="datetime-local" value={customTime} min={localInputValue(new Date())} onChange={(e) => setCustomTime(e.target.value)} />
+                    <button className="btn primary sm" onClick={() => { const t = new Date(customTime).getTime(); if (t > Date.now() + 60000) { setSendMenu(false); send(t); } else toast('Pick a time in the future', { error: true }); }}>Schedule</button>
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
           <div className="fmt">
             <button type="button" className="icon-btn" title="Bold" onMouseDown={(e) => { e.preventDefault(); exec('bold'); }}><Icon name="bold" size={16} /></button>
             <button type="button" className="icon-btn" title="Italic" onMouseDown={(e) => { e.preventDefault(); exec('italic'); }}><Icon name="italic" size={16} /></button>
@@ -171,6 +218,20 @@ function Composer({ c, me, prefs, onClose, onSend, focusIndex, setFocus, count }
             <button type="button" className="icon-btn" title="Insert link" onMouseDown={(e) => { e.preventDefault(); addLink(); }}><Icon name="link" size={16} /></button>
             <button type="button" className="icon-btn" title="Attach files" onClick={() => fileInput.current.click()}><Icon name="clip" size={16} /></button>
             <button type="button" className={`icon-btn ${important ? 'on-red' : ''}`} title="High importance" onClick={() => setImportant((x) => !x)}>!</button>
+            <div className="dd">
+              <button type="button" className="icon-btn" title="Signature" onClick={() => setSigMenu((x) => !x)}><Icon name="pen" size={16} /></button>
+              {sigMenu && (
+                <div className="menu up" onMouseLeave={() => setSigMenu(false)}>
+                  <div className="menu-head"><b>Signature</b></div>
+                  <button onClick={() => chooseSignature(null)}>{!sigChoice ? <Icon name="check" /> : <span className="ic-space" />} No signature</button>
+                  {sigData?.org?.mode === 'default' && <button onClick={() => chooseSignature('company')}>{sigChoice === 'company' ? <Icon name="check" /> : <span className="ic-space" />} {sigData.org.company || 'Company'} signature</button>}
+                  {(sigData?.personal?.signatures || []).map((x) => (
+                    <button key={x.id} onClick={() => chooseSignature(x.id)}>{sigChoice === x.id ? <Icon name="check" /> : <span className="ic-space" />} {x.name}</button>
+                  ))}
+                  {!(sigData?.personal?.signatures || []).length && <div className="menu-note">Create signatures in Settings → Signatures.</div>}
+                </div>
+              )}
+            </div>
             <input ref={fileInput} type="file" multiple hidden onChange={(e) => { addFiles(e.target.files); e.target.value = ''; }} />
           </div>
           <span className="muted small saving">{saving}</span>
@@ -187,14 +248,14 @@ function toForm(p) {
   fd.append('to', list(p.to)); fd.append('cc', list(p.cc)); fd.append('bcc', list(p.bcc));
   fd.append('subject', p.subject);
   fd.append('html', p.html); fd.append('text', p.text);
-  for (const k of ['inReplyTo', 'references', 'replyFolder', 'replyUid', 'forwardFolder', 'forwardUid', 'draftUid', 'priority', 'fromName']) {
+  for (const k of ['inReplyTo', 'references', 'replyFolder', 'replyUid', 'forwardFolder', 'forwardUid', 'draftUid', 'priority', 'fromName', 'sendAt']) {
     if (p[k]) fd.append(k, p[k]);
   }
   for (const f of p.files) fd.append('attachments', f, f.name);
   return fd;
 }
 
-export default function ComposeManager({ composers, setComposers, me, prefs, onSent }) {
+export default function ComposeManager({ composers, setComposers, me, prefs, sigData, onSent }) {
   const toast = useToast();
   const [focused, setFocused] = useState(null);
   const remove = (id) => setComposers((cs) => cs.filter((c) => c.id !== id));
@@ -213,6 +274,10 @@ export default function ComposeManager({ composers, setComposers, me, prefs, onS
         setComposers((cs) => [...cs, { id: Date.now(), initial: { ...c.initial, ...payload, html: payload.html, draftUid: payload.draftUid } }]);
       }
     };
+    if (payload.sendAt) {
+      return api.form('/api/send', toForm(payload)).then(() => { toast(`Scheduled for ${fmtWhen(payload.sendAt)}`); onSent(); })
+        .catch((e) => { toast(`Couldn't schedule: ${e.message}`, { error: true }); setComposers((cs) => [...cs, { id: Date.now(), initial: { ...c.initial, ...payload } }]); });
+    }
     const delay = Number(prefs.undoSeconds) || 0;
     if (!delay) return doSend();
     const timer = setTimeout(doSend, delay * 1000);
@@ -230,7 +295,7 @@ export default function ComposeManager({ composers, setComposers, me, prefs, onS
   return (
     <div className="composers">
       {composers.map((c, i) => (
-        <Composer key={c.id} c={c} me={me} prefs={prefs} count={composers.length} focusIndex={i}
+        <Composer key={c.id} c={c} me={me} prefs={prefs} sigData={sigData} count={composers.length} focusIndex={i}
           setFocus={() => setFocused(c.id)} onClose={() => remove(c.id)} onSend={(p) => onSend(c, p)} />
       ))}
     </div>

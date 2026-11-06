@@ -1,9 +1,10 @@
 import { useEffect, useRef } from 'react';
 import { Icon } from '../icons.jsx';
 import { fmtDate, dateGroup, personName, avatarColor, initials } from '../util.js';
+import { fmtWhen } from '../snooze.js';
 
 export default function MessageList({ list, title, search, onClearSearch, folderUse, filter, setFilter, selected, setSelected,
-  active, onOpen, act, categories, density, onLoadMore, onEmpty, onMarkAllRead }) {
+  active, onOpen, act, categories, density, onLoadMore, onEmpty, onMarkAllRead, snoozeMap }) {
   const ref = useRef();
   const { messages, loading, total } = list;
   const showTo = folderUse === '\\Sent' || folderUse === '\\Drafts';
@@ -107,7 +108,8 @@ export default function MessageList({ list, title, search, onClearSearch, folder
                     {m.hasAttachments && <Icon name="clip" size={14} />}
                     {m.answered && <Icon name="reply" size={14} />}
                   </span>
-                  <span className="date">{fmtDate(m.date)}</span>
+                  {snoozeMap?.[m.uid] ? <span className="date snoozed" title="Snoozed until"><Icon name="clock" size={12} /> {fmtWhen(snoozeMap[m.uid].run_at)}</span>
+                    : <span className="date">{fmtDate(m.date)}</span>}
                 </div>
                 <div className="row-sub">
                   <span className="subject">{m.draft && <span className="draft-tag">[Draft] </span>}{m.subject}</span>
@@ -116,6 +118,8 @@ export default function MessageList({ list, title, search, onClearSearch, folder
                 {density !== 'compact' && <div className="snippet">{m.snippet}</div>}
               </div>
               <div className="row-actions" onClick={(e) => e.stopPropagation()}>
+                {snoozeMap?.[m.uid] ? <button title="Unsnooze now" onClick={() => act.unsnooze(m.uid)}><Icon name="inbox" size={16} /></button>
+                  : <button title="Snooze" onClick={() => act.snooze(m.uid)}><Icon name="clock" size={16} /></button>}
                 <button title="Archive" onClick={() => act.archive(m.uid)}><Icon name="archive" size={16} /></button>
                 <button title="Delete" onClick={() => act.del(m.uid)}><Icon name="trash" size={16} /></button>
                 <button title={m.seen ? 'Mark unread' : 'Mark read'} onClick={() => act.read(!m.seen, m.uid)}><Icon name={m.seen ? 'mail' : 'mailOpen'} size={16} /></button>

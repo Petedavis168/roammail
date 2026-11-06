@@ -62,6 +62,23 @@ export const mailcow = {
 
   setMailboxRateLimit: (email, value, frame) => call('POST', 'edit/rl-mbox', { items: [email], attr: { rl_value: String(value), rl_frame: frame } }),
 
+  // Sieve filters
+  listFilters: async (email) => list(await call('GET', `get/filters/all`)).filter((f) => f.username === email),
+  addFilter: (email, desc, script, type = 'prefilter') => call('POST', 'add/filter', { username: email, filter_type: type, script_desc: desc, script_data: script, active: 1 }),
+  editFilter: (id, attr) => call('POST', 'edit/filter', { items: [String(id)], attr }),
+  deleteFilter: (id) => call('POST', 'delete/filter', [String(id)]),
+
+  // IMAP import (sync jobs)
+  listSyncJobs: async (email) => list(await call('GET', 'get/syncjobs/all/no_log')).filter((j) => j.user2 === email),
+  addSyncJob: (email, { host, port, user, password, enc }) => call('POST', 'add/syncjob', {
+    username: email, host1: host, port1: port, user1: user, password1: password, enc1: enc || 'SSL',
+    mins_interval: 20, subfolder2: '', maxage: 0, maxbytespersecond: 0, timeout1: 600, timeout2: 600,
+    exclude: '(?i)spam|(?i)junk|(?i)trash|(?i)bin|(?i)all mail|(?i)important|(?i)starred', custom_params: '',
+    delete2duplicates: 1, delete1: 0, delete2: 0, automap: 1, skipcrossduplicates: 1, subscribeall: 1, active: 1,
+  }),
+  editSyncJob: (id, attr) => call('POST', 'edit/syncjob', { items: [String(id)], attr }),
+  deleteSyncJob: (id) => call('POST', 'delete/syncjob', [String(id)]),
+
   listAliases: async (domain) => list(await call('GET', 'get/alias/all'))
     .filter((a) => a.domain === domain || String(a.address).endsWith(`@${domain}`))
     .map((a) => ({ id: a.id, address: a.address, goto: a.goto, active: Number(a.active) === 1 })),

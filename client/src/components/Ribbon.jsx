@@ -23,6 +23,7 @@ export default function Ribbon({ hasSelection, folderUse, folders, onCompose, ac
       {folderUse === '\\Junk'
         ? <button className="rb" disabled={sel} onClick={() => act.notJunk()}><Icon name="inbox" /> <span>Not junk</span></button>
         : <button className="rb" disabled={sel} onClick={() => act.junk()} title="Report junk (!)"><Icon name="junk" /> <span>Junk</span></button>}
+      <button className="rb" disabled={sel} onClick={() => act.snooze()} title="Snooze (b)"><Icon name="clock" /> <span>Snooze</span></button>
       <Dropdown label="Move to" icon="move" disabled={sel}>
         {folders.filter((f) => !f.flags.includes('\\Noselect')).map((f) => (
           <button key={f.path} onClick={() => act.move(f.path)}><Icon name={folderIcon(f)} /> {folderLabel(f)}</button>

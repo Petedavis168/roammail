@@ -2,6 +2,7 @@
 // inside the encrypted cookie and in memory while an IMAP connection is open.
 import crypto from 'node:crypto';
 import { config } from './config.js';
+import { security } from './db.js';
 
 const COOKIE = 'mc_session';
 
@@ -25,10 +26,11 @@ export function unseal(token) {
   }
 }
 
-export function setSession(res, { email, password, name }) {
+export function setSession(res, { email, password, name, sid }) {
   const exp = Date.now() + config.sessionHours * 3600 * 1000;
-  const sid = crypto.randomBytes(16).toString('hex');
-  res.cookie(COOKIE, seal({ email, password, name, sid, exp }), {
+  sid = sid || crypto.randomBytes(16).toString('hex');
+  const epoch = security(email).session_epoch;
+  res.cookie(COOKIE, seal({ email, password, name, sid, exp, epoch }), {
     httpOnly: true,
     secure: config.cookieSecure,
     sameSite: 'strict',
@@ -43,7 +45,8 @@ export function clearSession(res) {
 
 export function requireAuth(req, res, next) {
   const s = req.cookies?.[COOKIE] && unseal(req.cookies[COOKIE]);
-  if (!s) return res.status(401).json({ error: 'Not signed in' });
+  // "Sign out everywhere" / password change bump the epoch and invalidate older cookies
+  if (!s || (s.epoch ?? 0) !== security(s.email).session_epoch) return res.status(401).json({ error: 'Not signed in' });
   req.user = s;
   next();
 }

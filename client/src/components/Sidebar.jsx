@@ -4,15 +4,15 @@ import { Icon } from '../icons.jsx';
 import { folderIcon, folderLabel, SPECIAL_ORDER } from '../util.js';
 import { useToast } from './Toast.jsx';
 
-export default function Sidebar({ folders, current, onSelect, onCompose, reload, onDropMessages, categories, onCategory }) {
+export default function Sidebar({ folders, current, onSelect, onCompose, reload, onDropMessages, categories, onCategory, onScheduled }) {
   const toast = useToast();
   const [collapsed, setCollapsed] = useState(() => JSON.parse(localStorage.getItem('collapsed') || '{}'));
   const [dragOver, setDragOver] = useState(null);
   const [menu, setMenu] = useState(null);
 
-  const { specials, tree } = useMemo(() => {
+  const { specials, tree, snoozedFolder } = useMemo(() => {
     const specials = SPECIAL_ORDER.map((u) => folders.find((f) => f.specialUse === u)).filter(Boolean);
-    const others = folders.filter((f) => !specials.includes(f));
+    const others = folders.filter((f) => !specials.includes(f) && f.path.toLowerCase() !== 'snoozed');
     const byParent = new Map();
     for (const f of others) {
       const key = f.parent && others.some((o) => o.path === f.parent) ? f.parent : '';
@@ -20,7 +20,7 @@ export default function Sidebar({ folders, current, onSelect, onCompose, reload,
       byParent.get(key).push(f);
     }
     for (const arr of byParent.values()) arr.sort((a, b) => a.name.localeCompare(b.name));
-    return { specials, tree: byParent };
+    return { specials, tree: byParent, snoozedFolder: folders.find((f) => f.path.toLowerCase() === 'snoozed') };
   }, [folders]);
 
   const toggle = (p) => setCollapsed((c) => { const n = { ...c, [p]: !c[p] }; localStorage.setItem('collapsed', JSON.stringify(n)); return n; });
@@ -80,6 +80,10 @@ export default function Sidebar({ folders, current, onSelect, onCompose, reload,
       <button className="compose-btn" onClick={onCompose}><Icon name="pen" /> New mail</button>
       <div className="nav-section">
         {specials.map((f) => <Row key={f.path} f={f} />)}
+        {snoozedFolder && <Row f={snoozedFolder} />}
+        <div className={`folder ${current === '@scheduled' ? 'on' : ''}`} style={{ paddingLeft: 10 }} onClick={onScheduled} role="button">
+          <span className="twisty" /><Icon name="clock" /><span className="fname">Scheduled</span>
+        </div>
       </div>
       <div className="nav-title">Folders <button className="icon-btn xs" onClick={() => createFolder(null)} title="New folder"><Icon name="plus" size={14} /></button></div>
       <div className="nav-section">

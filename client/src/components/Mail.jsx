@@ -12,6 +12,10 @@ import SettingsPanel from './Settings.jsx';
 import ShortcutsHelp from './ShortcutsHelp.jsx';
 import Admin from './admin/Admin.jsx';
 import { initials, avatarColor, folderLabel } from '../util.js';
+import { useSignatures } from '../signatures.js';
+import { fmtWhen } from '../snooze.js';
+import ScheduledList from './ScheduledList.jsx';
+import SnoozeMenu from './SnoozeMenu.jsx';
 
 export default function Mail({ me, refreshMe, theme, setTheme, onLogout }) {
   const toast = useToast();
@@ -31,9 +35,13 @@ export default function Mail({ me, refreshMe, theme, setTheme, onLogout }) {
   const [sidebarOpen, setSidebarOpen] = useState(window.innerWidth > 900);
   const [userMenu, setUserMenu] = useState(false);
   const searchRef = useRef();
+  const [sigData, reloadSigs] = useSignatures();
+  const [snoozeMap, setSnoozeMap] = useState({});
+  const [snoozeFor, setSnoozeFor] = useState(null); // uids awaiting a snooze time
   const reqId = useRef(0);
 
   const isAdmin = me.superAdmin || me.orgs?.some((o) => o.role === 'admin');
+  const inOrg = me.orgs?.length > 0;
   const listFolder = list.folder;
   const msgs = list.messages;
   const activeMsg = msgs.find((m) => m.uid === active) || null;
@@ -61,7 +69,13 @@ export default function Mail({ me, refreshMe, theme, setTheme, onLogout }) {
   }, [folder, filter, search, toast]);
 
   useEffect(() => { loadFolders(); }, [loadFolders]);
-  useEffect(() => { setSelected(new Set()); setActive(null); load(); }, [load]);
+  useEffect(() => { setSelected(new Set()); setActive(null); if (folder !== '@scheduled') load(); }, [load]);
+  const loadSnoozed = useCallback(() => api.get('/api/snoozed').then((jobs) => {
+    const m = {};
+    for (const j of jobs) for (const u of j.summary.uids || []) m[u] = j;
+    setSnoozeMap(m);
+  }).catch(() => {}), []);
+  useEffect(() => { if (folder.toLowerCase() === 'snoozed') loadSnoozed(); }, [folder, list.messages.length, loadSnoozed]);
 
   // ---------- live updates ----------
   const loadRef = useRef(load);
@@ -92,7 +106,7 @@ export default function Mail({ me, refreshMe, theme, setTheme, onLogout }) {
   // Page title with unread count
   useEffect(() => {
     const inbox = folders.find((f) => f.specialUse === '\\Inbox');
-    document.title = `${inbox?.unread ? `(${inbox.unread}) ` : ''}${view === 'admin' ? 'Admin' : folderLabel(currentFolderObj || { name: 'Inbox' })} - ${me.email}`;
+    document.title = `${inbox?.unread ? `(${inbox.unread}) ` : ''}${view === 'admin' ? 'Admin' : folder === '@scheduled' ? 'Scheduled' : folderLabel(currentFolderObj || { name: 'Inbox' })} - ${me.email}`;
   }, [folders, currentFolderObj, me.email, view]);
 
   // ---------- helpers ----------
@@ -163,6 +177,26 @@ export default function Mail({ me, refreshMe, theme, setTheme, onLogout }) {
     },
     junk(uid) { return act.move('@junk', uid, 'marked as junk'); },
     async notJunk(uid) { return act.move('INBOX', uid, 'moved to Inbox'); },
+    snooze(uid) { const uids = targetUids(uid); if (uids.length) setSnoozeFor(uids); },
+    async doSnooze(until) {
+      const uids = snoozeFor; setSnoozeFor(null);
+      if (!uids?.length) return;
+      dropMsgs(uids);
+      try {
+        await api.post('/api/snooze', { folder: listFolder, uids, until });
+        loadFolders();
+        toast(`Snoozed until ${fmtWhen(until)}`);
+      } catch (e) { toast(e.message, { error: true }); load({ quiet: true }); }
+    },
+    async unsnooze(uid) {
+      const job = snoozeMap[uid]; if (!job) return;
+      await api.post('/api/snoozed/wake', { id: job.id }).catch((e) => toast(e.message, { error: true }));
+      toast('Moved back to your inbox'); load({ quiet: true }); loadFolders();
+    },
+    async block(address) {
+      if (!confirm(`Block ${address}? Future messages from them go straight to Junk.`)) return;
+      try { await api.post('/api/block', { address }); toast(`Blocked ${address}`); act.junk(); } catch (e) { toast(e.message, { error: true }); }
+    },
     async emptyFolder() {
       if (!confirm(`Permanently delete everything in ${folderLabel(currentFolderObj || { name: folder })}?`)) return;
       await api.post('/api/empty', { folder: listFolder });
@@ -221,7 +255,7 @@ export default function Mail({ me, refreshMe, theme, setTheme, onLogout }) {
         o: () => idx < 0 && go(0), Enter: () => idx < 0 && go(0),
         e: () => act.archive(), '#': () => act.del(), Delete: () => act.del(), '!': () => act.junk(),
         r: () => activeMsg && reply(activeMsg, 'reply'), a: () => activeMsg && reply(activeMsg, 'all'), f: () => activeMsg && reply(activeMsg, 'forward'),
-        s: () => act.flag(), u: () => setActive(null), Escape: () => { setActive(null); setSelected(new Set()); },
+        s: () => act.flag(), b: () => act.snooze(), u: () => setActive(null), Escape: () => { setActive(null); setSelected(new Set()); },
         I: () => act.read(true), U: () => act.read(false), q: () => act.read(true),
         x: () => active && setSelected((s) => { const n = new Set(s); n.has(active) ? n.delete(active) : n.add(active); return n; }),
         '/': () => searchRef.current?.focus(), '?': () => setShowHelp(true),
@@ -248,9 +282,11 @@ export default function Mail({ me, refreshMe, theme, setTheme, onLogout }) {
           </form>
         )}
         <div className="topbar-right">
-          <button className={`top-btn ${view === 'admin' ? 'on' : ''}`} onClick={() => setView(view === 'admin' ? 'mail' : 'admin')} title="Admin & business email">
+          {(isAdmin || !inOrg) && (
+            <button className={`top-btn ${view === 'admin' ? 'on' : ''}`} onClick={() => setView(view === 'admin' ? 'mail' : 'admin')} title="Admin & business email">
               <Icon name={view === 'admin' ? 'mail' : 'shield'} /> <span>{view === 'admin' ? 'Back to mail' : isAdmin ? 'Admin' : 'Business email'}</span>
-          </button>
+            </button>
+          )}
           <button className="icon-btn on-dark" onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')} title="Toggle dark mode"><Icon name={theme === 'dark' ? 'sun' : 'moon'} /></button>
           <button className="icon-btn on-dark" onClick={() => setShowSettings(true)} title="Settings"><Icon name="settings" /></button>
           <button className="icon-btn on-dark" onClick={() => setShowHelp(true)} title="Keyboard shortcuts (?)">?</button>
@@ -262,7 +298,7 @@ export default function Mail({ me, refreshMe, theme, setTheme, onLogout }) {
               <div className="menu right" onMouseLeave={() => setUserMenu(false)}>
                 <div className="menu-head"><b>{prefs.displayName || me.name || me.email.split('@')[0]}</b><small>{me.email}</small></div>
                 <button onClick={() => { setShowSettings(true); setUserMenu(false); }}><Icon name="settings" /> Settings</button>
-                <button onClick={() => { setView('admin'); setUserMenu(false); }}><Icon name="shield" /> {isAdmin ? 'Admin portal' : 'Set up business email'}</button>
+                {(isAdmin || !inOrg) && <button onClick={() => { setView('admin'); setUserMenu(false); }}><Icon name="shield" /> {isAdmin ? 'Admin portal' : 'Set up business email'}</button>}
                 <button onClick={onLogout}><Icon name="logout" /> Sign out</button>
               </div>
             )}
@@ -277,7 +313,7 @@ export default function Mail({ me, refreshMe, theme, setTheme, onLogout }) {
           {sidebarOpen && (
             <Sidebar folders={folders} current={search ? null : folder} onCompose={() => compose()} reload={loadFolders}
               onSelect={(p) => { setFolder(p); clearSearch(); setFilter(''); if (window.innerWidth <= 900) setSidebarOpen(false); }}
-              onDropMessages={(dest, uids) => act.move(dest, uids)}
+              onDropMessages={(dest, uids) => act.move(dest, uids)} onScheduled={() => { setFolder('@scheduled'); clearSearch(); }}
               categories={prefs.categories} onCategory={(c) => runSearch(`label:${catKeyword(c.name).slice(4)}`)} />
           )}
           <main className={`main ${paneClass}`}>
@@ -289,7 +325,8 @@ export default function Mail({ me, refreshMe, theme, setTheme, onLogout }) {
               readingPane={prefs.readingPane} setReadingPane={(v) => setPrefs({ readingPane: v })}
             />
             <div className="panes">
-              <MessageList
+              {folder === '@scheduled' && !search ? <ScheduledList onCompose={compose} /> : <MessageList
+                snoozeMap={folder.toLowerCase() === 'snoozed' ? snoozeMap : null}
                 list={list} title={search ? `Results for "${search}"` : folderLabel(currentFolderObj || { name: folder })}
                 search={search} onClearSearch={clearSearch}
                 folderUse={currentFolderObj?.specialUse} filter={filter} setFilter={setFilter}
@@ -297,12 +334,12 @@ export default function Mail({ me, refreshMe, theme, setTheme, onLogout }) {
                 act={act} categories={prefs.categories} density={prefs.density}
                 onLoadMore={() => !search && list.messages.length < list.total && !list.loading && load({ page: list.page + 1, append: true })}
                 onEmpty={act.emptyFolder} onMarkAllRead={act.markAllRead}
-              />
-              {prefs.readingPane !== 'off' || active ? (
+              />}
+              {folder !== '@scheduled' && (prefs.readingPane !== 'off' || active) ? (
                 <ReadingPane
                   key={`${listFolder}:${active}`} folder={listFolder} msg={activeMsg} me={me} prefs={prefs} setPrefs={setPrefs}
                   conversation={prefs.conversation} onReply={reply} act={act} categories={prefs.categories}
-                  onClose={() => setActive(null)} isJunk={currentFolderObj?.specialUse === '\\Junk'}
+                  onClose={() => setActive(null)} isJunk={currentFolderObj?.specialUse === '\\Junk'} orgDomains={me.orgDomains || []}
                 />
               ) : null}
             </div>
@@ -310,9 +347,10 @@ export default function Mail({ me, refreshMe, theme, setTheme, onLogout }) {
         </div>
       )}
 
-      <ComposeManager composers={composers} setComposers={setComposers} me={me} prefs={prefs}
+      {snoozeFor && <SnoozeMenu onPick={act.doSnooze} onClose={() => setSnoozeFor(null)} />}
+      <ComposeManager composers={composers} setComposers={setComposers} me={me} prefs={prefs} sigData={sigData}
         onSent={() => { loadFolders(); if (listFolder === special('\\Sent') || listFolder === special('\\Drafts')) load({ quiet: true }); }} />
-      {showSettings && <SettingsPanel prefs={prefs} setPrefs={setPrefs} me={me} onClose={() => setShowSettings(false)} />}
+      {showSettings && <SettingsPanel prefs={prefs} setPrefs={setPrefs} me={me} folders={folders} sigData={sigData} reloadSigs={reloadSigs} onClose={() => setShowSettings(false)} />}
       {showHelp && <ShortcutsHelp onClose={() => setShowHelp(false)} />}
     </div>
   );

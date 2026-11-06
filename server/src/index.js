@@ -7,6 +7,10 @@ import { fileURLToPath } from 'node:url';
 import { config } from './config.js';
 import { api } from './routes.js';
 import { publicAccounts, accounts } from './accounts.js';
+import { publicSecurity, securityApi } from './security.js';
+import { signatures, publicAssets } from './signatures.js';
+import { mailtools } from './mailtools.js';
+import { startJobs } from './jobs.js';
 
 const app = express();
 app.set('trust proxy', 1);
@@ -36,9 +40,14 @@ app.use('/api', (req, res, next) => {
   next();
 });
 app.get('/healthz', (req, res) => res.json({ ok: true }));
+app.use(publicAssets);
+app.use('/api', publicSecurity);
 app.use('/api', publicAccounts);
 app.use('/api', api);
 app.use('/api', accounts);
+app.use('/api', signatures);
+app.use('/api', securityApi);
+app.use('/api', mailtools);
 app.use('/api', (req, res) => res.status(404).json({ error: 'Not found' }));
 app.use('/api', (err, req, res, _next) => {
   const status = err.status || (err.code === 'LIMIT_FILE_SIZE' ? 413 : err.authenticationFailed ? 401 : 500);
@@ -52,6 +61,7 @@ if (fs.existsSync(dist)) {
   app.get(/^\/(?!api\/).*/, (req, res) => res.sendFile(path.join(dist, 'index.html')));
 }
 
+startJobs();
 app.listen(config.port, () => {
   console.log(`Mail client on http://localhost:${config.port}  (IMAP ${config.imap.host}:${config.imap.port}, SMTP ${config.smtp.host}:${config.smtp.port})`);
 });

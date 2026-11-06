@@ -1,56 +1,110 @@
+import { useState } from 'react';
 import { Icon } from '../icons.jsx';
+import Signatures from './settings/Signatures.jsx';
+import Security from './settings/Security.jsx';
+import { AutoReply, Rules, ImportMail } from './settings/MailTools.jsx';
+import { api } from '../api.js';
+import { useToast } from './Toast.jsx';
 
-export default function SettingsPanel({ prefs, setPrefs, me, onClose }) {
+function General({ prefs, setPrefs, me }) {
   const set = (k) => (e) => setPrefs({ [k]: e.target.type === 'checkbox' ? e.target.checked : e.target.value });
   return (
-    <div className="drawer-wrap" onClick={onClose}>
-      <aside className="drawer" onClick={(e) => e.stopPropagation()}>
-        <div className="drawer-head"><h2>Settings</h2><button className="icon-btn" onClick={onClose}><Icon name="close" /></button></div>
-        <div className="drawer-body">
-          <h3>Layout</h3>
-          <label className="row-field">Reading pane
-            <select value={prefs.readingPane} onChange={set('readingPane')}>
-              <option value="right">Show on the right</option><option value="bottom">Show on the bottom</option><option value="off">Hidden (open messages full width)</option>
-            </select></label>
-          <label className="row-field">Density
-            <select value={prefs.density} onChange={set('density')}><option value="comfortable">Comfortable</option><option value="compact">Compact</option></select></label>
-          <label className="check"><input type="checkbox" checked={prefs.conversation} onChange={set('conversation')} /> Conversation view (group replies together)</label>
-
-          <h3>Writing</h3>
-          <label className="row-field">Your name (shown to recipients)<input value={prefs.displayName} placeholder={me.name || me.email} onChange={set('displayName')} /></label>
-          <label className="row-field col">Signature<textarea rows={4} value={prefs.signature} onChange={set('signature')} placeholder="Jane Doe&#10;Acme Inc. · (555) 123-4567" /></label>
-          <label className="row-field">Undo send
-            <select value={prefs.undoSeconds} onChange={set('undoSeconds')}>
-              {[0, 5, 10, 20, 30].map((s) => <option key={s} value={s}>{s ? `${s} seconds` : 'Off'}</option>)}
-            </select></label>
-
-          <h3>Privacy</h3>
-          <label className="row-field">External images
-            <select value={prefs.showImages} onChange={set('showImages')}><option value="ask">Ask before showing</option><option value="always">Always show</option></select></label>
-          {prefs.trustedSenders.length > 0 && (
-            <div className="trusted">
-              <small className="muted">Always show images from:</small>
-              {prefs.trustedSenders.map((s) => (
-                <span key={s} className="rchip">{s}<button onClick={() => setPrefs((p) => ({ trustedSenders: p.trustedSenders.filter((x) => x !== s) }))}>×</button></span>
-              ))}
-            </div>
-          )}
-          <label className="check"><input type="checkbox" checked={prefs.notifications} onChange={set('notifications')} /> Desktop notifications for new mail</label>
-
-          <h3>Categories</h3>
-          {prefs.categories.map((c, i) => (
-            <div key={i} className="cat-edit">
-              <input type="color" value={c.color} onChange={(e) => setPrefs((p) => ({ categories: p.categories.map((x, j) => (j === i ? { ...x, color: e.target.value } : x)) }))} />
-              <input value={c.name} onChange={(e) => setPrefs((p) => ({ categories: p.categories.map((x, j) => (j === i ? { ...x, name: e.target.value } : x)) }))} />
-              <button className="icon-btn" onClick={() => setPrefs((p) => ({ categories: p.categories.filter((_, j) => j !== i) }))}><Icon name="trash" size={16} /></button>
-            </div>
+    <div className="settings-section">
+      <h3>Layout</h3>
+      <label className="row-field">Reading pane
+        <select value={prefs.readingPane} onChange={set('readingPane')}>
+          <option value="right">Show on the right</option><option value="bottom">Show on the bottom</option><option value="off">Hidden (open messages full width)</option>
+        </select></label>
+      <label className="row-field">Density
+        <select value={prefs.density} onChange={set('density')}><option value="comfortable">Comfortable</option><option value="compact">Compact</option></select></label>
+      <label className="check"><input type="checkbox" checked={prefs.conversation} onChange={set('conversation')} /> Conversation view (group replies together)</label>
+      <h3>Writing</h3>
+      <label className="row-field">Your name (shown to recipients)<input value={prefs.displayName} placeholder={me.name || me.email} onChange={set('displayName')} /></label>
+      <label className="row-field">Undo send
+        <select value={prefs.undoSeconds} onChange={set('undoSeconds')}>
+          {[0, 5, 10, 20, 30].map((s) => <option key={s} value={s}>{s ? `${s} seconds` : 'Off'}</option>)}
+        </select></label>
+      <h3>Privacy</h3>
+      <label className="row-field">External images
+        <select value={prefs.showImages} onChange={set('showImages')}><option value="ask">Ask before showing</option><option value="always">Always show</option></select></label>
+      {prefs.trustedSenders.length > 0 && (
+        <div className="trusted">
+          <small className="muted">Always show images from:</small>
+          {prefs.trustedSenders.map((s) => (
+            <span key={s} className="rchip">{s}<button onClick={() => setPrefs((p) => ({ trustedSenders: p.trustedSenders.filter((x) => x !== s) }))}>×</button></span>
           ))}
-          <button className="btn" onClick={() => setPrefs((p) => ({ categories: [...p.categories, { name: 'New', color: '#038387' }] }))}><Icon name="plus" size={16} /> Add category</button>
-
-          <h3>Use on your phone or desktop app</h3>
-          <p className="muted small">Your account also works in Outlook, Apple Mail, Thunderbird and phone mail apps. Use your email address and password; most apps set themselves up automatically.</p>
         </div>
-      </aside>
+      )}
+      <label className="check"><input type="checkbox" checked={prefs.notifications} onChange={set('notifications')} /> Desktop notifications for new mail</label>
+      <h3>Categories</h3>
+      {prefs.categories.map((c, i) => (
+        <div key={i} className="cat-edit">
+          <input type="color" value={c.color} onChange={(e) => setPrefs((p) => ({ categories: p.categories.map((x, j) => (j === i ? { ...x, color: e.target.value } : x)) }))} />
+          <input value={c.name} onChange={(e) => setPrefs((p) => ({ categories: p.categories.map((x, j) => (j === i ? { ...x, name: e.target.value } : x)) }))} />
+          <button className="icon-btn" onClick={() => setPrefs((p) => ({ categories: p.categories.filter((_, j) => j !== i) }))}><Icon name="trash" size={16} /></button>
+        </div>
+      ))}
+      <div><button className="btn" onClick={() => setPrefs((p) => ({ categories: [...p.categories, { name: 'New', color: '#038387' }] }))}><Icon name="plus" size={16} /> Add category</button></div>
+    </div>
+  );
+}
+
+function Apps({ me, sigData }) {
+  const toast = useToast();
+  const c = me.clientSettings || {};
+  const [prof, setProf] = useState({ phone: sigData?.profile?.phone || '', mobile: sigData?.profile?.mobile || '' });
+  const Row = ({ l, v }) => <div className="tr two"><span className="muted">{l}</span><span className="mono">{v}</span><span /></div>;
+  return (
+    <div className="settings-section">
+      <p className="muted small">Your account works in Outlook, Apple Mail, Thunderbird and the mail apps on iPhone and Android. Most apps only need your email and password. If yours asks for server settings, use these:</p>
+      <div className="table">
+        <Row l="Email / username" v={me.email} />
+        <Row l="Incoming (IMAP)" v={`${c.imapHost} · port ${c.imapPort} · SSL/TLS`} />
+        <Row l="Outgoing (SMTP)" v={`${c.smtpHost} · port ${c.smtpPort} · ${c.smtpSecure ? 'SSL/TLS' : 'STARTTLS'}`} />
+        <Row l="Password" v="Your normal password" />
+      </div>
+      <h3>Install this app</h3>
+      <p className="muted small">On your phone: open this site in Safari or Chrome, tap <b>Share</b> → <b>Add to Home Screen</b>. On a computer: click the install icon in the address bar.</p>
+      {sigData?.inOrg && <>
+        <h3>Your contact details</h3>
+        <p className="muted small">Used in your company signature. Your admin manages your name and job title.</p>
+        <div className="two-col">
+          <label>Phone<input value={prof.phone} onChange={(e) => setProf({ ...prof, phone: e.target.value })} /></label>
+          <label>Mobile<input value={prof.mobile} onChange={(e) => setProf({ ...prof, mobile: e.target.value })} /></label>
+        </div>
+        <div><button className="btn" onClick={() => api.patch('/api/profile', prof).then(() => toast('Saved')).catch((e) => toast(e.message, { error: true }))}>Save</button></div>
+      </>}
+    </div>
+  );
+}
+
+const TABS = [
+  ['general', 'General', 'settings'], ['signatures', 'Signatures', 'pen'], ['security', 'Security', 'lock'],
+  ['autoreply', 'Automatic replies', 'reply'], ['rules', 'Rules', 'filter'], ['import', 'Import mail', 'import'], ['apps', 'Phone & apps', 'phone'],
+];
+
+export default function SettingsPanel({ prefs, setPrefs, me, folders, sigData, reloadSigs, onClose, initialTab = 'general' }) {
+  const [tab, setTab] = useState(initialTab);
+  return (
+    <div className="modal-wrap" onClick={onClose}>
+      <div className="settings-modal" onClick={(e) => e.stopPropagation()} role="dialog" aria-label="Settings">
+        <nav className="settings-nav">
+          <h2>Settings</h2>
+          {TABS.map(([k, l, i]) => <button key={k} className={tab === k ? 'on' : ''} onClick={() => setTab(k)}><Icon name={i} size={16} /> {l}</button>)}
+        </nav>
+        <div className="settings-body">
+          <div className="drawer-head"><h2>{TABS.find((t) => t[0] === tab)[1]}</h2><button className="icon-btn" onClick={onClose}><Icon name="close" /></button></div>
+          <div className="drawer-body">
+            {tab === 'general' && <General prefs={prefs} setPrefs={setPrefs} me={me} />}
+            {tab === 'signatures' && <Signatures sigData={sigData} reloadSigs={reloadSigs} prefs={prefs} setPrefs={setPrefs} />}
+            {tab === 'security' && <Security me={me} />}
+            {tab === 'autoreply' && <AutoReply me={me} />}
+            {tab === 'rules' && <Rules folders={folders} categories={prefs.categories} me={me} />}
+            {tab === 'import' && <ImportMail />}
+            {tab === 'apps' && <Apps me={me} sigData={sigData} />}
+          </div>
+        </div>
+      </div>
     </div>
   );
 }

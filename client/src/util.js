@@ -48,7 +48,7 @@ export function folderIcon(f) {
     case '\\Trash': return 'trash';
     case '\\Junk': return 'junk';
     case '\\Archive': return 'archive';
-    default: return 'folder';
+    default: return f.path?.toLowerCase() === 'snoozed' ? 'clock' : 'folder';
   }
 }
 export const SPECIAL_ORDER = ['\\Inbox', '\\Drafts', '\\Sent', '\\Archive', '\\Junk', '\\Trash'];

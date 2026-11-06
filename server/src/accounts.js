@@ -8,6 +8,9 @@ import { mailcow } from './mailcow.js';
 import { setSession, requireAuth } from './session.js';
 import { verifyRecord, requiredRecords, checkVerification, checkRecords } from './dns.js';
 import { findZone, applyRecords } from './route53.js';
+import { saveProfile, getProfile, deleteUserData } from './signatures.js';
+import { setRecoveryEmail } from './security.js';
+import { deliverWelcome } from './welcome.js';
 
 const wrap = (fn) => (req, res, next) => Promise.resolve(fn(req, res, next)).catch(next);
 const fail = (status, message) => Object.assign(new Error(message), { status });
@@ -71,6 +74,9 @@ publicAccounts.post('/signup', rateLimit({ windowMs: 60 * 60_000, limit: 10 }), 
   if (rl) await mailcow.setMailboxRateLimit(email, rl[1], rl[2]).catch((e) => console.warn('rate limit not set:', e.message));
   q.run('INSERT OR REPLACE INTO signups(email, ip, recovery_email) VALUES(?, ?, ?)', email, req.ip, String(req.body.recoveryEmail || '').slice(0, 200) || null);
   audit(email, null, 'signup', { ip: req.ip });
+  saveProfile(email, { name });
+  setRecoveryEmail(email, String(req.body.recoveryEmail || '').trim());
+  deliverWelcome({ email, password, name }).catch(() => {});
   setSession(res, { email, password, name });
   res.json({ email });
 }));
@@ -251,7 +257,10 @@ accounts.get('/admin/users', wrap(async (req, res) => {
   const d = requireDomainAdmin(req, req.query.domain);
   if (d.status !== 'active') return res.json([]);
   const admins = new Set(q.all("SELECT email FROM members WHERE org_id = ? AND role = 'admin'", d.org_id).map((m) => m.email));
-  res.json((await mailcow.listMailboxes(d.domain)).map((m) => ({ ...m, admin: admins.has(m.email.toLowerCase()) })));
+  res.json((await mailcow.listMailboxes(d.domain)).map((m) => {
+    const p = getProfile(m.email);
+    return { ...m, admin: admins.has(m.email.toLowerCase()), title: p.title || '', department: p.department || '', phone: p.phone || '', mobile: p.mobile || '' };
+  }));
 }));
 
 accounts.post('/admin/users', wrap(async (req, res) => {
@@ -265,6 +274,8 @@ accounts.post('/admin/users', wrap(async (req, res) => {
   const email = `${local}@${d.domain}`;
   await mailcow.addMailbox({ localPart: local, domain: d.domain, name: String(req.body.name || '').slice(0, 100), password: req.body.password, quotaMb });
   q.run('INSERT OR REPLACE INTO members(email, org_id, role) VALUES(?, ?, ?)', email, d.org_id, req.body.admin ? 'admin' : 'user');
+  saveProfile(email, { name: req.body.name || '', title: req.body.title, department: req.body.department, phone: req.body.phone, mobile: req.body.mobile });
+  if (req.body.welcome !== false) deliverWelcome({ email, password: req.body.password, name: req.body.name, company: d.org_name }).catch(() => {});
   audit(req.user.email, d.org_id, 'user.create', { email, admin: !!req.body.admin });
   res.json({ ok: true, email });
 }));
@@ -281,6 +292,10 @@ accounts.patch('/admin/users', wrap(async (req, res) => {
     attr.active = req.body.active ? 1 : 0;
   }
   if (Object.keys(attr).length) await mailcow.editMailbox(email, attr);
+  const prof = {};
+  for (const k of ['name', 'title', 'department', 'phone', 'mobile']) if (req.body[k] !== undefined) prof[k] = req.body[k];
+  if (Object.keys(prof).length) saveProfile(email, prof);
+  if (attr.password) q.run('UPDATE user_security SET session_epoch = session_epoch + 1 WHERE email = ?', email); // sign the user out everywhere
   if (req.body.admin !== undefined) {
     if (email === req.user.email && !req.body.admin) throw fail(400, 'You can\'t remove your own admin rights');
     q.run('INSERT OR REPLACE INTO members(email, org_id, role) VALUES(?, ?, ?)', email, d.org_id, req.body.admin ? 'admin' : 'user');
@@ -297,6 +312,7 @@ accounts.delete('/admin/users', wrap(async (req, res) => {
   if (o.owner_email === email) throw fail(400, 'The organization owner can\'t be deleted');
   await mailcow.deleteMailbox(email);
   q.run('DELETE FROM members WHERE email = ? AND org_id = ?', email, d.org_id);
+  deleteUserData(email);
   audit(req.user.email, d.org_id, 'user.delete', { email });
   res.json({ ok: true });
 }));

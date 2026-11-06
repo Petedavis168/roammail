@@ -18,6 +18,16 @@ existing **mailcow** server (IMAP/SMTP for mail, the mailcow API for accounts).
 - Privacy: HTML mail is sanitized and sandboxed; remote images/trackers blocked until you allow them
 - Dark mode, compact density, mobile layout
 
+- **Schedule send** (presets or pick a time; Scheduled view to edit/cancel) and **Snooze** (comes back unread at the top)
+- **Signatures:** several rich signatures per person (logos, links), separate defaults for new mail and replies,
+  switch while writing, "copy for Outlook / phone"
+- **Automatic replies** (out of office, with dates and "only my organization"), **Rules** (move, mark read, flag,
+  categorize, forward, junk, delete) and **Block sender**. These run on the server (Sieve), so they work in every app.
+- **Import mail** from Gmail, Outlook, Yahoo, iCloud or any IMAP account (keeps syncing until stopped)
+- **Phishing protection:** warnings for failed SPF/DKIM/DMARC, display-name spoofing, odd Reply-To, fake
+  "internal" mail; **External** tag for business users; verified-sender lock
+- Welcome email with setup tips in every new mailbox; installable as an app (PWA) on phones and desktops
+
 **Search operators:** `from:` `to:` `cc:` `subject:` `has:attachment` `is:unread` `is:read` `is:starred`
 `newer_than:7d` `older_than:1y` `before:2026-01-01` `after:` `larger:5M` `smaller:` `label:Red` `in:sent` `-word` `"exact phrase"`
 
@@ -30,6 +40,11 @@ existing **mailcow** server (IMAP/SMTP for mail, the mailcow API for accounts).
 - Domains hosted in **your AWS Route 53**: one click adds all records (super-admin)
 - Business admin portal: users (create, reset password, quota, suspend, make admin, delete),
   aliases (`sales@` → several people), domains, activity log
+- **Company signature ("global signature"):** one template for the whole business with fields (name, title,
+  department, phone, mobile, company, website, address, logo). Every user, including each new hire the moment
+  they're added, gets it filled in. Modes: off / default (people can switch) / required (added server-side, can't be
+  removed). Optional on replies. Starter templates, logo upload, live preview as any employee.
+- Employee details (job title, department, phone, mobile) set when adding a user; people can update their own phones
 - Super-admin "Platform" portal: stats, turn sign-ups on/off, suspend businesses, change user limits,
   review and suspend new free accounts
 
@@ -40,6 +55,7 @@ existing **mailcow** server (IMAP/SMTP for mail, the mailcow API for accounts).
    - *System → Configuration → Options → Fail2ban parameters*: add the new server's IP to the
      **whitelist**. All logins come from this server, so without this a few wrong passwords could
      get it banned and lock everyone out.
+   - The API key is also used for rules and auto-replies (Sieve filters), mail import (sync jobs) and password changes.
    - Create the domain you'll use for free sign-ups (e.g. `yourdomain.com`) if it doesn't exist.
 2. **Launch EC2**: Ubuntu 24.04, `t3.small` is plenty to start. Security group: allow 22 (your IP), 80, 443.
    Paste `deploy/aws/user-data.sh` into *Advanced details → User data* (installs Docker).
@@ -83,6 +99,20 @@ Sign up as `owner` (it's the super-admin in `dev/test.env`).
 - `server/src/accounts.js` — sign-up, domains, admin APIs; `mailcow.js` (mailcow REST API client),
   `dns.js` (record checks via public resolvers), `route53.js`, `db.js` (SQLite via `node:sqlite`).
 - `client/` — React + Vite, no UI framework. Email HTML is rendered with DOMPurify in a sandboxed iframe.
+
+## Account security
+
+- **2-step verification** (authenticator app, TOTP) with 10 single-use backup codes
+- **Lockout:** 10 wrong passwords or codes lock the account for 15 minutes, on top of per-IP rate limits
+- **Sign-in history** (device, IP, failed attempts) and **sign out of all other devices**
+- **Password change** in the app signs out every other device; admin password resets do the same
+- **Forgot password** via a recovery email (needs `SYSTEM_MAIL_*`); reset links are single use, expire in 30 minutes,
+  and the request page never reveals whether an account exists
+- Free accounts: captcha (Turnstile), per-IP limits, reserved names, a send-rate limit, and no forwarding rules
+  (forwarding is a classic hijacked-account trick)
+- Schedule send and snooze keep the user's credentials sealed (AES-256-GCM) inside the job until it runs, then delete them
+- Note: 2-step verification protects sign-in to this webmail. Desktop and phone apps sign in to mailcow directly
+  with the password. For those, recommend mailcow app passwords (mailcow UI → Mailbox → App passwords).
 
 ## Security notes
 - Users can only log in to the IMAP/SMTP server configured in `.env` (no open relay or SSRF).

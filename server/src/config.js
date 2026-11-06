@@ -62,3 +62,7 @@ config.awsRegion = env.AWS_REGION || 'us-east-1';
 // Anti-abuse for free sign-ups
 config.signup.rateLimit = env.SIGNUP_SEND_LIMIT || '100/h'; // max outgoing mails per free account (mailcow rate limit), "" to disable
 config.turnstile = { siteKey: env.TURNSTILE_SITE_KEY || '', secret: env.TURNSTILE_SECRET || '' };
+// System mailbox used to send password-reset emails (create e.g. no-reply@yourdomain.com in mailcow)
+config.systemMail = { user: env.SYSTEM_MAIL_USER || '', pass: env.SYSTEM_MAIL_PASS || '', from: env.SYSTEM_MAIL_FROM || env.SYSTEM_MAIL_USER || '' };
+config.publicUrl = (env.PUBLIC_URL || (env.APP_DOMAIN ? `https://${env.APP_DOMAIN}` : '')).replace(/\/$/, '');
+config.appName = env.APP_NAME || 'Mail';
