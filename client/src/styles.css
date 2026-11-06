@@ -516,3 +516,13 @@ kbd { font: 12px ui-monospace, monospace; background: var(--panel-2); border: 1p
 }
 .card > label.radio-card { flex-direction: row !important; font-weight: 400; }
 .card > label.check { flex-direction: row !important; font-weight: 400; }
+.phone-setup { flex-direction: row !important; gap: 22px !important; align-items: center; flex-wrap: wrap; background: linear-gradient(135deg, var(--brand-soft), var(--panel)); }
+.phone-qr img { display: block; background: #fff; border-radius: 10px; padding: 6px; border: 1px solid var(--border); }
+.qr-placeholder { width: 200px; height: 200px; border: 2px dashed var(--brand); border-radius: 12px; background: var(--panel); color: var(--brand); display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px; font-weight: 700; }
+.qr-placeholder:hover { background: var(--brand-soft); }
+.phone-steps { flex: 1; min-width: 240px; }
+.phone-steps h3 { margin: 0 0 6px !important; }
+.phone-steps ol { margin: 0 0 6px; padding-left: 20px; line-height: 1.7; }
+.hire-qr { display: flex; gap: 14px; align-items: center; padding: 10px; border: 1px solid var(--border); border-radius: 10px; margin-bottom: 12px; background: var(--panel-2); }
+.hire-qr img { background: #fff; border-radius: 8px; padding: 4px; }
+.hire-qr p { margin: 4px 0 0; }

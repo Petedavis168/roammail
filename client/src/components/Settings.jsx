@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Icon } from '../icons.jsx';
 import Signatures from './settings/Signatures.jsx';
 import Security from './settings/Security.jsx';
@@ -49,6 +49,39 @@ function General({ prefs, setPrefs, me }) {
   );
 }
 
+function PhoneQr({ me }) {
+  const toast = useToast();
+  const [link, setLink] = useState(null);
+  const [left, setLeft] = useState(0);
+  const make = async () => { try { setLink(await api.post('/api/device-setup', {})); } catch (e) { toast(e.message, { error: true }); } };
+  useEffect(() => {
+    if (!link) return;
+    const t = setInterval(() => setLeft(Math.max(0, Math.round((link.expiresAt - Date.now()) / 1000))), 1000);
+    return () => clearInterval(t);
+  }, [link]);
+  return (
+    <div className="phone-setup card">
+      <div className="phone-qr">
+        {link && left > 0 ? <img src={link.qr} alt="Setup QR code" width="200" height="200" /> : (
+          <button className="qr-placeholder" onClick={make}><Icon name="phone" size={32} /><span>Show my setup code</span></button>
+        )}
+      </div>
+      <div className="phone-steps">
+        <h3>Set up your phone in seconds</h3>
+        <ol>
+          <li>Click <b>Show my setup code</b>.</li>
+          <li>Point your phone's camera at the code and tap the link.</li>
+          <li><b>iPhone:</b> tap Install. Mail{' '}(plus calendar &amp; contacts) is set up with nothing to type.<br />
+            <b>Android:</b> follow the one-screen instructions for your app.</li>
+        </ol>
+        {link && left > 0 && <p className="muted small">Code works once and expires in {Math.floor(left / 60)}:{String(left % 60).padStart(2, '0')}. It contains a sign-in key, so don't share it.</p>}
+        {link && left <= 0 && <p className="muted small">Code expired. <button className="link" onClick={make}>Make a new one</button></p>}
+        <p className="muted small">Already on your phone? <a href={`/setup?email=${encodeURIComponent(me.email)}`} target="_blank" rel="noreferrer">Open the setup page</a></p>
+      </div>
+    </div>
+  );
+}
+
 function Apps({ me, sigData }) {
   const toast = useToast();
   const c = me.clientSettings || {};
@@ -56,12 +89,15 @@ function Apps({ me, sigData }) {
   const Row = ({ l, v }) => <div className="tr two"><span className="muted">{l}</span><span className="mono">{v}</span><span /></div>;
   return (
     <div className="settings-section">
-      <p className="muted small">Your account works in Outlook, Apple Mail, Thunderbird and the mail apps on iPhone and Android. Most apps only need your email and password. If yours asks for server settings, use these:</p>
+      <PhoneQr me={me} />
+      <h3>Server settings</h3>
+      <p className="muted small">Outlook, Apple Mail, Thunderbird and most phone apps only need your email and password. If an app asks for server settings, use these:</p>
       <div className="table">
         <Row l="Email / username" v={me.email} />
         <Row l="Incoming (IMAP)" v={`${c.imapHost} · port ${c.imapPort} · SSL/TLS`} />
         <Row l="Outgoing (SMTP)" v={`${c.smtpHost} · port ${c.smtpPort} · ${c.smtpSecure ? 'SSL/TLS' : 'STARTTLS'}`} />
         <Row l="Password" v="Your normal password" />
+        {me.clientSettings?.davEnabled !== false && <Row l="Calendar & contacts" v={`https://${c.davHost || c.imapHost}/SOGo/dav/`} />}
       </div>
       <h3>Install this app</h3>
       <p className="muted small">On your phone: open this site in Safari or Chrome, tap <b>Share</b> → <b>Add to Home Screen</b>. On a computer: click the install icon in the address bar.</p>

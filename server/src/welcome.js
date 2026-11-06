@@ -17,6 +17,8 @@ export async function deliverWelcome({ email, password, name, company }) {
   <h3 style="margin-bottom:4px">📥 Bring your old email</h3>
   <p>Go to <b>Settings → Import mail</b> to copy everything from Gmail, Outlook, Yahoo or iCloud. It keeps syncing until you switch off the old account.</p>
   <h3 style="margin-bottom:4px">📱 Use it on your phone or in Outlook</h3>
+  ${app ? `<p><a href="${esc(app)}/setup?email=${encodeURIComponent(email)}" style="background:#0f6cbd;color:#fff;padding:10px 18px;border-radius:6px;text-decoration:none;display:inline-block">Set up on my phone</a></p>
+  <p style="color:#616161;font-size:13px">On iPhone it installs in two taps. On Android it shows the easiest app for you. Or scan the QR code in <b>Settings → Phone &amp; apps</b>.</p>` : ''}
   <table cellpadding="4" style="border-collapse:collapse;font-size:13px">
     <tr><td style="color:#616161">Incoming (IMAP)</td><td><b>${esc(config.imap.host)}</b>, port ${config.imap.port}, SSL</td></tr>
     <tr><td style="color:#616161">Outgoing (SMTP)</td><td><b>${esc(config.smtp.host)}</b>, port ${config.smtp.port}, ${config.smtp.secure ? 'SSL' : 'STARTTLS'}</td></tr>

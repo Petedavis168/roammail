@@ -8,6 +8,7 @@ RUN npm run build
 
 # ---- runtime ----
 FROM node:22-alpine
+RUN apk add --no-cache openssl
 ENV NODE_ENV=production DATA_DIR=/data PORT=3000
 WORKDIR /app
 COPY server/package*.json server/

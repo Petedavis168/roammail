@@ -91,8 +91,14 @@ function Users({ org, domains }) {
             <div><span>Password</span><b className="mono">{created.password}</b><Copy text={created.password} /></div>
             <div><span>Sign in at</span><b className="mono">{location.origin}</b><Copy text={location.origin} /></div>
           </div>
+          {created.setup && (
+            <div className="hire-qr">
+              <img src={created.setup.qr} alt="Phone setup QR code" width="150" height="150" />
+              <div><b>Set up their phone now</b><p className="muted small">Have them scan this with their phone camera. On iPhone it installs mail, calendar and contacts with no typing. Works once, for the next 2 hours.</p></div>
+            </div>
+          )}
           {!created.reset && <SigPreview orgId={org.id} email={created.email} />}
-          <Copy text={`Your email is ready!\nSign in at: ${location.origin}\nEmail: ${created.email}\nPassword: ${created.password}\nIt also works in Outlook, Apple Mail and phone apps.`} />
+          <Copy text={`Your email is ready!\nSign in at: ${location.origin}\nEmail: ${created.email}\nPassword: ${created.password}\nSet up your phone: ${location.origin}/setup?email=${created.email}\nIt also works in Outlook, Apple Mail and other mail apps.`} />
           <span className="muted small"> ← copy everything as a message</span>
         </Modal>
       )}
@@ -127,7 +133,7 @@ function AddUser({ domain, onClose, onCreated }) {
   const [busy, setBusy] = useState(false);
   const submit = async (e) => {
     e.preventDefault(); setErr(''); setBusy(true);
-    try { const r = await api.post('/api/admin/users', { ...f, domain }); onCreated({ email: r.email, password: f.password }); }
+    try { const r = await api.post('/api/admin/users', { ...f, domain }); onCreated({ email: r.email, password: f.password, setup: r.setup }); }
     catch (e2) { setErr(e2.message); } finally { setBusy(false); }
   };
   return (

@@ -21,6 +21,9 @@ export function requiredRecords(domain, dkim) {
   if (dkim) recs.push({ key: 'dkim', type: 'TXT', host: `${dkim.selector}._domainkey`, name: `${dkim.selector}._domainkey.${domain}`, value: dkim.txt, purpose: 'Signs your outgoing mail (DKIM)' });
   recs.push(
     { key: 'dmarc', type: 'TXT', host: '_dmarc', name: `_dmarc.${domain}`, value: `v=DMARC1; p=quarantine; rua=mailto:postmaster@${domain}`, purpose: 'Tells others what to do with spoofed mail (DMARC)' },
+    { key: 'srv-imaps', type: 'SRV', host: '_imaps._tcp', name: `_imaps._tcp.${domain}`, value: `0 1 993 ${mx}`, purpose: 'Phones & apps find your mail server automatically', optional: true },
+    { key: 'srv-submission', type: 'SRV', host: '_submission._tcp', name: `_submission._tcp.${domain}`, value: `0 1 587 ${mx}`, purpose: 'Apps find the sending server automatically', optional: true },
+    { key: 'srv-autodiscover', type: 'SRV', host: '_autodiscover._tcp', name: `_autodiscover._tcp.${domain}`, value: `0 1 443 ${mx}`, purpose: 'Outlook auto-setup', optional: true },
     { key: 'autodiscover', type: 'CNAME', host: 'autodiscover', name: `autodiscover.${domain}`, value: mx, purpose: 'Outlook / phone auto-setup', optional: true },
     { key: 'autoconfig', type: 'CNAME', host: 'autoconfig', name: `autoconfig.${domain}`, value: mx, purpose: 'Thunderbird / phone auto-setup', optional: true },
   );
@@ -41,6 +44,11 @@ export async function checkRecords(domain, dkim) {
       if (r.type === 'MX') {
         found = (await resolver.resolveMx(r.name)).map((m) => m.exchange);
         ok = found.some((x) => norm(x) === norm(r.value));
+      } else if (r.type === 'SRV') {
+        const recs = await resolver.resolveSrv(r.name).catch(() => []);
+        found = recs.map((x) => `${x.priority} ${x.weight} ${x.port} ${x.name}`);
+        const port = Number(r.value.split(' ')[2]);
+        ok = recs.some((x) => x.port === port && norm(x.name) === norm(r.value.split(' ')[3]));
       } else if (r.type === 'CNAME') {
         found = await resolver.resolveCname(r.name).catch(() => []);
         ok = found.some((x) => norm(x) === norm(r.value));

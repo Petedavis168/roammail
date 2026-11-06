@@ -26,6 +26,11 @@ existing **mailcow** server (IMAP/SMTP for mail, the mailcow API for accounts).
 - **Import mail** from Gmail, Outlook, Yahoo, iCloud or any IMAP account (keeps syncing until stopped)
 - **Phishing protection:** warnings for failed SPF/DKIM/DMARC, display-name spoofing, odd Reply-To, fake
   "internal" mail; **External** tag for business users; verified-sender lock
+- **One-scan phone setup:** Settings → Phone & apps shows a QR code. On iPhone/iPad/Mac it installs a configuration
+  profile with mail, calendar and contacts and the password already filled in (single-use link, 15 minutes). Android
+  gets a page tailored to the device (self-configuring apps, exact Gmail-app settings with copy buttons, or the web app).
+  Admins get a QR on the "User created" screen to set up a new hire's phone on the spot, and every welcome email has a
+  "Set up on my phone" button. The domain wizard also adds SRV records so apps find the server by themselves.
 - Welcome email with setup tips in every new mailbox; installable as an app (PWA) on phones and desktops
 
 **Search operators:** `from:` `to:` `cc:` `subject:` `has:attachment` `is:unread` `is:read` `is:starred`
@@ -78,6 +83,13 @@ existing **mailcow** server (IMAP/SMTP for mail, the mailcow API for accounts).
 
 **Updating:** `git pull && docker compose up -d --build`. App data (orgs, domains, audit log) lives in the
 `appdata` Docker volume (SQLite). Back it up with your mailcow backups.
+
+## Phone & Outlook auto-configuration checklist
+- Business domains: add the optional `autodiscover`/`autoconfig` CNAMEs and SRV records from the domain wizard
+  (mailcow answers those requests, which is what Outlook, Thunderbird and many Android apps use).
+- Do the same for your free sign-up domain (mailcow UI → your domain → DNS shows the records).
+- For a "Verified" iPhone profile set `PROFILE_SIGN_CERT`/`PROFILE_SIGN_KEY` (any publicly trusted certificate,
+  e.g. the mail server's Let's Encrypt cert).
 
 ## Local development
 

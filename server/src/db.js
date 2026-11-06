@@ -75,6 +75,13 @@ CREATE TABLE IF NOT EXISTS user_settings (
   email TEXT NOT NULL, key TEXT NOT NULL, value TEXT NOT NULL,
   PRIMARY KEY (email, key)
 );
+CREATE TABLE IF NOT EXISTS setup_tokens (
+  token_hash TEXT PRIMARY KEY,
+  email TEXT NOT NULL,
+  creds TEXT,                       -- sealed password (optional) so the profile needs no typing
+  expires INTEGER NOT NULL,
+  used_at INTEGER
+);
 CREATE TABLE IF NOT EXISTS profiles (
   email TEXT PRIMARY KEY,
   name TEXT, title TEXT, department TEXT, phone TEXT, mobile TEXT,

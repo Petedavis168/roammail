@@ -26,7 +26,7 @@ export async function applyRecords(zoneId, domain, records) {
   for (const r of records) {
     const key = `${r.type}:${r.name}`;
     const set = sets.get(key) || { Name: r.name, Type: r.type, TTL: 300, ResourceRecords: [] };
-    const value = r.type === 'MX' ? `${r.priority} ${r.value}.` : r.type === 'CNAME' ? `${r.value}.` : txtValue(r.value);
+    const value = r.type === 'MX' ? `${r.priority} ${r.value}.` : r.type === 'CNAME' || r.type === 'SRV' ? `${r.value}.` : txtValue(r.value);
     set.ResourceRecords.push({ Value: value });
     sets.set(key, set);
   }

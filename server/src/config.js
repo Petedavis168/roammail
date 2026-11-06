@@ -66,3 +66,9 @@ config.turnstile = { siteKey: env.TURNSTILE_SITE_KEY || '', secret: env.TURNSTIL
 config.systemMail = { user: env.SYSTEM_MAIL_USER || '', pass: env.SYSTEM_MAIL_PASS || '', from: env.SYSTEM_MAIL_FROM || env.SYSTEM_MAIL_USER || '' };
 config.publicUrl = (env.PUBLIC_URL || (env.APP_DOMAIN ? `https://${env.APP_DOMAIN}` : '')).replace(/\/$/, '');
 config.appName = env.APP_NAME || 'Mail';
+// ---------- device setup ----------
+// Include calendar & contacts (mailcow SOGo CalDAV/CardDAV) in iPhone/Mac profiles
+config.davEnabled = (env.DAV_ENABLED ?? 'true') === 'true';
+config.davHost = env.DAV_HOST || config.mailHostname;
+// Optional: sign .mobileconfig profiles so iOS shows "Verified" (PEM files, e.g. your mail server's TLS cert)
+config.profileSign = { cert: env.PROFILE_SIGN_CERT || '', key: env.PROFILE_SIGN_KEY || '', chain: env.PROFILE_SIGN_CHAIN || '' };

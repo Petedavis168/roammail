@@ -98,7 +98,7 @@ api.post('/logout', wrap(async (req, res) => {
 api.get('/me', (req, res) => res.json({
   email: req.user.email, name: req.user.name, ...rolesFor(req.user.email),
   orgDomains: q.all("SELECT d.domain FROM domains d WHERE d.status = 'active' AND d.org_id = (SELECT org_id FROM domains WHERE domain = ?)", req.user.email.split('@')[1]).map((d) => d.domain),
-  clientSettings: { imapHost: appConfig.imap.host, imapPort: appConfig.imap.port, smtpHost: appConfig.smtp.host, smtpPort: appConfig.smtp.port, smtpSecure: appConfig.smtp.secure },
+  clientSettings: { imapHost: appConfig.imap.host, imapPort: appConfig.imap.port, smtpHost: appConfig.smtp.host, smtpPort: appConfig.smtp.port, smtpSecure: appConfig.smtp.secure, davEnabled: appConfig.davEnabled, davHost: appConfig.davHost },
 }));
 
 // ---------- folders ----------
