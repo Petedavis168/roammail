@@ -1,0 +1,7 @@
+{$APP_DOMAIN} {
+	encode gzip
+	reverse_proxy app:3000 {
+		# keep the live-update stream (Server-Sent Events) unbuffered
+		flush_interval -1
+	}
+}

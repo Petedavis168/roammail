@@ -1,0 +1,238 @@
+import { useEffect, useRef, useState } from 'react';
+import { api } from '../api.js';
+import { Icon } from '../icons.jsx';
+import { fmtAddr, fmtDate, fmtSize, escapeHtml } from '../util.js';
+import RecipientInput from './RecipientInput.jsx';
+import { useToast } from './Toast.jsx';
+
+const prefix = (p, s = '') => (new RegExp(`^${p}:`, 'i').test(s.trim()) ? s : `${p}: ${s}`);
+
+/** Build the initial state of a reply / reply-all / forward. */
+export function replyDraft(msg, mode, myEmail) {
+  const me = myEmail.toLowerCase();
+  const notMe = (a) => a.address?.toLowerCase() !== me;
+  const base = { quote: msg, mode, inReplyTo: msg.messageId, references: [...(msg.references || []), msg.messageId].filter(Boolean).join(' '),
+    replyFolder: msg.folder, replyUid: msg.uid };
+  if (mode === 'forward') {
+    return { ...base, to: [], subject: prefix('Fwd', msg.subject), forwardFolder: msg.folder, forwardUid: msg.uid, inReplyTo: undefined, references: undefined };
+  }
+  const sentByMe = msg.from?.some((a) => !notMe(a));
+  const primary = sentByMe ? msg.to || [] : msg.replyTo?.length ? msg.replyTo : msg.from || [];
+  const to = primary.filter((a) => sentByMe || notMe(a));
+  const cc = mode === 'all' ? [...(sentByMe ? [] : msg.to || []), ...(msg.cc || [])].filter(notMe).filter((a) => !to.some((t) => t.address === a.address)) : [];
+  return { ...base, to, cc, subject: prefix('Re', msg.subject) };
+}
+
+function quoteHtml(msg, mode) {
+  const body = msg.html || `<div style="white-space:pre-wrap">${escapeHtml(msg.text || '')}</div>`;
+  const inner = body.replace(/^[\s\S]*<body[^>]*>/i, '').replace(/<\/body>[\s\S]*$/i, '').replace(/<script[\s\S]*?<\/script>/gi, '');
+  if (mode === 'forward') {
+    return `<br><br><div>---------- Forwarded message ----------<br>From: ${escapeHtml((msg.from || []).map(fmtAddr).join(', '))}<br>Date: ${escapeHtml(fmtDate(msg.date, true))}<br>Subject: ${escapeHtml(msg.subject || '')}<br>To: ${escapeHtml((msg.to || []).map(fmtAddr).join(', '))}<br>${msg.cc?.length ? `Cc: ${escapeHtml(msg.cc.map(fmtAddr).join(', '))}<br>` : ''}<br>${inner}</div>`;
+  }
+  return `<br><br><div>On ${escapeHtml(fmtDate(msg.date, true))}, ${escapeHtml((msg.from || []).map(fmtAddr).join(', '))} wrote:</div><blockquote style="margin:0 0 0 .8ex;border-left:2px solid #ccc;padding-left:1ex">${inner}</blockquote>`;
+}
+
+function Composer({ c, me, prefs, onClose, onSend, focusIndex, setFocus, count }) {
+  const toast = useToast();
+  const init = c.initial;
+  const [to, setTo] = useState(init.to || []);
+  const [cc, setCc] = useState(init.cc || []);
+  const [bcc, setBcc] = useState(init.bcc || []);
+  const [showCc, setShowCc] = useState(!!(init.cc?.length || init.bcc?.length));
+  const [subject, setSubject] = useState(init.subject || '');
+  const [files, setFiles] = useState(init.files || []);
+  const [state, setState] = useState('normal'); // normal | min | max
+  const [draft, setDraft] = useState({ uid: init.draftUid, folder: init.draftFolder });
+  const [saving, setSaving] = useState('');
+  const [ready, setReady] = useState(!(init.quote && !init.quote.html && !init.quote.text));
+  const [dragging, setDragging] = useState(false);
+  const [important, setImportant] = useState(init.priority === 'high');
+  const editor = useRef();
+  const fileInput = useRef();
+  const dirty = useRef(false);
+  const sig = prefs.signature ? `<br><br><div class="signature">-- <br>${prefs.signature.split('\n').map(escapeHtml).join('<br>')}</div>` : '';
+
+  // Fill the editor (fetching the full original if we only have a list summary)
+  useEffect(() => {
+    let cancelled = false;
+    const fill = (quote) => {
+      if (cancelled || !editor.current) return;
+      editor.current.innerHTML = init.html ?? `<div><br></div>${sig}${quote ? quoteHtml(quote, init.mode) : ''}`;
+      setReady(true);
+      if (to.length || init.mode === 'forward') {
+        const r = document.createRange(); r.setStart(editor.current, 0); r.collapse(true);
+        const s = getSelection(); s.removeAllRanges(); s.addRange(r);
+        if (to.length) editor.current.focus();
+      }
+    };
+    const q = init.quote;
+    if (q && !q.html && !q.text) {
+      api.get('/api/message', { folder: q.folder, uid: q.uid, peek: 1 }).then((full) => fill({ ...q, ...full })).catch(() => fill(q));
+    } else fill(q);
+    return () => { cancelled = true; };
+  }, []);
+
+  const payload = () => ({
+    to, cc, bcc, subject, files, html: editor.current?.innerHTML || '', text: editor.current?.innerText || '',
+    inReplyTo: init.inReplyTo, references: init.references, replyFolder: init.replyFolder, replyUid: init.replyUid,
+    forwardFolder: init.forwardFolder, forwardUid: init.forwardUid, draftUid: draft.uid, draftFolder: draft.folder,
+    priority: important ? 'high' : 'normal', fromName: prefs.displayName || me.name || '',
+  });
+
+  const saveDraft = async () => {
+    if (!dirty.current) return;
+    dirty.current = false;
+    setSaving('Saving…');
+    try {
+      const r = await api.form('/api/drafts', toForm(payload()));
+      setDraft({ uid: r.uid, folder: r.folder });
+      setSaving(`Draft saved ${new Date().toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}`);
+    } catch (e) { setSaving('Couldn\'t save draft'); dirty.current = true; }
+  };
+  useEffect(() => { const t = setInterval(saveDraft, 20000); return () => clearInterval(t); });
+
+  const markDirty = () => { dirty.current = true; };
+  useEffect(markDirty, [to, cc, bcc, subject, files]);
+
+  const close = async () => {
+    const hasContent = to.length || subject || (editor.current?.innerText || '').trim().replace(/^--[\s\S]*$/, '').trim();
+    if (hasContent && dirty.current) { await saveDraft(); toast('Draft saved'); }
+    onClose();
+  };
+  const discard = async () => {
+    if (draft.uid && draft.folder) await api.remove(draft.folder, [draft.uid], true).catch(() => {});
+    onClose();
+  };
+  const send = () => {
+    if (!to.length && !cc.length && !bcc.length) return toast('Add at least one recipient', { error: true });
+    const bad = [...to, ...cc, ...bcc].find((a) => !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(a.address));
+    if (bad) return toast(`"${bad.address}" isn't a valid email address`, { error: true });
+    if (!subject.trim() && !confirm('Send this message without a subject?')) return;
+    const text = (editor.current?.innerText || '').toLowerCase();
+    if (/\b(attached|attachment|enclosed)\b/.test(text.split('wrote:')[0]) && !files.length && !init.forwardUid && !confirm('You mentioned an attachment but none is attached. Send anyway?')) return;
+    onSend(payload());
+  };
+
+  const addFiles = (list) => {
+    const arr = [...list];
+    const total = [...files, ...arr].reduce((s, f) => s + f.size, 0);
+    if (total > 25 * 1024 * 1024) return toast('Attachments are limited to 25 MB in total', { error: true });
+    setFiles((f) => [...f, ...arr]);
+  };
+
+  const exec = (cmd, val) => { editor.current?.focus(); document.execCommand(cmd, false, val); markDirty(); };
+  const addLink = () => { const url = prompt('Link address (https://…)'); if (url) exec('createLink', /^\w+:/.test(url) ? url : `https://${url}`); };
+
+  const title = subject || (init.mode === 'forward' ? 'Forward' : init.mode ? 'Reply' : 'New message');
+  return (
+    <div className={`composer ${state}`} style={state === 'max' ? undefined : { right: 16 + (count - 1 - focusIndex) * 0 }}
+      onFocus={setFocus}
+      onKeyDown={(e) => { if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') { e.preventDefault(); send(); } if (e.key === 'Escape') { e.stopPropagation(); setState('min'); } }}
+      onDragOver={(e) => { if (e.dataTransfer.types.includes('Files')) { e.preventDefault(); setDragging(true); } }}
+      onDragLeave={() => setDragging(false)}
+      onDrop={(e) => { if (e.dataTransfer.files.length) { e.preventDefault(); setDragging(false); addFiles(e.dataTransfer.files); } }}>
+      <div className="composer-bar" onClick={() => state === 'min' && setState('normal')}>
+        <span className="ctitle">{title}</span>
+        <button className="icon-btn on-dark xs" title="Minimize" onClick={(e) => { e.stopPropagation(); setState(state === 'min' ? 'normal' : 'min'); }}><Icon name="min" size={14} /></button>
+        <button className="icon-btn on-dark xs" title={state === 'max' ? 'Exit full screen' : 'Full screen'} onClick={(e) => { e.stopPropagation(); setState(state === 'max' ? 'normal' : 'max'); }}><Icon name="max" size={14} /></button>
+        <button className="icon-btn on-dark xs" title="Save & close" onClick={(e) => { e.stopPropagation(); close(); }}><Icon name="close" size={14} /></button>
+      </div>
+      <div className="composer-body" style={{ display: state === 'min' ? 'none' : undefined }}>
+        <RecipientInput label="To" value={to} onChange={setTo} autoFocus={!to.length}
+          right={!showCc && <button type="button" className="link small" onClick={() => setShowCc(true)}>Cc Bcc</button>} />
+        {showCc && <RecipientInput label="Cc" value={cc} onChange={setCc} />}
+        {showCc && <RecipientInput label="Bcc" value={bcc} onChange={setBcc} />}
+        <input className="subject-input" placeholder="Subject" value={subject} onChange={(e) => setSubject(e.target.value)} aria-label="Subject" />
+        <div className="editor-wrap">
+          {!ready && <div className="list-msg"><div className="spinner" /></div>}
+          <div ref={editor} className="editor" contentEditable suppressContentEditableWarning onInput={markDirty} aria-label="Message body" role="textbox" aria-multiline="true"
+            onPaste={(e) => {
+              const imgs = [...e.clipboardData.files].filter((f) => f.type.startsWith('image/'));
+              if (imgs.length) { e.preventDefault(); addFiles(imgs); }
+            }} />
+          {dragging && <div className="drop-zone">Drop files to attach</div>}
+        </div>
+        {files.length > 0 && (
+          <div className="c-files">
+            {files.map((f, i) => (
+              <span key={i} className="c-file"><Icon name="clip" size={14} /> {f.name} <small>({fmtSize(f.size)})</small>
+                <button type="button" onClick={() => setFiles(files.filter((_, j) => j !== i))} aria-label="Remove attachment">×</button></span>
+            ))}
+          </div>
+        )}
+        {init.forwardUid && <div className="muted small c-note">Original attachments will be included.</div>}
+        <div className="composer-foot">
+          <button className="btn primary" onClick={send} title="Send (Ctrl+Enter)"><Icon name="send" size={16} /> Send</button>
+          <div className="fmt">
+            <button type="button" className="icon-btn" title="Bold" onMouseDown={(e) => { e.preventDefault(); exec('bold'); }}><Icon name="bold" size={16} /></button>
+            <button type="button" className="icon-btn" title="Italic" onMouseDown={(e) => { e.preventDefault(); exec('italic'); }}><Icon name="italic" size={16} /></button>
+            <button type="button" className="icon-btn" title="Underline" onMouseDown={(e) => { e.preventDefault(); exec('underline'); }}><Icon name="underline" size={16} /></button>
+            <button type="button" className="icon-btn" title="Bulleted list" onMouseDown={(e) => { e.preventDefault(); exec('insertUnorderedList'); }}><Icon name="list" size={16} /></button>
+            <button type="button" className="icon-btn" title="Insert link" onMouseDown={(e) => { e.preventDefault(); addLink(); }}><Icon name="link" size={16} /></button>
+            <button type="button" className="icon-btn" title="Attach files" onClick={() => fileInput.current.click()}><Icon name="clip" size={16} /></button>
+            <button type="button" className={`icon-btn ${important ? 'on-red' : ''}`} title="High importance" onClick={() => setImportant((x) => !x)}>!</button>
+            <input ref={fileInput} type="file" multiple hidden onChange={(e) => { addFiles(e.target.files); e.target.value = ''; }} />
+          </div>
+          <span className="muted small saving">{saving}</span>
+          <button className="icon-btn" title="Discard draft" onClick={discard}><Icon name="trash" size={16} /></button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function toForm(p) {
+  const fd = new FormData();
+  const list = (a) => a.map(fmtAddr).join(', ');
+  fd.append('to', list(p.to)); fd.append('cc', list(p.cc)); fd.append('bcc', list(p.bcc));
+  fd.append('subject', p.subject);
+  fd.append('html', p.html); fd.append('text', p.text);
+  for (const k of ['inReplyTo', 'references', 'replyFolder', 'replyUid', 'forwardFolder', 'forwardUid', 'draftUid', 'priority', 'fromName']) {
+    if (p[k]) fd.append(k, p[k]);
+  }
+  for (const f of p.files) fd.append('attachments', f, f.name);
+  return fd;
+}
+
+export default function ComposeManager({ composers, setComposers, me, prefs, onSent }) {
+  const toast = useToast();
+  const [focused, setFocused] = useState(null);
+  const remove = (id) => setComposers((cs) => cs.filter((c) => c.id !== id));
+
+  const onSend = (c, payload) => {
+    remove(c.id);
+    let undone = false;
+    const doSend = async () => {
+      if (undone) return;
+      try {
+        await api.form('/api/send', toForm(payload));
+        toast('Message sent');
+        onSent();
+      } catch (e) {
+        toast(`Couldn't send: ${e.message}`, { error: true, duration: 8000 });
+        setComposers((cs) => [...cs, { id: Date.now(), initial: { ...c.initial, ...payload, html: payload.html, draftUid: payload.draftUid } }]);
+      }
+    };
+    const delay = Number(prefs.undoSeconds) || 0;
+    if (!delay) return doSend();
+    const timer = setTimeout(doSend, delay * 1000);
+    toast('Sending…', {
+      duration: delay * 1000,
+      action: 'Undo',
+      onAction: () => {
+        undone = true;
+        clearTimeout(timer);
+        setComposers((cs) => [...cs, { id: Date.now(), initial: { ...c.initial, ...payload, html: payload.html, draftUid: payload.draftUid } }]);
+      },
+    });
+  };
+
+  return (
+    <div className="composers">
+      {composers.map((c, i) => (
+        <Composer key={c.id} c={c} me={me} prefs={prefs} count={composers.length} focusIndex={i}
+          setFocus={() => setFocused(c.id)} onClose={() => remove(c.id)} onSend={(p) => onSend(c, p)} />
+      ))}
+    </div>
+  );
+}
