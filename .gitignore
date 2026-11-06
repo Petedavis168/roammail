@@ -4,3 +4,4 @@ server/data/
 data/
 .env
 *.log
+deploy/aws/config.env

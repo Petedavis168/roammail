@@ -1,0 +1,356 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: >-
+  Mail client for mailcow - EC2 (Docker + Caddy HTTPS), Elastic IP, encrypted disk, daily snapshots,
+  auto-recovery, CloudWatch logs, no SSH (Session Manager). Deployed by deploy/aws/deploy.sh.
+
+Parameters:
+  AppDomain:
+    Type: String
+    Description: Web address of the app, e.g. webmail.example.com
+    AllowedPattern: '^[a-z0-9.-]+\.[a-z]{2,}$'
+  HostedZoneId:
+    Type: String
+    Default: ''
+    Description: Optional Route 53 hosted zone ID for AppDomain. If set, the DNS record is created for you.
+  InstanceType:
+    Type: String
+    Default: t3.small
+    AllowedValues: [t3.small, t3.medium, t3.large, t3a.small, t3a.medium, m6i.large]
+  DataDiskGb:
+    Type: Number
+    Default: 10
+    MinValue: 5
+    MaxValue: 1000
+    Description: Size of the separate encrypted data disk (accounts, settings, certificates). Can only grow.
+  AlertEmail:
+    Type: String
+    Default: ''
+    Description: Optional email address for alerts (server down, high CPU). You'll get a confirmation email.
+  EnableRoute53Dns:
+    Type: String
+    Default: 'false'
+    AllowedValues: ['true', 'false']
+    Description: Let the app add DNS records for customer domains hosted in this AWS account's Route 53
+  ArtifactBucket:
+    Type: String
+    Description: S3 bucket holding the app release (created by deploy.sh)
+  ArtifactKey:
+    Type: String
+    Default: releases/latest.tar.gz
+  EnvParameterName:
+    Type: String
+    Description: SSM SecureString parameter that holds the app's .env (written by deploy.sh)
+  SnapshotRetentionDays:
+    Type: Number
+    Default: 14
+    MinValue: 1
+    MaxValue: 365
+  UbuntuAmi:
+    Type: AWS::EC2::Image::Id
+    Description: Ubuntu 24.04 image, pinned at creation by deploy.sh so updates never replace the server
+
+Conditions:
+  HasZone: !Not [!Equals [!Ref HostedZoneId, '']]
+  HasAlertEmail: !Not [!Equals [!Ref AlertEmail, '']]
+  Route53Feature: !Equals [!Ref EnableRoute53Dns, 'true']
+
+Resources:
+  # ---------------------------------------------------------------- network
+  WebSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Mail client - HTTP/HTTPS only (admin access via Session Manager, no SSH)
+      SecurityGroupIngress:
+        - { IpProtocol: tcp, FromPort: 80, ToPort: 80, CidrIp: 0.0.0.0/0, Description: HTTP (redirects to HTTPS) }
+        - { IpProtocol: tcp, FromPort: 443, ToPort: 443, CidrIp: 0.0.0.0/0, Description: HTTPS }
+        - { IpProtocol: tcp, FromPort: 443, ToPort: 443, CidrIpv6: '::/0', Description: HTTPS IPv6 }
+        - { IpProtocol: udp, FromPort: 443, ToPort: 443, CidrIp: 0.0.0.0/0, Description: HTTP/3 }
+      Tags: [{ Key: Name, Value: !Sub '${AWS::StackName}-web' }]
+
+  # ---------------------------------------------------------------- permissions
+  InstanceRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - { Effect: Allow, Principal: { Service: ec2.amazonaws.com }, Action: sts:AssumeRole }
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore   # browser shell + remote updates, no SSH keys
+      Policies:
+        - PolicyName: app
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action: s3:GetObject
+                Resource: !Sub 'arn:aws:s3:::${ArtifactBucket}/releases/*'
+              - Effect: Allow
+                Action: ssm:GetParameter
+                Resource: !Sub 'arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter${EnvParameterName}'
+              - Effect: Allow
+                Action: [logs:CreateLogStream, logs:PutLogEvents, logs:DescribeLogStreams]
+                Resource: !Sub '${LogGroup.Arn}:*'
+              - Effect: Allow
+                Action: cloudformation:SignalResource
+                Resource: !Ref AWS::StackId
+        - !If
+          - Route53Feature
+          - PolicyName: route53-customer-dns
+            PolicyDocument:
+              Version: '2012-10-17'
+              Statement:
+                - Effect: Allow
+                  Action: [route53:ListHostedZonesByName, route53:ListResourceRecordSets, route53:ChangeResourceRecordSets, route53:GetChange]
+                  Resource: '*'
+          - !Ref AWS::NoValue
+
+  InstanceProfile:
+    Type: AWS::IAM::InstanceProfile
+    Properties:
+      Roles: [!Ref InstanceRole]
+
+  LogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub '/${AWS::StackName}/app'
+      RetentionInDays: 30
+
+  # ---------------------------------------------------------------- server
+  LaunchTemplate:
+    Type: AWS::EC2::LaunchTemplate
+    Properties:
+      LaunchTemplateData:
+        MetadataOptions:
+          HttpTokens: required          # IMDSv2 only
+          HttpPutResponseHopLimit: 2    # containers can reach the instance role (Route 53 feature)
+        BlockDeviceMappings:
+          - DeviceName: /dev/sda1
+            Ebs: { VolumeSize: 30, VolumeType: gp3, Encrypted: true, DeleteOnTermination: true }
+
+  # Separate disk for everything that matters, so the server itself is disposable.
+  DataVolume:
+    Type: AWS::EC2::Volume
+    DeletionPolicy: Snapshot          # deleting the stack keeps a final snapshot
+    UpdateReplacePolicy: Snapshot
+    Properties:
+      AvailabilityZone: !Select [0, !GetAZs '']
+      Size: !Ref DataDiskGb
+      VolumeType: gp3
+      Encrypted: true
+      Tags:
+        - { Key: Name, Value: !Sub '${AWS::StackName}-data' }
+        - { Key: mail-client-backup, Value: !Ref AWS::StackName }
+
+  Server:
+    Type: AWS::EC2::Instance
+    CreationPolicy:
+      ResourceSignal: { Count: 1, Timeout: PT25M }
+    Properties:
+      ImageId: !Ref UbuntuAmi
+      AvailabilityZone: !Select [0, !GetAZs '']
+      Volumes:
+        - { Device: /dev/sdf, VolumeId: !Ref DataVolume }
+      InstanceType: !Ref InstanceType
+      IamInstanceProfile: !Ref InstanceProfile
+      SecurityGroupIds: [!GetAtt WebSecurityGroup.GroupId]
+      LaunchTemplate:
+        LaunchTemplateId: !Ref LaunchTemplate
+        Version: !GetAtt LaunchTemplate.LatestVersionNumber
+      Tags:
+        - { Key: Name, Value: !Ref AWS::StackName }
+      UserData:
+        Fn::Base64: !Sub |
+          #!/bin/bash
+          set -euxo pipefail
+          exec > >(tee /var/log/mail-client-setup.log) 2>&1
+          export DEBIAN_FRONTEND=noninteractive
+          signal() { aws cloudformation signal-resource --region ${AWS::Region} --stack-name ${AWS::StackName} --logical-resource-id Server --unique-id "$(hostname)" --status "$1" || true; }
+          trap 'signal FAILURE' ERR
+
+          # --- packages: Docker (official repo), AWS CLI
+          apt-get update
+          apt-get install -y ca-certificates curl jq unzip
+          install -m 0755 -d /etc/apt/keyrings
+          curl -fsSL https://download.docker.com/linux/ubuntu/gpg -o /etc/apt/keyrings/docker.asc
+          echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/ubuntu $(. /etc/os-release && echo "$VERSION_CODENAME") stable" > /etc/apt/sources.list.d/docker.list
+          apt-get update
+          apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
+          systemctl enable --now docker
+          snap install aws-cli --classic || (curl -fsSL https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip -o /tmp/aws.zip && unzip -q /tmp/aws.zip -d /tmp && /tmp/aws/install)
+          export PATH=$PATH:/snap/bin:/usr/local/bin
+
+          # --- data disk: format on first use, mount at /srv/mcdata
+          ROOT=$(lsblk -no PKNAME "$(findmnt -no SOURCE /)")
+          for i in $(seq 1 60); do
+            DATA=$(lsblk -dpno NAME,TYPE | awk '$2=="disk"{print $1}' | grep -v "/dev/$ROOT" | head -1)
+            [ -n "$DATA" ] && break; sleep 2
+          done
+          [ -n "$DATA" ]
+          blkid "$DATA" || mkfs.ext4 -L mcdata "$DATA"
+          mkdir -p /srv/mcdata
+          grep -q 'LABEL=mcdata' /etc/fstab || echo 'LABEL=mcdata /srv/mcdata ext4 defaults,nofail 0 2' >> /etc/fstab
+          mountpoint -q /srv/mcdata || mount /srv/mcdata
+          mkdir -p /srv/mcdata/app /srv/mcdata/caddy
+          chown 1000:1000 /srv/mcdata/app
+          # grow the filesystem if DataDiskGb was increased
+          resize2fs "$DATA" || true
+
+          # --- 2 GB swap so builds never run out of memory on small instances
+          if [ ! -f /swapfile ]; then fallocate -l 2G /swapfile && chmod 600 /swapfile && mkswap /swapfile && swapon /swapfile && echo '/swapfile none swap sw 0 0' >> /etc/fstab; fi
+
+          # --- automatic security updates (reboot at 04:00 if a kernel update needs it)
+          apt-get install -y unattended-upgrades
+          echo 'Unattended-Upgrade::Automatic-Reboot "true";' > /etc/apt/apt.conf.d/52auto-reboot
+          echo 'Unattended-Upgrade::Automatic-Reboot-Time "04:00";' >> /etc/apt/apt.conf.d/52auto-reboot
+
+          # --- deploy script (also used for every update via deploy.sh)
+          mkdir -p /opt/mail-client
+          cat > /opt/mail-client/redeploy.sh <<'SCRIPT'
+          #!/bin/bash
+          set -euo pipefail
+          export PATH=$PATH:/snap/bin:/usr/local/bin
+          cd /opt/mail-client
+          KEY="$*"
+          if [ -z "$KEY" ]; then KEY='${ArtifactKey}'; fi
+          aws s3 cp "s3://${ArtifactBucket}/$KEY" release.tar.gz --region ${AWS::Region}
+          rm -rf app.new && mkdir app.new && tar -xzf release.tar.gz -C app.new
+          aws ssm get-parameter --region ${AWS::Region} --name '${EnvParameterName}' --with-decryption --query Parameter.Value --output text > app.new/.env
+          chmod 600 app.new/.env
+          cat > app.new/docker-compose.aws.yml <<YAML
+          x-logging: &logging
+            driver: awslogs
+            options: { awslogs-region: ${AWS::Region}, awslogs-group: '${LogGroup}', awslogs-create-group: 'false', tag: '{{.Name}}' }
+          services:
+            app: { logging: *logging, environment: { AWS_REGION: ${AWS::Region} }, volumes: ['/srv/mcdata/app:/data'] }
+            caddy: { logging: *logging, volumes: ['./deploy/Caddyfile:/etc/caddy/Caddyfile:ro', '/srv/mcdata/caddy:/data', 'caddy_config:/config'] }
+          YAML
+          rm -rf app.old; [ -d app ] && mv app app.old; mv app.new app
+          cd app
+          docker compose -p mailclient -f docker-compose.yml -f docker-compose.aws.yml up -d --build --remove-orphans
+          for i in $(seq 1 30); do
+            if docker compose -p mailclient exec -T app wget -qO- http://127.0.0.1:3000/healthz >/dev/null 2>&1; then echo "healthy"; docker image prune -f >/dev/null; exit 0; fi
+            sleep 5
+          done
+          echo "App did not become healthy - rolling back" >&2
+          if [ -d ../app.old ]; then cd .. && rm -rf app.failed && mv app app.failed && mv app.old app && cd app && docker compose -p mailclient -f docker-compose.yml -f docker-compose.aws.yml up -d --build; fi
+          exit 1
+          SCRIPT
+          chmod +x /opt/mail-client/redeploy.sh
+
+          # --- self-healing: restart the app if the health check fails twice in a row
+          cat > /etc/cron.d/mail-client-health <<'CRON'
+          */2 * * * * root cd /opt/mail-client/app && (docker compose -p mailclient exec -T app wget -qO- http://127.0.0.1:3000/healthz >/dev/null 2>&1 || (sleep 30; docker compose -p mailclient exec -T app wget -qO- http://127.0.0.1:3000/healthz >/dev/null 2>&1) || docker compose -p mailclient restart app) >/dev/null 2>&1
+          CRON
+
+          /opt/mail-client/redeploy.sh
+          trap - ERR
+          signal SUCCESS
+
+  ElasticIp:
+    Type: AWS::EC2::EIP
+    Properties:
+      InstanceId: !Ref Server
+      Tags: [{ Key: Name, Value: !Ref AWS::StackName }]
+
+  DnsRecord:
+    Type: AWS::Route53::RecordSet
+    Condition: HasZone
+    Properties:
+      HostedZoneId: !Ref HostedZoneId
+      Name: !Ref AppDomain
+      Type: A
+      TTL: '300'
+      ResourceRecords: [!Ref ElasticIp]
+
+  # ---------------------------------------------------------------- backups: daily disk snapshots
+  SnapshotRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - { Effect: Allow, Principal: { Service: dlm.amazonaws.com }, Action: sts:AssumeRole }
+      ManagedPolicyArns: [arn:aws:iam::aws:policy/service-role/AWSDataLifecycleManagerServiceRole]
+
+  SnapshotPolicy:
+    Type: AWS::DLM::LifecyclePolicy
+    Properties:
+      Description: !Sub 'Daily snapshots for ${AWS::StackName}'
+      State: ENABLED
+      ExecutionRoleArn: !GetAtt SnapshotRole.Arn
+      PolicyDetails:
+        ResourceTypes: [VOLUME]
+        TargetTags: [{ Key: mail-client-backup, Value: !Ref AWS::StackName }]
+        Schedules:
+          - Name: daily
+            CreateRule: { Interval: 24, IntervalUnit: HOURS, Times: ['03:00'] }
+            RetainRule: { Interval: !Ref SnapshotRetentionDays, IntervalUnit: DAYS }
+            CopyTags: true
+
+  # ---------------------------------------------------------------- monitoring
+  AlertTopic:
+    Type: AWS::SNS::Topic
+    Condition: HasAlertEmail
+    Properties:
+      Subscription: [{ Protocol: email, Endpoint: !Ref AlertEmail }]
+
+  RecoverAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmDescription: AWS hardware problem - automatically move the server to healthy hardware
+      Namespace: AWS/EC2
+      MetricName: StatusCheckFailed_System
+      Dimensions: [{ Name: InstanceId, Value: !Ref Server }]
+      Statistic: Maximum
+      Period: 60
+      EvaluationPeriods: 2
+      Threshold: 0
+      ComparisonOperator: GreaterThanThreshold
+      AlarmActions:
+        - !Sub 'arn:aws:automate:${AWS::Region}:ec2:recover'
+        - !If [HasAlertEmail, !Ref AlertTopic, !Ref AWS::NoValue]
+
+  RebootAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmDescription: Server stopped responding - reboot it
+      Namespace: AWS/EC2
+      MetricName: StatusCheckFailed_Instance
+      Dimensions: [{ Name: InstanceId, Value: !Ref Server }]
+      Statistic: Maximum
+      Period: 60
+      EvaluationPeriods: 3
+      Threshold: 0
+      ComparisonOperator: GreaterThanThreshold
+      AlarmActions:
+        - !Sub 'arn:aws:automate:${AWS::Region}:ec2:reboot'
+        - !If [HasAlertEmail, !Ref AlertTopic, !Ref AWS::NoValue]
+
+  CpuAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Condition: HasAlertEmail
+    Properties:
+      AlarmDescription: CPU above 80% for 15 minutes - consider a bigger InstanceType
+      Namespace: AWS/EC2
+      MetricName: CPUUtilization
+      Dimensions: [{ Name: InstanceId, Value: !Ref Server }]
+      Statistic: Average
+      Period: 300
+      EvaluationPeriods: 3
+      Threshold: 80
+      ComparisonOperator: GreaterThanThreshold
+      AlarmActions: [!Ref AlertTopic]
+
+Outputs:
+  AppUrl:
+    Value: !Sub 'https://${AppDomain}'
+  PublicIp:
+    Description: Point AppDomain here (A record) and allow this IP in mailcow's API + Fail2ban whitelist
+    Value: !Ref ElasticIp
+  InstanceId:
+    Value: !Ref Server
+  DataVolumeId:
+    Value: !Ref DataVolume
+  LogGroup:
+    Value: !Ref LogGroup

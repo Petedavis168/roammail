@@ -1,5 +1,5 @@
 # ---- build the web app ----
-FROM node:22-alpine AS client
+FROM public.ecr.aws/docker/library/node:22-alpine AS client
 WORKDIR /app/client
 COPY client/package*.json ./
 RUN npm ci
@@ -7,7 +7,7 @@ COPY client/ ./
 RUN npm run build
 
 # ---- runtime ----
-FROM node:22-alpine
+FROM public.ecr.aws/docker/library/node:22-alpine
 RUN apk add --no-cache openssl
 ENV NODE_ENV=production DATA_DIR=/data PORT=3000
 WORKDIR /app

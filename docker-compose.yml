@@ -11,7 +11,7 @@ services:
       - "3000"
 
   caddy:
-    image: caddy:2-alpine
+    image: public.ecr.aws/docker/library/caddy:2-alpine
     restart: unless-stopped
     depends_on: [app]
     ports:

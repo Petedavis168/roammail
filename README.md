@@ -53,7 +53,13 @@ existing **mailcow** server (IMAP/SMTP for mail, the mailcow API for accounts).
 - Super-admin "Platform" portal: stats, turn sign-ups on/off, suspend businesses, change user limits,
   review and suspend new free accounts
 
-## Deploy on AWS (recommended: a separate small EC2 instance)
+## Deploy on AWS: one command (recommended)
+
+See **[deploy/aws/README.md](deploy/aws/README.md)**. In AWS CloudShell: fill in `deploy/aws/config.env`, run
+`./deploy/aws/deploy.sh`. It builds the server, encrypted data disk, daily backups, fixed IP, HTTPS, alarms and logs,
+and later updates go out with the same command (with automatic rollback).
+
+## Deploy on AWS by hand (a separate small EC2 instance)
 
 1. **mailcow prep** (in the mailcow admin UI)
    - *System → Configuration → Access → API*: enable a **read-write** API key and allow the new server's IP.
