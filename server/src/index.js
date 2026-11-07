@@ -10,6 +10,7 @@ import { api } from './routes.js';
 import { sharedboxes } from './sharedboxes.js';
 import { archive } from './archive.js';
 import { push, startPush, pushStats } from './push.js';
+import { help } from './help.js';
 import { abuseDesk, outboundAdmin, startOutboundChecks } from './outbound.js';
 import { ops, metricsMiddleware, startMetricsLog, gauge, startDbBackups } from './ops.js';
 import { q } from './db.js';
@@ -67,6 +68,7 @@ app.use('/api', (req, res, next) => {
 app.get('/healthz', (req, res) => res.json({ ok: true }));
 app.use(ops);
 app.use(abuseDesk);
+app.use(help);
 gauge('sessions_active', async () => (await q.get('SELECT COUNT(*) AS n FROM sessions')).n);
 gauge('jobs_pending', async () => (await q.get("SELECT COUNT(*) AS n FROM jobs WHERE status = 'pending'")).n);
 // Background work must never crash the server; log it so the error alarm fires instead.

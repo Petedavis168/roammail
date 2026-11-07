@@ -296,3 +296,15 @@ test('templates: personal templates are cleaned and private', async () => {
   assert.equal((await b.get('/api/templates')).data.personal.length, 0);
   assert.ok([403, 404].includes((await a.req('PUT', '/api/admin/orgs/1/templates', { templates: [] })).status));
 });
+
+test('help centre and support form', async () => {
+  const anon = new Client();
+  const h = await anon.req('GET', '/help', undefined, { csrf: false });
+  assert.match(h.data, /How can we help/);
+  assert.match((await anon.req('GET', '/help/forgot-password', undefined, { csrf: false })).data, /Lost your phone/);
+  assert.equal((await anon.req('GET', '/help/nope', undefined, { csrf: false })).status, 404);
+  const res = await fetch(`${BASE}/help/contact`, { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded', 'X-Forwarded-For': anon.ip },
+    body: new URLSearchParams({ email: `helpme${run}@example.com`, topic: 'Billing', message: 'Where is my <b>invoice</b>?' }) });
+  assert.equal(res.status, 200); assert.match(await res.text(), /Your reference is <b>#\d+/);
+  assert.equal((await new Client().get('/api/super/tickets')).status, 401);
+});

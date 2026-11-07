@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { api } from '../../api.js';
 import { Icon } from '../../icons.jsx';
 import { useToast } from '../Toast.jsx';
@@ -9,6 +9,30 @@ const ACTIONS = [
   ['cancel-recovery', 'Cancel pending recovery'], ['suspend', 'Suspend account'], ['unsuspend', 'Unsuspend account'],
 ];
 const when = (t) => (t ? fmtDate(new Date(t).toISOString()) : '');
+
+function Tickets() {
+  const toast = useToast();
+  const [list, setList] = useState(null);
+  const load = () => api.get('/api/super/tickets').then(setList).catch(() => setList([]));
+  useEffect(() => { load(); }, []);
+  if (!list) return null;
+  return (
+    <>
+      <h3>Support requests ({list.length} open)</h3>
+      {list.length === 0 && <p className="muted small">None. New requests from the help centre also arrive in your support inbox.</p>}
+      {list.map((t) => (
+        <div key={t.id} className="card" style={{ marginBottom: 8 }}>
+          <b>#{t.id} {t.topic}</b> <span className="muted small">{t.email}{t.account ? ` · account ${t.account}` : ''} · {when(t.at)}</span>
+          <div className="small" style={{ whiteSpace: 'pre-wrap' }}>{t.message}</div>
+          <div className="actions" style={{ display: 'flex', gap: 6 }}>
+            <a className="btn sm" href={`mailto:${t.email}?subject=${encodeURIComponent(`Re: Support #${t.id}`)}`}>Reply</a>
+            <button className="btn sm" onClick={async () => { try { await api.post(`/api/super/tickets/${t.id}/close`); load(); } catch (e) { toast(e.message, { error: true }); } }}>Close</button>
+          </div>
+        </div>
+      ))}
+    </>
+  );
+}
 
 export default function Support() {
   const toast = useToast();
@@ -26,6 +50,8 @@ export default function Support() {
   };
   return (
     <div className="settings-section">
+      <Tickets />
+      <h3>Look up an account</h3>
       <p className="muted small">Look up any account to help someone. Every lookup and action is recorded in the audit log, and the person is emailed when their security settings change. Always confirm who you're talking to before changing anything.</p>
       <form className="pick-time" onSubmit={lookup}>
         <input type="email" placeholder="name@domain.com" value={email} onChange={(e) => setEmail(e.target.value)} />

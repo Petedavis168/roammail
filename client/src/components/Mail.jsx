@@ -315,6 +315,7 @@ export default function Mail({ me, refreshMe, theme, setTheme, onLogout }) {
             </button>
           )}
           <button className="icon-btn on-dark" onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')} title="Toggle dark mode"><Icon name={theme === 'dark' ? 'sun' : 'moon'} /></button>
+          <a className="icon-btn on-dark" href="/help" target="_blank" rel="noreferrer" title="Help" aria-label="Help" style={{ fontWeight: 700, textDecoration: 'none' }}>?</a>
           <button className="icon-btn on-dark" onClick={() => setShowSettings(true)} title="Settings"><Icon name="settings" /></button>
           <button className="icon-btn on-dark" onClick={() => setShowHelp(true)} title="Keyboard shortcuts (?)">?</button>
           <div className="user-menu-wrap">
