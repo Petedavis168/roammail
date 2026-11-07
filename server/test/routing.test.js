@@ -2,6 +2,7 @@
 //   BASE_URL=http://localhost:3000 node --test test/routing.test.js
 //   HOSTS_BASE=http://127.0.0.1:3003 (an instance started with ROOT_DOMAIN=roammail.test) also tests host routing.
 import { test } from 'node:test';
+import { finishSetup } from './setup-helper.js';
 import assert from 'node:assert/strict';
 import crypto from 'node:crypto';
 import http from 'node:http';
@@ -20,6 +21,7 @@ class Browser {
     const res = await fetch(BASE + path, { method, headers: h, body: body === undefined ? undefined : JSON.stringify(body), redirect: 'manual' });
     for (const c of res.headers.getSetCookie?.() || []) if (c.startsWith('mc_session=')) this.cookie = c.split(';')[0].endsWith('=') ? '' : c.split(';')[0];
     const text = await res.text(); let data; try { data = JSON.parse(text); } catch { data = text; }
+    if (this.autoSetup !== false && method === 'POST' && /^\/api\/(login|login\/2fa|signup|password\/reset)$/.test(path) && res.status === 200 && data?.setupRequired?.length) this.password = await finishSetup((m, p, b) => this.req(m, p, b), data, body?.password);
     return { status: res.status, data, location: res.headers.get('location'), headers: res.headers };
   }
 }

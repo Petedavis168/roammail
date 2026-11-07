@@ -1,3 +1,4 @@
+import { ensureSetupRow, setupState, markChosen } from './setup.js';
 import { ensureMailboxId, inboxUrl } from './mailboxids.js';
 // Sign-in security: 2-step verification (TOTP), lockout, sign-in history,
 // password change / reset, sign out everywhere.
@@ -102,7 +103,8 @@ publicSecurity.post('/login', loginLimiter, wrap(async (req, res) => {
   await setSession(res, { email, password, name: '' }, req);
   await newDeviceCheck(req, email, password);
   const mailboxId = await ensureMailboxId(email);
-  res.json({ email, mailboxId, redirect: inboxUrl(mailboxId) });
+  await ensureSetupRow(email);
+  res.json({ email, mailboxId, redirect: inboxUrl(mailboxId), setupRequired: (await setupState(email)).setupRequired });
 }));
 
 publicSecurity.post('/login/2fa', loginLimiter, wrap(async (req, res) => {
@@ -137,7 +139,8 @@ publicSecurity.post('/login/2fa', loginLimiter, wrap(async (req, res) => {
   await setSession(res, { email: t.email, password: t.password, name: '' }, req);
   await newDeviceCheck(req, t.email, t.password);
   const mailboxId = await ensureMailboxId(t.email);
-  res.json({ email: t.email, mailboxId, redirect: inboxUrl(mailboxId) });
+  await ensureSetupRow(t.email);
+  res.json({ email: t.email, mailboxId, redirect: inboxUrl(mailboxId), setupRequired: (await setupState(t.email)).setupRequired });
 }));
 
 const resetLimiter = rateLimit({ windowMs: 60 * 60 * 1000, limit: 10 });
@@ -169,6 +172,7 @@ publicSecurity.post('/password/reset', resetLimiter, wrap(async (req, res) => {
   await assertNotBreached(req.body.password, row.email);
   await mailcow.editMailbox(row.email, { password: req.body.password, password2: req.body.password });
   await q.run('DELETE FROM password_resets WHERE email = ?', row.email);
+  await markChosen(row.email);
   await q.run('UPDATE user_security SET failed_count = 0, locked_until = 0 WHERE email = ?', row.email);
   await bumpEpoch(row.email);
   if (row.kind === 'invite') {
@@ -177,7 +181,7 @@ publicSecurity.post('/password/reset', resetLimiter, wrap(async (req, res) => {
     await audit(row.email, null, 'security.invite_accepted', { ip: req.ip });
     await setSession(res, { email: row.email, password: req.body.password, name: '' }, req);
     const mailboxId = await ensureMailboxId(row.email);
-    return res.json({ ok: true, email: row.email, mailboxId, redirect: inboxUrl(mailboxId) });
+    return res.json({ ok: true, email: row.email, mailboxId, redirect: inboxUrl(mailboxId), setupRequired: (await setupState(row.email)).setupRequired });
   }
   await audit(row.email, null, 'security.password_reset', { ip: req.ip });
   res.json({ ok: true, email: row.email });
@@ -290,6 +294,7 @@ securityApi.post('/security/password', wrap(async (req, res) => {
   await assertNotBreached(next, req.user.email);
   if (next === current) throw fail(400, 'Choose a password you haven\'t used here before');
   await mailcow.editMailbox(req.user.email, { password: next, password2: next });
+  await markChosen(req.user.email);
   await closeClient(req.user.sid);
   await bumpEpoch(req.user.email, req.user.sid);  // signs out every other device
   await updateSessionPassword(req.user.sid, next);

@@ -68,6 +68,9 @@ jobs:
       - name: Push notification tests
         run: npm run test:push --prefix server
 
+      - name: First sign-in setup tests
+        run: npm run test:setup --prefix server
+
       - name: Browser injection tests
         working-directory: server
         run: |

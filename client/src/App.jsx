@@ -5,7 +5,7 @@ import { parseLocation, setHosts, loginHref } from './nav.js';
 import Login from './components/Login.jsx';
 import Mail from './components/Mail.jsx';
 import { ToastProvider } from './components/Toast.jsx';
-import { TwoFactorGate } from './components/TwoFactorSetup.jsx';
+import SetupWizard from './components/SetupWizard.jsx';
 
 const route = parseLocation();
 if (route.id) setMailboxId(route.id);
@@ -13,6 +13,8 @@ if (route.id) setMailboxId(route.id);
 export default function App() {
   const [me, setMe] = useState(undefined);
   const [hostsReady, setHostsReady] = useState(false);
+  // keep the wizard open through its optional steps once it started
+  const [wizardOpen, setWizardOpen] = useState(true);
   useEffect(() => { api.signupConfig().then(setHosts).catch(() => {}).finally(() => setHostsReady(true)); }, []);
   const [theme, setTheme] = useState(() => localStorage.getItem('theme') || (matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'));
 
@@ -60,8 +62,8 @@ export default function App() {
   if (me === undefined || !hostsReady || (route.id && !me)) return <div className="splash"><div className="spinner" /></div>;
   return (
     <ToastProvider>
-      {me && me.twoFactor?.requiredByOrg && !me.twoFactor?.enabled ? (
-        <TwoFactorGate me={me} reason="Your organization requires 2-step verification for everyone." onDone={refreshMe} onLogout={() => signOut(false)} />
+      {me && (me.setup?.setupRequired?.length || (me.setup && !me.setup.onboarded && wizardOpen)) ? (
+        <SetupWizard me={me} onDone={() => { setWizardOpen(false); refreshMe(); }} onLogout={() => signOut(false)} />
       ) : me ? (
         <Mail me={me} route={route} refreshMe={refreshMe} theme={theme} setTheme={setTheme} onLogout={signOut} />
       ) : (

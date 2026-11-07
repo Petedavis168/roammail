@@ -13,7 +13,8 @@
     "test:workspace": "node --disable-warning=ExperimentalWarning --test test/workspace.test.js",
     "test:outbound": "node --test test/outbound.test.js",
     "test:push": "node --test test/push.test.js",
-    "test:routing": "node --test test/routing.test.js"
+    "test:routing": "node --test test/routing.test.js",
+    "test:setup": "node --test test/setup.test.js"
   },
   "keywords": [],
   "author": "",

@@ -767,3 +767,11 @@ table.kv td { padding: 4px 0; }
 /* Brand kit: headings in Georgia */
 h1, h2, h3, .g-card h1, .modal-head h2, .admin-main h1, .settings-section h3 { font-family: var(--heading-font); font-weight: 600; }
 .g-brand-foot { color: var(--slate); font-size: 12px; text-align: center; margin-top: 8px; }
+.wizard { max-width: 460px; text-align: left; }
+.wizard h1 { font-size: 22px; margin: 10px 0 6px; }
+.wiz-steps { display: flex; gap: 6px; margin: 12px 0 4px; }
+.wiz-steps span { flex: 1; height: 4px; border-radius: 2px; background: var(--border); }
+.wiz-steps span.on { background: var(--brand); }
+.wizard .meter { height: 4px; background: var(--border); border-radius: 2px; margin: 6px 0 2px; overflow: hidden; }
+.wizard .meter div { height: 100%; background: var(--brand); transition: width .15s; }
+.wiz-extras { padding-left: 18px; line-height: 1.9; }

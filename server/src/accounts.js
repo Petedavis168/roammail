@@ -1,3 +1,4 @@
+import { markChosen, markTemporary, setupState } from './setup.js';
 import { renameMailboxId, ensureMailboxId, inboxUrl } from './mailboxids.js';
 import { syncArchive } from './archive.js';
 import { applySendingRoute } from './outbound.js';
@@ -119,6 +120,7 @@ publicAccounts.post('/signup', rateLimit({ windowMs: 60 * 60_000, limit: 10 }), 
   const email = `${local}@${config.signup.domain}`;
   if (!(await addressAvailable(local))) throw fail(409, 'That address is taken. Try one of the suggestions.');
   await mailcow.addMailbox({ localPart: local, domain: config.signup.domain, name, password, quotaMb: config.signup.quotaMb });
+  await markChosen(`${local}@${config.signup.domain}`);
   const rl = /^(\d+)\/([smhd])$/.exec(config.signup.rateLimit);
   if (rl) await mailcow.setMailboxRateLimit(email, rl[1], rl[2]).catch((e) => console.warn('rate limit not set:', e.message));
   await q.run('INSERT INTO signups(email, ip, recovery_email, terms_version) VALUES(?, ?, ?, ?) ON CONFLICT(email) DO UPDATE SET ip = excluded.ip, recovery_email = excluded.recovery_email, terms_version = excluded.terms_version, created_at = excluded.created_at', email, req.ip, String(req.body.recoveryEmail || '').slice(0, 200) || null, config.legal.termsVersion);
@@ -128,7 +130,7 @@ publicAccounts.post('/signup', rateLimit({ windowMs: 60 * 60_000, limit: 10 }), 
   deliverWelcome({ email, password, name }).catch(() => {});
   await setSession(res, { email, password, name }, req);
   const mailboxId = await ensureMailboxId(email, { name });
-  res.json({ email, mailboxId, redirect: inboxUrl(mailboxId) });
+  res.json({ email, mailboxId, redirect: inboxUrl(mailboxId), setupRequired: (await setupState(email)).setupRequired });
 }));
 
 // =================================================================== helpers
@@ -350,6 +352,7 @@ async function createUser(req, d, body) {
   const quotaMb = Math.max(256, Math.min(Number(body.quotaMb) || config.business.defaultQuotaMb, config.business.maxQuotaMb));
   const email = `${local}@${d.domain}`;
   await mailcow.addMailbox({ localPart: local, domain: d.domain, name: String(body.name || '').slice(0, 100), password: body.password, quotaMb });
+  await markTemporary(`${local}@${d.domain}`, body.inviteEmail ? 'invite' : 'admin');
   await q.run('INSERT INTO members(email, org_id, role) VALUES(?, ?, ?) ON CONFLICT(email, org_id) DO UPDATE SET role = excluded.role', email, d.org_id, body.admin ? 'admin' : 'user');
   await saveProfile(email, { name: body.name || '', title: body.title, department: body.department, phone: body.phone, mobile: body.mobile });
   if (body.welcome !== false) deliverWelcome({ email, password: body.password, name: body.name, company: d.org_name }).catch(() => {});
@@ -494,7 +497,7 @@ accounts.patch('/admin/users', wrap(async (req, res) => {
   const d = await requireDomainAdmin(req, email.split('@')[1]);
   const attr = {};
   if (req.body.name !== undefined) { attr.name = String(req.body.name).slice(0, 100); await renameMailboxId(email, attr.name); }
-  if (req.body.password) { checkPassword(req.body.password); attr.password = req.body.password; attr.password2 = req.body.password; }
+  if (req.body.password) { checkPassword(req.body.password); attr.password = req.body.password; attr.password2 = req.body.password; await markTemporary(email, 'admin-reset'); }
   if (req.body.quotaMb !== undefined) attr.quota = Math.max(256, Math.min(Number(req.body.quotaMb) || config.business.defaultQuotaMb, config.business.maxQuotaMb));
   if (req.body.active !== undefined) {
     if (email === req.user.email && !req.body.active) throw fail(400, 'You can\'t suspend yourself');

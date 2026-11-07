@@ -179,6 +179,11 @@ CREATE TABLE IF NOT EXISTS mailbox_ids (
 CREATE INDEX IF NOT EXISTS mailbox_ids_email ON mailbox_ids(email, status);
 -- Stable user id, separate from the address and from the public mailbox URL ID (ready for single sign-on)
 CREATE TABLE IF NOT EXISTS users (id TEXT PRIMARY KEY, email TEXT NOT NULL UNIQUE, created_at INTEGER NOT NULL);
+-- First sign-in setup state (temporary password must be replaced; 2-step verification reminders)
+CREATE TABLE IF NOT EXISTS account_setup (
+  email TEXT PRIMARY KEY, must_change_password INTEGER NOT NULL DEFAULT 0, twofa_snoozes INTEGER NOT NULL DEFAULT 0,
+  twofa_snooze_until INTEGER NOT NULL DEFAULT 0, onboarded_at INTEGER, source TEXT, created_at INTEGER NOT NULL
+);
 CREATE TABLE IF NOT EXISTS send_counts (email TEXT NOT NULL, day TEXT NOT NULL, count INTEGER NOT NULL DEFAULT 0, PRIMARY KEY (email, day));
 `;
 

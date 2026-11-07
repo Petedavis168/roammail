@@ -9,6 +9,7 @@ import { clearSession, requireAuth, onRevoke } from './session.js';
 import { createCache } from './cache.js';
 import { sharedMailboxContext } from './sharedboxes.js';
 import { ensureMailboxId } from './mailboxids.js';
+import { setupState } from './setup.js';
 import { count, gauge } from './ops.js';
 import { getClient, closeClient, withMailbox, specialFolder, makeClient, userTransport } from './imap.js';
 import { parseQuery } from './search.js';
@@ -113,6 +114,7 @@ api.post('/logout', wrap(async (req, res) => {
 api.get('/me', async (req, res) => res.json({
   email: req.user.email, name: req.user.name, ...await rolesFor(req.user.email),
   mailboxId: await ensureMailboxId(req.user.email, { name: req.user.name || undefined }),
+  setup: await setupState(req.user.email),
   // every mailbox signed in on this browser (switch = change the ID in the URL)
   accounts: await Promise.all((req.accounts || []).map(async (a) => ({ email: a.email, name: a.name, mailboxId: await ensureMailboxId(a.email) }))),
   // set when the URL points at a shared mailbox this person can open

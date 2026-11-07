@@ -29,6 +29,7 @@ test('push: new mail triggers an encrypted web push; sign-out everywhere stops i
   try {
     const s = await call('POST', '/api/signup', { name: 'Pusher', username: `push${Date.now() % 1e6}`, password: PW, acceptTerms: true });
     assert.equal(s.status, 200);
+    await call('POST', '/api/setup/2fa/remind', {}); await call('POST', '/api/setup/step', { step: 'done' });
     await sleep(1300);
     const { publicKey } = (await call('GET', '/api/push/key')).data;
     assert.ok(publicKey.length > 80);
