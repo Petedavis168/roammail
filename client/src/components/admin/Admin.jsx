@@ -8,6 +8,7 @@ import { avatarColor, initials, fmtDate } from '../../util.js';
 import OrgSignature from './Signature.jsx';
 import SpamAdmin from './SpamAdmin.jsx';
 import Groups from './Groups.jsx';
+import Billing, { PlanPicker } from './Billing.jsx';
 import TwoFactorSetup from '../TwoFactorSetup.jsx';
 
 const genPassword = () => {
@@ -87,7 +88,7 @@ function Users({ org, domains }) {
         ))}
       </div>
       <datalist id="org-departments">{[...new Set((users || []).map((u) => u.department).filter(Boolean))].map((d) => <option key={d} value={d} />)}</datalist>
-      {adding && <AddUser domain={domain} onClose={() => setAdding(false)} onCreated={(c) => { setAdding(false); setCreated(c); load(); }} />}
+      {adding && <AddUser domain={domain} orgId={org.id} onClose={() => setAdding(false)} onCreated={(c) => { setAdding(false); setCreated(c); load(); }} />}
       {edit && <EditUser u={edit} onClose={() => setEdit(null)} onSave={async (patch) => { await update(edit.email, patch, 'User updated'); setEdit(null); }} />}
       {created && (
         <Modal title={created.reset ? 'New password' : 'User created'} onClose={() => setCreated(null)}>
@@ -133,14 +134,24 @@ function ProfileFields({ f, setF }) {
   );
 }
 
-function AddUser({ domain, onClose, onCreated }) {
+function AddUser({ domain, orgId, onClose, onCreated }) {
+  const [needPlan, setNeedPlan] = useState(false);
   const [f, setF] = useState({ name: '', localPart: '', password: genPassword(), quotaMb: 5120, admin: false, title: '', department: '', phone: '', mobile: '', welcome: true });
   const [err, setErr] = useState('');
   const [busy, setBusy] = useState(false);
   const submit = async (e) => {
     e.preventDefault(); setErr(''); setBusy(true);
-    try { const r = await api.post('/api/admin/users', { ...f, domain }); onCreated({ email: r.email, password: f.password, setup: r.setup }); }
-    catch (e2) { setErr(e2.message); } finally { setBusy(false); }
+    const create = async () => { const r = await api.post('/api/admin/users', { ...f, domain }); onCreated({ email: r.email, password: f.password, setup: r.setup }); };
+    try { await create(); }
+    catch (e2) {
+      if (e2.status === 402 && e2.code === 'seat_required') {
+        const cost = e2.message;
+        if (confirm(`${cost}\n\nThis adds one user to your plan. You'll be charged the prorated amount for the rest of this billing period now, then the normal price each period. Continue?`)) {
+          try { await api.post(`/api/billing/${orgId}/seats`); await create(); } catch (e3) { setErr(e3.message); }
+        }
+      } else if (e2.status === 402) setNeedPlan(true);
+      else setErr(e2.message);
+    } finally { setBusy(false); }
   };
   return (
     <Modal title="Add a user" onClose={onClose}>
@@ -156,7 +167,8 @@ function AddUser({ domain, onClose, onCreated }) {
         <label className="check"><input type="checkbox" checked={f.admin} onChange={(e) => setF({ ...f, admin: e.target.checked })} /> Make this person an admin (can manage users &amp; domains)</label>
         <label className="check"><input type="checkbox" checked={f.welcome} onChange={(e) => setF({ ...f, welcome: e.target.checked })} /> Put a welcome &amp; getting-started email in their inbox</label>
         {err && <div className="form-error">{err}</div>}
-        <div className="step-actions"><button type="button" className="btn" onClick={onClose}>Cancel</button><button className="btn primary" disabled={busy}>{busy ? 'Creating…' : 'Create user'}</button></div>
+        {needPlan ? <PlanPicker orgId={orgId} adding={1} title="Choose a plan to add this person" note="You've used your free mailbox. After payment, come back and click Create user again." onCancel={() => setNeedPlan(false)} />
+          : <div className="step-actions"><button type="button" className="btn" onClick={onClose}>Cancel</button><button className="btn primary" disabled={busy}>{busy ? 'Creating…' : 'Create user'}</button></div>}
       </form>
     </Modal>
   );
@@ -301,6 +313,29 @@ function Activity({ org }) {
 }
 
 // ------------------------------------------------------------------ super admin
+function FriendlyCodes() {
+  const toast = useToast();
+  const [codes, setCodes] = useState([]);
+  const [note, setNote] = useState('');
+  const [fresh, setFresh] = useState(null);
+  const load = () => api.get('/api/super/friendly-codes').then(setCodes).catch(() => {});
+  useEffect(() => { load(); }, []);
+  return (
+    <div className="card">
+      <h3>Friendly Web Services customer codes</h3>
+      <p className="muted small">Give a code to a Friendly Web Services customer. When they enter it during business setup, their first mailbox is free. Each code works once.</p>
+      <form className="pick-time" onSubmit={async (e) => { e.preventDefault(); try { const r = await api.post('/api/super/friendly-codes', { note }); setFresh(r.code); setNote(''); load(); } catch (err) { toast(err.message, { error: true }); } }}>
+        <input placeholder="Who is it for? (e.g. Acme Plumbing, invoice 1043)" value={note} onChange={(e) => setNote(e.target.value)} />
+        <button className="btn primary">Create code</button>
+      </form>
+      {fresh && <div className="callout good"><Icon name="check" /><div>New code: <b className="mono">{fresh}</b><br /><small>Copy it now. For security only a fingerprint is stored, so it can't be shown again.</small></div><Copy text={fresh} /></div>}
+      <div className="table">
+        {codes.map((c, i) => <div className="tr two" key={i}><span className="mono">…{c.hint} <small className="muted">{c.note}</small></span><span className="small">{c.used_at ? `Used by ${c.org || 'a business'}` : 'Not used yet'}</span><span /></div>)}
+      </div>
+    </div>
+  );
+}
+
 function Platform() {
   const toast = useToast();
   const [d, setD] = useState(null);
@@ -322,6 +357,7 @@ function Platform() {
           Allow anyone to create a free account {d.settings.signupDomain ? <>on <b>@{d.settings.signupDomain}</b></> : <span className="bad"> (SIGNUP_DOMAIN not configured)</span>}</label>
         <p className="muted small">Mail server: <b>{d.settings.mailHostname}</b> · Route 53 auto-DNS: <b>{d.settings.route53 ? 'on' : 'off'}</b></p>
       </div>
+      <FriendlyCodes />
       <h3>Businesses</h3>
       <div className="table">
         <div className="tr th"><span>Business</span><span>Domains</span><span>User limit</span><span>Status</span><span /></div>
@@ -330,7 +366,9 @@ function Platform() {
             <span><b>{o.name}</b><small className="muted"> {o.owner_email}</small></span>
             <span className="small">{o.domains.map((x) => `${x.domain}${x.status === 'pending' ? ' (pending)' : ''}`).join(', ') || '—'}</span>
             <span><input type="number" min="1" defaultValue={o.max_mailboxes} className="num" onBlur={(e) => Number(e.target.value) !== o.max_mailboxes && patchOrg(o, { maxMailboxes: Number(e.target.value) })} /></span>
-            <span>{o.suspended ? <span className="pill bad">Suspended</span> : <span className="pill ok">Active</span>}</span>
+            <span>{o.suspended ? <span className="pill bad">Suspended</span> : <span className="pill ok">Active</span>}
+              <label className="check small"><input type="checkbox" checked={o.plan === 'friendly'} onChange={async (e) => { await api.patch(`/api/super/orgs/${o.id}/plan`, { plan: e.target.checked ? 'friendly' : 'standard' }); load(); }} /> Friendly</label>
+              <small className="muted">{o.billing_status !== 'none' ? `billing: ${o.billing_status}` : ''}</small></span>
             <span className="actions"><button className="btn sm" onClick={() => confirm(`${o.suspended ? 'Reactivate' : 'Suspend'} ${o.name}?`) && patchOrg(o, { suspended: !o.suspended })}>{o.suspended ? 'Reactivate' : 'Suspend'}</button></span>
           </div>
         ))}
@@ -390,7 +428,7 @@ export default function Admin({ me, refreshMe, onExit }) {
   }
 
   const tabs = [
-    ...(org ? [['users', 'Users', 'users'], ['groups', 'Groups', 'users'], ['signature', 'Signature', 'pen'], ['spam', 'Spam filter', 'junk'], ['orgsecurity', 'Security', 'lock'], ['aliases', 'Aliases', 'mail'], ['domains', 'Domains', 'globe'], ['activity', 'Activity', 'refresh']] : []),
+    ...(org ? [['users', 'Users', 'users'], ['groups', 'Groups', 'users'], ['signature', 'Signature', 'pen'], ['spam', 'Spam filter', 'junk'], ['orgsecurity', 'Security', 'lock'], ['billing', 'Billing', 'tag'], ['aliases', 'Aliases', 'mail'], ['domains', 'Domains', 'globe'], ['activity', 'Activity', 'refresh']] : []),
     ...(me.superAdmin ? [['platform', 'Platform (super-admin)', 'shield'], ['new', 'New business', 'plus']] : []),
   ];
   const current = tabs.some((t) => t[0] === tab) ? tab : tabs[0][0];
@@ -413,6 +451,7 @@ export default function Admin({ me, refreshMe, onExit }) {
         {current === 'users' && org && <Users key={org.id} org={org} domains={org.domains} />}
         {current === 'signature' && org && <SignatureTab key={org.id} org={org} />}
         {current === 'orgsecurity' && org && <OrgSecurity key={org.id} org={org} reload={load} />}
+        {current === 'billing' && org && <Billing key={org.id} org={org} />}
         {current === 'groups' && org && <Groups key={org.id} org={org} />}
         {current === 'spam' && org && <SpamAdmin key={org.id} org={org} />}
         {current === 'aliases' && org && <Aliases key={org.id} domains={org.domains} />}

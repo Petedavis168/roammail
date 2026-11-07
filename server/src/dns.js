@@ -30,7 +30,12 @@ export function requiredRecords(domain, dkim) {
   return recs;
 }
 
+// Local development only: never honored in production (the Docker image sets NODE_ENV=production)
+const DEV_SKIP = process.env.DEV_SKIP_DNS_VERIFY === 'true' && process.env.NODE_ENV !== 'production';
+if (DEV_SKIP) console.warn('WARNING: DEV_SKIP_DNS_VERIFY is on - domain ownership is NOT checked. Never use this in production.');
+
 export async function checkVerification(domain, token) {
+  if (DEV_SKIP) return true;
   return (await txt(domain)).some((v) => v.trim() === `mailcow-verify=${token}`);
 }
 

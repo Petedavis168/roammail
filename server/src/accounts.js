@@ -15,6 +15,7 @@ import { createSetupLink } from './devicesetup.js';
 import { applyDomainSpamDefaults } from './spam.js';
 import { assertNotBreached, topSenders } from './abuse.js';
 import { syncOrgGroups } from './groups.js';
+import { needsPaymentToActivate, seatCheck, shrinkSeats, onPaid, startBillingChecks, orgBilling } from './billing.js';
 
 const wrap = (fn) => (req, res, next) => Promise.resolve(fn(req, res, next)).catch(next);
 const fail = (status, message) => Object.assign(new Error(message), { status });
@@ -51,11 +52,42 @@ async function checkCaptcha(token, ip) {
   if (!r.success) throw fail(400, 'Please complete the "I am human" check');
 }
 
+/** Is local@SIGNUP_DOMAIN free? Checks mailboxes, aliases/groups, and addresses of deleted accounts (never reused). */
+async function addressAvailable(local) {
+  if (!LOCAL_RE.test(local) || RESERVED.has(local) || local.length < 3) return false;
+  const email = `${local}@${config.signup.domain}`;
+  if (q.get('SELECT 1 FROM signups WHERE email = ?', email)) return false;
+  if (q.get('SELECT 1 FROM groups WHERE address = ?', email)) return false;
+  if (await mailcow.getMailbox(email)) return false;
+  if ((await aliasesCached()).has(email)) return false;
+  return true;
+}
+let aliasCache = { at: 0, set: new Set() };
+async function aliasesCached() {
+  if (Date.now() - aliasCache.at > 60_000) {
+    aliasCache = { at: Date.now(), set: new Set((await mailcow.listAliases(config.signup.domain).catch(() => [])).map((a) => a.address.toLowerCase())) };
+  }
+  return aliasCache.set;
+}
+const usernameHint = (local) => (local.length < 3 ? 'Use at least 3 characters' : !LOCAL_RE.test(local) ? 'Use only letters, numbers, dots, dashes and underscores' : RESERVED.has(local) ? 'That name is reserved' : null);
+
 publicAccounts.get('/signup/check', rateLimit({ windowMs: 60_000, limit: 60 }), wrap(async (req, res) => {
-  const local = String(req.query.username || '').toLowerCase();
-  if (!LOCAL_RE.test(local) || RESERVED.has(local)) return res.json({ available: false });
-  const exists = await mailcow.getMailbox(`${local}@${config.signup.domain}`);
-  res.json({ available: !exists });
+  const local = String(req.query.username || '').toLowerCase().trim();
+  const hint = usernameHint(local);
+  if (hint) return res.json({ available: false, reason: hint });
+  res.json({ available: await addressAvailable(local) });
+}));
+
+// Gmail-style suggestions from the person's name
+publicAccounts.get('/signup/suggest', rateLimit({ windowMs: 60_000, limit: 30 }), wrap(async (req, res) => {
+  const norm = (s) => String(s || '').normalize('NFKD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/[^a-z0-9]/g, '').slice(0, 20);
+  const f = norm(req.query.first); const l = norm(req.query.last);
+  const year = new Date().getFullYear();
+  const ideas = [...new Set([f && l && `${f}.${l}`, f && l && `${f}${l}`, f && l && `${f[0]}${l}`, f && l && `${f}.${l[0]}`, f && l && `${f}${l}${year % 100}`,
+    f && `${f}${l ? `.${l}` : ''}${Math.floor(10 + Math.random() * 89)}`, f && l && `${l}.${f}`, f && `${f}${year}`].filter(Boolean))];
+  const out = [];
+  for (const i of ideas) { if (out.length >= 3) break; if (await addressAvailable(i)) out.push(i); }
+  res.json({ domain: config.signup.domain, suggestions: out });
 }));
 
 publicAccounts.post('/signup', rateLimit({ windowMs: 60 * 60_000, limit: 10 }), wrap(async (req, res) => {
@@ -65,6 +97,7 @@ publicAccounts.post('/signup', rateLimit({ windowMs: 60 * 60_000, limit: 10 }), 
   const password = String(req.body.password || '');
   checkLocal(local);
   if (RESERVED.has(local)) throw fail(400, 'That username is reserved');
+  if (local.length < 3) throw fail(400, 'Use at least 3 characters for your address');
   if (!name) throw fail(400, 'Please enter your name');
   checkPassword(password);
   const today = q.get("SELECT COUNT(*) AS n FROM signups WHERE ip = ? AND created_at > datetime('now', '-1 day')", req.ip).n;
@@ -76,7 +109,7 @@ publicAccounts.post('/signup', rateLimit({ windowMs: 60 * 60_000, limit: 10 }), 
   await checkCaptcha(req.body.captcha, req.ip);
 
   const email = `${local}@${config.signup.domain}`;
-  if (await mailcow.getMailbox(email)) throw fail(409, 'That address is taken');
+  if (!(await addressAvailable(local))) throw fail(409, 'That address is taken. Try one of the suggestions.');
   await mailcow.addMailbox({ localPart: local, domain: config.signup.domain, name, password, quotaMb: config.signup.quotaMb });
   const rl = /^(\d+)\/([smhd])$/.exec(config.signup.rateLimit);
   if (rl) await mailcow.setMailboxRateLimit(email, rl[1], rl[2]).catch((e) => console.warn('rate limit not set:', e.message));
@@ -145,6 +178,17 @@ async function activateDomain(d, actor) {
 
 const dkimOf = (d) => (d.dkim_txt ? { txt: d.dkim_txt, selector: d.dkim_selector || 'dkim' } : null);
 
+onPaid(async (orgId) => {
+  for (const row of q.all("SELECT domain FROM domains WHERE org_id = ? AND status = 'verified'", orgId)) {
+    await activateDomain(orgOf(row.domain), 'billing');
+  }
+});
+export async function suspendOrg(orgId) {
+  q.run('UPDATE orgs SET suspended = 1 WHERE id = ?', orgId);
+  for (const d of q.all("SELECT domain FROM domains WHERE org_id = ? AND status = 'active'", orgId)) await mailcow.editDomain(d.domain, { active: 0 });
+}
+startBillingChecks(suspendOrg);
+
 // =================================================================== domains
 export const accounts = express.Router();
 accounts.use(requireAuth);
@@ -189,6 +233,10 @@ accounts.get('/domains/:domain', wrap(async (req, res) => {
   const superAdmin = rolesFor(req.user.email).superAdmin;
   const base = { domain: d.domain, orgId: d.org_id, orgName: d.org_name, status: d.status, mailHostname: config.mailHostname };
   const route53 = superAdmin && !!(await findZone(d.domain));
+  if (d.status === 'verified') {
+    const b = orgBilling(d.org_id);
+    return res.json({ ...base, route53: false, needsPayment: needsPaymentToActivate(d.org_id), plan: b.plan, records: requiredRecords(d.domain, null) });
+  }
   if (d.status === 'pending') {
     return res.json({ ...base, route53, verify: { ...verifyRecord(d.domain, d.verify_token), ok: await checkVerification(d.domain, d.verify_token) }, records: requiredRecords(d.domain, null) });
   }
@@ -203,6 +251,11 @@ accounts.post('/domains/:domain/verify', wrap(async (req, res) => {
   const skip = req.body?.skipVerification && rolesFor(req.user.email).superAdmin;
   if (!skip && !(await checkVerification(d.domain, d.verify_token))) {
     return res.json({ ok: false, error: 'We can\'t see the verification TXT record yet. DNS changes can take a few minutes (sometimes up to an hour) to appear.' });
+  }
+  if (needsPaymentToActivate(d.org_id) && !rolesFor(req.user.email).superAdmin) {
+    q.run("UPDATE domains SET status = 'verified', verified_at = datetime('now') WHERE domain = ?", d.domain);
+    audit(req.user.email, d.org_id, 'domain.verified', { domain: d.domain });
+    return res.json({ ok: true, status: 'verified', needsPayment: true });
   }
   await activateDomain(d, req.user.email);
   res.json({ ok: true, status: 'active' });
@@ -284,6 +337,11 @@ accounts.post('/admin/users', wrap(async (req, res) => {
   checkPassword(req.body.password);
   await assertNotBreached(req.body.password, `${local}@x`);
   if ((await orgMailboxCount(d.org_id)) >= d.max_mailboxes) throw fail(400, `Your plan allows ${d.max_mailboxes} users`);
+  const seat = await seatCheck(d.org_id);
+  if (!seat.ok) {
+    return res.status(402).json({ error: seat.hasSubscription ? 'Adding this person needs one more paid user.' : 'Choose a plan to add this person.',
+      code: seat.hasSubscription ? 'seat_required' : 'checkout_required', perUser: seat.perUser, interval: seat.interval, orgId: d.org_id });
+  }
   const quotaMb = Math.max(256, Math.min(Number(req.body.quotaMb) || config.business.defaultQuotaMb, config.business.maxQuotaMb));
   const email = `${local}@${d.domain}`;
   await mailcow.addMailbox({ localPart: local, domain: d.domain, name: String(req.body.name || '').slice(0, 100), password: req.body.password, quotaMb });
@@ -333,6 +391,7 @@ accounts.delete('/admin/users', wrap(async (req, res) => {
   q.run('DELETE FROM members WHERE email = ? AND org_id = ?', email, d.org_id);
   deleteUserData(email);
   revokeSessions(email);
+  shrinkSeats(d.org_id).catch(() => {});
   syncOrgGroups(d.org_id).catch(() => {});
   // remove the person from static groups too
   for (const g of q.all("SELECT * FROM groups WHERE org_id = ? AND kind = 'static'", d.org_id)) {

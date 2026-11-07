@@ -109,6 +109,16 @@ CREATE TABLE IF NOT EXISTS departments (
   name TEXT NOT NULL,
   PRIMARY KEY (org_id, name)
 );
+CREATE TABLE IF NOT EXISTS friendly_codes (
+  code_hash TEXT PRIMARY KEY,
+  hint TEXT NOT NULL,                 -- last 4 characters, for display
+  note TEXT,
+  created_by TEXT, created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  used_by_org INTEGER, used_at TEXT
+);
+CREATE TABLE IF NOT EXISTS billing_events (
+  id TEXT PRIMARY KEY, type TEXT, org_id INTEGER, at TEXT NOT NULL DEFAULT (datetime('now'))
+);
 CREATE TABLE IF NOT EXISTS profiles (
   email TEXT PRIMARY KEY,
   name TEXT, title TEXT, department TEXT, phone TEXT, mobile TEXT,
@@ -135,7 +145,10 @@ CREATE TABLE IF NOT EXISTS audit (
 `);
 
 // Migrations for columns added after first release
-for (const [table, col, def] of [['orgs', 'require_2fa', 'INTEGER NOT NULL DEFAULT 0'], ['orgs', 'allow_external_forward', 'INTEGER NOT NULL DEFAULT 0'], ['signups', 'terms_version', 'TEXT']]) {
+for (const [table, col, def] of [['orgs', 'require_2fa', 'INTEGER NOT NULL DEFAULT 0'], ['orgs', 'allow_external_forward', 'INTEGER NOT NULL DEFAULT 0'], ['signups', 'terms_version', 'TEXT'],
+  ['orgs', 'plan', "TEXT NOT NULL DEFAULT 'standard'"], ['orgs', 'billing_interval', 'TEXT'], ['orgs', 'stripe_customer', 'TEXT'],
+  ['orgs', 'stripe_subscription', 'TEXT'], ['orgs', 'billing_status', "TEXT NOT NULL DEFAULT 'none'"], ['orgs', 'paid_seats', 'INTEGER NOT NULL DEFAULT 0'],
+  ['orgs', 'canceled_at', 'TEXT']]) {
   const cols = db.prepare(`PRAGMA table_info(${table})`).all().map((c) => c.name);
   if (!cols.includes(col)) db.exec(`ALTER TABLE ${table} ADD COLUMN ${col} ${def}`);
 }

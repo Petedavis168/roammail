@@ -15,6 +15,16 @@ export default function App() {
   }, [theme]);
 
   const refreshMe = () => api.me().then(setMe).catch(() => setMe(null));
+  // Back from Stripe checkout: confirm the payment with the server (which asks Stripe directly)
+  useEffect(() => {
+    const p = new URLSearchParams(location.search);
+    if (p.get('billing') && me) {
+      const sid = p.get('session_id');
+      history.replaceState(null, '', '/');
+      localStorage.setItem('startBusiness', '1');
+      if (sid) api.post('/api/billing/confirm', { sessionId: sid }).then(() => refreshMe()).catch(() => {});
+    }
+  }, [!!me]);
   useEffect(() => {
     refreshMe();
     const onExpired = () => setMe(null);

@@ -97,7 +97,7 @@ legalPages.get('/legal/:doc', (req, res) => {
 <style>body{margin:0;font:16px/1.6 -apple-system,Segoe UI,Roboto,Arial,sans-serif;color:#242424;background:#f5f5f5}
 main{max-width:760px;margin:0 auto;padding:32px 22px 60px;background:#fff;min-height:100vh}h1{font-size:28px;margin:0 0 4px}
 h2{font-size:18px;margin:26px 0 6px}a{color:#244960}nav{font-size:14px;margin-bottom:24px}nav a{margin-right:14px}.muted{color:#666;font-size:14px}</style></head>
-<body><main><a href="/"><img src="/roammail-logo.png" alt="${esc(config.appName)}" style="width:180px;height:auto;margin-bottom:10px"></a><nav><a href="/">← Back to ${esc(config.appName)}</a>${Object.entries(DOCS).map(([k, v]) => `<a href="/legal/${k}">${esc(v)}</a>`).join('')}</nav>
+<body><main><a href="/" style="display:flex;align-items:center;gap:10px;text-decoration:none;color:#0a1e2e;font:700 22px Georgia,serif;margin-bottom:12px"><img src="/roammail-mark.png" alt="" style="width:40px;height:auto">${esc(config.appName)}</a><nav><a href="/">← Back to ${esc(config.appName)}</a>${Object.entries(DOCS).map(([k, v]) => `<a href="/legal/${k}">${esc(v)}</a>`).join('')}</nav>
 <h1>${esc(DOCS[doc])}</h1><p class="muted">${esc(config.legal.company)} · Version ${esc(config.legal.termsVersion)}</p>${content}</main></body></html>`);
 });
 

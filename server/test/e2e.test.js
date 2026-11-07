@@ -41,9 +41,11 @@ test('malicious email content cannot run code or overlay the app (reading, reply
     const remote = [];
     page.on('request', (r) => { if (/tracker\.test|evil\.test/.test(r.url())) remote.push(r.url()); });
     await page.goto(BASE);
-    await page.fill('input[type=email]', `${user}@free.test`);
-    await page.fill('input[type=password]', PW);
-    await page.click('button.primary');
+    // Gmail-style sign-in: email, Next, password, Next
+    await page.fill('input[autocomplete=username]', `${user}@free.test`);
+    await page.click('.g-btn');
+    await page.fill('input[autocomplete=current-password]', PW);
+    await page.click('.g-btn');
     await page.waitForSelector('.row');
     for (const subject of Object.keys(PAYLOADS)) {
       await page.click(`.row:has-text("${subject}")`);

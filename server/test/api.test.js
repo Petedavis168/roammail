@@ -128,6 +128,13 @@ test('quarantine is private to its owner', async () => {
   assert.equal((await b.post('/api/quarantine/release', { ids: [items[0].id] })).status, 404);
 });
 
+test('2FA can be turned on right after sign-up', async () => {
+  const a = new Client(); await signup(a, `z${run}`);
+  const { secret } = (await a.post('/api/security/2fa/setup')).data;
+  assert.equal((await a.post('/api/security/2fa/enable', { code: totpNow(secret) })).status, 200);
+  assert.equal((await a.get('/api/me')).data.twoFactor.enabled, true);
+});
+
 test('sensitive changes need the password', async () => {
   const a = new Client(); await signup(a, `p${run}`);
   assert.equal((await a.req('PUT', '/api/security/recovery-email', { email: 'evil@attacker.test' })).status, 401);
@@ -152,6 +159,7 @@ test('admins must use 2FA; companies can require it; external forwarding off by 
   await owner.post('/api/domains', { domain, orgName: `Co ${run}` });
   assert.equal((await owner.post(`/api/domains/${domain}/verify`, { skipVerification: true })).data.ok, true);
   const orgId = (await owner.get('/api/admin/orgs')).data.find((o) => o.domains.some((d) => d.domain === domain)).id;
+  await owner.req('PATCH', `/api/super/orgs/${orgId}/plan`, { plan: 'friendly' }); // first mailbox free, so no payment is needed here
   assert.equal((await owner.post('/api/admin/users', { domain, localPart: 'emp', name: 'Emp', password: PW, welcome: false })).status, 200);
   await sleep(1500);
   const emp = new Client(); assert.equal((await emp.post('/api/login', { email: `emp@${domain}`, password: PW })).status, 200);

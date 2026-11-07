@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { api } from '../../api.js';
 import { Icon } from '../../icons.jsx';
 import { useToast } from '../Toast.jsx';
+import { PlanPicker, FriendlyCode } from './Billing.jsx';
 
 export function Copy({ text }) {
   const [done, setDone] = useState(false);
@@ -64,6 +65,20 @@ export function DomainStatus({ domain, onActivated, onDone }) {
 
   if (!s) return <div className="list-msg">{msg || <div className="spinner" />}</div>;
 
+  if (s.status === 'verified') {
+    return (
+      <div className="setup-step">
+        <div className="step-head"><span className="step-n done"><Icon name="check" size={16} /></span>
+          <div><h3>{s.domain} is verified. One last step</h3><p className="muted">Choose how you'd like to pay. Your email goes live as soon as payment is done.</p></div></div>
+        <PlanPicker orgId={s.orgId} seats={1} title="Your plan" note="Start with 1 user. You can add more people any time and your bill adjusts automatically." />
+        <details className="help"><summary>Friendly Web Services customer?</summary>
+          <p className="muted small">Enter your customer code and your first mailbox is free.</p>
+          <FriendlyCode orgId={s.orgId} onApplied={async () => { await api.post(`/api/domains/${encodeURIComponent(domain)}/verify`, {}); load(); onActivated?.(); }} />
+        </details>
+      </div>
+    );
+  }
+
   if (s.status === 'pending') {
     return (
       <div className="setup-step">
@@ -121,7 +136,9 @@ function SuperSkip({ onSkip }) {
 }
 
 export function DomainWizard({ orgId, onCreated, onDone, refreshMe }) {
-  const [form, setForm] = useState({ orgName: '', domain: '' });
+  const [form, setForm] = useState({ orgName: '', domain: '', code: '' });
+  const [pricing, setPricing] = useState(null);
+  useEffect(() => { api.get('/api/billing/config').then(setPricing).catch(() => {}); }, []);
   const [created, setCreated] = useState(null);
   const [err, setErr] = useState('');
   const [busy, setBusy] = useState(false);
@@ -130,6 +147,10 @@ export function DomainWizard({ orgId, onCreated, onDone, refreshMe }) {
     e.preventDefault(); setErr(''); setBusy(true);
     try {
       const r = await api.post('/api/domains', { ...form, orgId });
+      if (form.code.trim()) {
+        try { await api.post(`/api/billing/${r.orgId}/friendly`, { code: form.code }); }
+        catch (codeErr) { setErr(`Domain added, but the customer code didn't work: ${codeErr.message} You can enter it again later.`); }
+      }
       setCreated(r.domain);
       await refreshMe?.();
       onCreated?.(r);
@@ -146,6 +167,11 @@ export function DomainWizard({ orgId, onCreated, onDone, refreshMe }) {
           <form onSubmit={submit} className="wizard-form">
             {!orgId && <label>Business name<input required value={form.orgName} onChange={(e) => setForm({ ...form, orgName: e.target.value })} placeholder="Acme Plumbing" /></label>}
             <label>Domain<input required value={form.domain} onChange={(e) => setForm({ ...form, domain: e.target.value })} placeholder="acmeplumbing.com" autoCapitalize="off" /></label>
+            {pricing?.enabled && !orgId && (
+              <label className="wide-field">Friendly Web Services customer code <small className="muted">(optional, makes your first mailbox free)</small>
+                <input value={form.code} onChange={(e) => setForm({ ...form, code: e.target.value.toUpperCase() })} placeholder="FWS-XXXX-XXXX-XXXX" /></label>
+            )}
+            {pricing?.enabled && !orgId && <p className="muted small wide-field">Pricing: {pricing.currency === 'USD' ? '$' : ''}{pricing.perUserMonthly} per user per month, or {pricing.currency === 'USD' ? '$' : ''}{pricing.perUserYearly} per year. Groups and aliases are free. You only pay at the end, after your domain is verified.</p>}
             {err && <div className="form-error">{err}</div>}
             <button className="btn primary" disabled={busy}>{busy ? 'Adding…' : 'Continue'}</button>
           </form>

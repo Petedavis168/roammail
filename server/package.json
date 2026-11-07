@@ -8,7 +8,9 @@
     "start": "node --disable-warning=ExperimentalWarning src/index.js",
     "dev": "node --disable-warning=ExperimentalWarning --watch src/index.js",
     "test:api": "node --disable-warning=ExperimentalWarning --test test/api.test.js",
-    "test:e2e": "node --disable-warning=ExperimentalWarning --test test/e2e.test.js"
+    "test:e2e": "node --disable-warning=ExperimentalWarning --test test/e2e.test.js",
+    "test:billing": "node --disable-warning=ExperimentalWarning --test test/billing.test.js",
+    "test:workspace": "node --disable-warning=ExperimentalWarning --test test/workspace.test.js"
   },
   "keywords": [],
   "author": "",

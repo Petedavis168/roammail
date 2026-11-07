@@ -696,3 +696,63 @@ kbd { font: 12px ui-monospace, monospace; background: var(--panel-2); border: 1p
 .group-editor { width: min(680px, 96vw); }
 .addr-input select { border-radius: 0 6px 6px 0; border-left: 0; }
 .from-row select { border: 0; background: transparent; padding: 4px 2px; font-weight: 600; box-shadow: none !important; }
+
+/* ===================== Gmail-style sign-in ===================== */
+.g-page { min-height: 100%; display: flex; flex-direction: column; align-items: center; justify-content: center; background: #f0f4f9; padding: 24px 12px 12px; }
+[data-theme='dark'] .g-page { background: #131314; }
+.g-card { width: min(450px, 100%); background: var(--panel); border-radius: 28px; padding: 36px 40px 28px; display: flex; flex-direction: column; box-shadow: 0 1px 3px rgba(0,0,0,.06); }
+.g-mark { width: 56px; height: auto; margin-bottom: 14px; }
+.g-card h1 { font-size: 30px; font-weight: 400; margin: 0 0 6px; letter-spacing: -.3px; }
+.g-sub { margin: 0 0 22px; color: var(--muted); font-size: 15px; }
+.g-body { display: flex; flex-direction: column; gap: 14px; min-height: 120px; }
+.g-foot { display: flex; justify-content: space-between; align-items: center; margin-top: 28px; gap: 10px; }
+.g-btn { background: var(--brand); color: #fff; border: 0; border-radius: 20px; padding: 10px 24px; font-weight: 600; font-size: 14px; }
+.g-btn:hover:not(:disabled) { background: var(--brand-dark); box-shadow: 0 1px 3px rgba(0,0,0,.2); }
+.g-link { background: none; border: 0; color: var(--brand); font-weight: 600; font-size: 14px; padding: 8px 6px; border-radius: 6px; }
+.g-link:hover { background: var(--brand-soft); }
+.g-link.left { align-self: flex-start; padding-left: 0; }
+.g-field { position: relative; display: flex; flex-direction: column; }
+.g-field input { height: 54px; font-size: 16px; padding: 18px 14px 6px; border: 1px solid #747775; border-radius: 6px; background: transparent; }
+.g-field input:focus { border: 2px solid var(--brand); padding-left: 13px; box-shadow: none; }
+.g-field span { position: absolute; left: 12px; top: 16px; font-size: 16px; color: var(--muted); padding: 0 4px; pointer-events: none; transition: all .12s; background: var(--panel); }
+.g-field input:focus + span, .g-field input:not(:placeholder-shown) + span { top: -9px; font-size: 12px; color: var(--brand); }
+.g-field.err input { border-color: var(--danger); }
+.g-field.err span { color: var(--danger) !important; }
+.g-err { color: var(--danger); display: flex; align-items: center; gap: 4px; margin-top: 6px; font-size: 13px; }
+.g-hint { color: var(--muted); margin-top: 6px; font-size: 12.5px; }
+.g-check { display: flex; align-items: center; gap: 10px; font-size: 14px; }
+.g-check.top { align-items: flex-start; }
+.g-check.top input { margin-top: 3px; }
+.g-chip { align-self: flex-start; display: inline-flex; align-items: center; gap: 6px; border: 1px solid var(--border); background: var(--panel); border-radius: 16px; padding: 4px 12px; font-size: 14px; font-weight: 500; }
+.g-chip:hover { background: var(--hover); }
+.g-info { background: var(--brand-soft); border-radius: 8px; padding: 10px 12px; font-size: 13.5px; }
+.g-info.warn { background: #fff4ce; color: #5c4400; }
+.g-purpose { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 6px; }
+.g-purpose label, .g-options label { display: flex; flex-direction: column; gap: 2px; border: 1px solid var(--border); border-radius: 10px; padding: 10px 12px; cursor: pointer; }
+.g-purpose label input, .g-options label input { position: absolute; opacity: 0; pointer-events: none; }
+.g-purpose label small { color: var(--muted); font-size: 12px; }
+.g-purpose label.on, .g-options label.on { border: 2px solid var(--brand); padding: 9px 11px; background: var(--brand-soft); }
+.g-options { display: flex; flex-direction: column; gap: 8px; }
+.g-options label { flex-direction: row; align-items: center; justify-content: space-between; font-size: 15px; }
+.g-options label .icon { color: var(--brand); opacity: 0; }
+.g-options label.on .icon { opacity: 1; }
+.g-addr { display: flex; align-items: flex-start; gap: 8px; }
+.g-addr .g-field { flex: 1; }
+.g-domain { padding-top: 16px; color: var(--muted); font-size: 15px; white-space: nowrap; }
+.g-meter { display: flex; align-items: center; gap: 8px; margin-top: -6px; }
+.g-meter div { flex: 1; height: 4px; border-radius: 2px; background: var(--border); position: relative; overflow: hidden; }
+.g-meter div::after { content: ''; position: absolute; inset: 0; width: 20%; background: var(--danger); transition: width .2s; }
+.g-meter.s2 div::after { width: 50%; background: var(--warn); } .g-meter.s3 div::after { width: 75%; background: #498205; } .g-meter.s4 div::after { width: 100%; background: var(--ok); }
+.g-meter small { font-size: 12px; color: var(--muted); width: 64px; }
+.g-review { border: 1px solid var(--border); border-radius: 12px; padding: 12px 14px; font-size: 14px; }
+.g-review ul { margin: 8px 0 0; padding-left: 20px; color: var(--muted); line-height: 1.7; font-size: 13px; }
+.g-legal { width: min(450px, 100%); display: flex; justify-content: space-between; font-size: 12px; color: var(--muted); padding: 14px 8px; flex-wrap: wrap; gap: 8px; }
+.g-legal a { color: var(--muted); margin-left: 14px; text-decoration: none; }
+.g-legal a:hover { text-decoration: underline; }
+@media (max-width: 520px) { .g-page { background: var(--panel); justify-content: flex-start; } .g-card { padding: 24px 6px; box-shadow: none; border-radius: 0; } .g-purpose { grid-template-columns: 1fr; } }
+.plan-picker { display: flex; flex-direction: column; gap: 10px; }
+.plan-picker h3 { margin: 4px 0 0; }
+.plan-picker .radio-card span { font-weight: 600; font-size: 14px; }
+.plan-total { display: flex; justify-content: space-between; align-items: center; padding: 10px 14px; background: var(--panel-2); border-radius: 8px; border: 1px solid var(--border); }
+.plan-total b { font-size: 18px; }
+.wide-field { grid-column: 1 / -1; }

@@ -18,6 +18,9 @@ must do before and after launch. Report vulnerabilities to the address in `/.wel
 | **Display-name spoofing** | Sender display names can't contain addresses or brackets. Readers see warnings for failed SPF/DKIM/DMARC, names that hide a different address, odd Reply-To, and fake "internal" mail, plus an External tag for business users. |
 | **Information leaks** | Unexpected errors return a generic message (details only in server logs). No `X-Powered-By`; Permissions-Policy, Referrer-Policy, COOP, HSTS. |
 | **Infrastructure** | Container runs as non-root, read-only filesystem, all Linux capabilities dropped, no privilege escalation. EC2: IMDSv2 only, no SSH (Session Manager), only 80/443 open, encrypted disks, daily snapshots, auto-recovery, automatic security updates. Secrets live in SSM Parameter Store (encrypted). The release bucket is private, encrypted and TLS-only. CloudWatch alarms fire on error bursts and password-guessing waves. |
+| **Calendar & contacts** | Every calendar/contact address sent by the browser must point inside the signed-in user's own collections (no path tricks, no other hosts). Invitations and vCards from outside are rebuilt from validated fields, never stored raw (no foreign properties, alarms or tracking photos). Edits use ETags so phone and web changes can't silently overwrite each other. Invitations count against sending limits. |
+| **Groups** | Only business admins (with 2FA) manage groups. Groups are company-only by default; outside members need the external-forwarding permission. Sending as a group is checked server-side against current membership. |
+| **Billing** | Card details never reach this server (Stripe Checkout and portal). Payments are confirmed with Stripe directly, never trusted from the browser; webhooks are signature-checked (5-minute window) and de-duplicated. Customer codes are random, stored only as hashes, single-use and rate-limited. Payment return links always use `PUBLIC_URL`. |
 | **Dependencies** | `npm audit` fails the build on high/critical issues; Dependabot proposes updates weekly; CodeQL scans every change. |
 
 ## Known limitations (be honest with customers)
@@ -38,6 +41,11 @@ must do before and after launch. Report vulnerabilities to the address in `/.wel
 ## Operator checklist
 
 ### Before launch
+- [ ] **Stripe**: create the two Prices (per user: monthly and yearly), set `STRIPE_*`, add the webhook
+      `https://<your app>/api/billing/webhook` with events `checkout.session.completed`, `customer.subscription.updated`,
+      `customer.subscription.deleted`, `invoice.payment_failed`, `invoice.paid`, and turn on the customer portal
+      (allow switching between monthly and yearly). Set `PUBLIC_URL`.
+- [ ] **Never set `DEV_SKIP_DNS_VERIFY`** outside local testing (the server refuses it in production).
 - [ ] `SESSION_SECRET`: long and random (deploy.sh generates one). Never commit `deploy/aws/config.env`.
 - [ ] Turn on 2-step verification for your own super-admin account (the app requires it for the admin portal).
 - [ ] **mailcow admin UI**: turn on 2FA for the admin; restrict access to the admin UI (VPN or IP allow-list); restrict the API key

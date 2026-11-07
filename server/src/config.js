@@ -108,3 +108,19 @@ config.legal = {
 config.davUrl = (env.DAV_URL || `https://${config.davHost}/SOGo/dav/`).replace(/\/?$/, '/');
 // Who emails meeting invitations: "app" (this app sends iMIP emails) or "server" (SOGo sends them itself)
 config.calendarInvites = env.CALENDAR_INVITES === 'server' ? 'server' : 'app';
+// ---------- billing (Stripe) ----------
+config.billing = {
+  stripeKey: env.STRIPE_SECRET_KEY || '',
+  webhookSecret: env.STRIPE_WEBHOOK_SECRET || '',
+  apiBase: (env.STRIPE_API_BASE || 'https://api.stripe.com').replace(/\/$/, ''),
+  // Stripe Price IDs for one user ("seat"): $4/month and $48/year by default (create them in the Stripe dashboard)
+  priceMonthly: env.STRIPE_PRICE_MONTHLY || '',
+  priceYearly: env.STRIPE_PRICE_YEARLY || '',
+  perUserMonthly: Number(env.PRICE_PER_USER_MONTHLY || 4),
+  perUserYearly: Number(env.PRICE_PER_USER_YEARLY || 48),
+  currency: env.BILLING_CURRENCY || 'USD',
+  friendlyFreeMailboxes: Number(env.FRIENDLY_FREE_MAILBOXES || 1),
+  standardFreeMailboxes: Number(env.STANDARD_FREE_MAILBOXES || 0),
+  graceDays: Number(env.BILLING_GRACE_DAYS || 7),
+};
+config.billing.enabled = (env.BILLING_ENABLED ?? (config.billing.stripeKey ? 'true' : 'false')) === 'true';

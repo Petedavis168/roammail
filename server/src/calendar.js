@@ -8,6 +8,7 @@ import { config } from './config.js';
 import { requireAuth } from './session.js';
 import { audit } from './db.js';
 import { withMailbox } from './imap.js';
+import { checkSendQuota } from './abuse.js';
 import { discover, listCollections, createCalendar, report, putResource, deleteResource, getResource, assertOwnHref, xmlEscape } from './dav.js';
 
 const wrap = (fn) => (req, res, next) => Promise.resolve(fn(req, res, next)).catch(next);
@@ -131,6 +132,7 @@ function transport(user) {
 }
 async function sendInvites(user, f, method, recipients) {
   if (config.calendarInvites !== 'app' || !recipients.length) return;
+  checkSendQuota(user.email, recipients.length); // invitations are email too: same daily and per-message limits
   const ics = buildEvent(f, { organizer: { email: user.email, name: user.name }, method });
   const when = f.allDay ? new Date(f.start).toDateString() : new Date(f.start).toUTCString();
   const subject = method === 'CANCEL' ? `Canceled: ${f.title}` : f.sequence > 0 ? `Updated invitation: ${f.title}` : `Invitation: ${f.title}`;
@@ -210,10 +212,12 @@ calendar.post('/calendar/events', wrap(async (req, res) => {
   const f = validate(req.body, req.user.email);
   f.uid = `${crypto.randomUUID()}@roammail`;
   f.sequence = 0;
+  if (f.attendees.length && req.body.sendInvites !== false && config.calendarInvites === 'app') checkSendQuota(req.user.email, f.attendees.length);
   const href = `${cal.replace(/\/?$/, '/')}${encodeURIComponent(f.uid.split('@')[0])}.ics`;
   const ics = buildEvent(f, { organizer: f.attendees.length ? { email: req.user.email, name: req.user.name } : null });
   const etag = await putResource(req.user, href, ics, 'text/calendar; charset=utf-8');
   if (req.body.sendInvites !== false) await sendInvites(req.user, f, 'REQUEST', f.attendees).catch((e) => console.warn('invite email failed', e.message));
+  // (quota was already checked above; sendInvites counts the actual send)
   audit(req.user.email, null, 'calendar.create', { attendees: f.attendees.length });
   res.json({ ok: true, href, etag, uid: f.uid });
 }));

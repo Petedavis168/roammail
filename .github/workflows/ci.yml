@@ -44,16 +44,23 @@ jobs:
       - name: Unit tests
         run: npm test --prefix server
 
-      - name: Start test stack (mock mailcow + app)
+      - name: Start test stack (mock mailcow, mock Stripe, Radicale CalDAV/CardDAV, app)
         working-directory: server
         run: |
-          node dev/mock-mailcow.js > mock.log 2>&1 &
-          DATA_DIR=$RUNNER_TEMP/mc-data node --env-file=dev/test.env --disable-warning=ExperimentalWarning src/index.js > app.log 2>&1 &
-          for _ in $(seq 1 30); do curl -sf localhost:3000/healthz && break; sleep 1; done
+          pip install radicale
+          mkdir -p "$RUNNER_TEMP/radicale"
+          printf '[server]\nhosts = 127.0.0.1:5232\n[auth]\ntype = none\n[storage]\nfilesystem_folder = %s/radicale/collections\n[rights]\ntype = owner_only\n' "$RUNNER_TEMP" > "$RUNNER_TEMP/radicale/config"
+          TMPDIR=$RUNNER_TEMP dev/start-stack.sh "$RUNNER_TEMP/radicale/config"
           curl -sf localhost:3000/healthz
 
       - name: API security tests
         run: npm run test:api --prefix server
+
+      - name: Calendar and contacts tests
+        run: npm run test:workspace --prefix server
+
+      - name: Billing and groups tests
+        run: npm run test:billing --prefix server
 
       - name: Browser injection tests
         working-directory: server
@@ -64,7 +71,7 @@ jobs:
 
       - name: Logs on failure
         if: failure()
-        run: tail -n 100 server/app.log server/mock.log
+        run: tail -n 100 "$RUNNER_TEMP/app.log" "$RUNNER_TEMP/mock.log" "$RUNNER_TEMP/stripe.log"
 
   docker:
     runs-on: ubuntu-latest

@@ -240,9 +240,10 @@ securityApi.delete('/security/sessions', wrap(async (req, res) => {
 }));
 
 securityApi.post('/security/2fa/setup', wrap(async (req, res) => {
-  const secret = base32(crypto.randomBytes(20));
-  q.run('UPDATE user_security SET totp_secret = ? WHERE email = ? AND totp_enabled = 0', seal({ secret, exp: Date.now() + 1e13 }), req.user.email);
+  // security() creates the row for accounts that have never signed in before (e.g. right after sign-up)
   if (security(req.user.email).totp_enabled) throw fail(400, '2-step verification is already on');
+  const secret = base32(crypto.randomBytes(20));
+  q.run('UPDATE user_security SET totp_secret = ? WHERE email = ? AND totp_enabled = 0', seal({ secret }), req.user.email);
   const label = encodeURIComponent(`${config.appName}:${req.user.email}`);
   const uri = `otpauth://totp/${label}?secret=${secret}&issuer=${encodeURIComponent(config.appName)}&algorithm=SHA1&digits=6&period=30`;
   res.json({ secret, qr: await QRCode.toDataURL(uri, { margin: 1, width: 220 }) });

@@ -1,10 +1,18 @@
-# Mail — a modern webmail + business email platform for mailcow
+# Roammail: email, calendar and contacts for mailcow
+
+*Your business. Delivered.* Powered by Friendly Web Services.
 
 A fast web email client that feels like Outlook and Gmail combined, plus self-service
 sign-up, one-page business domain setup, and an admin portal. It runs on top of your
 existing **mailcow** server (IMAP/SMTP for mail, the mailcow API for accounts).
 
 ## What's in it
+
+**New in this version:** Gmail-style sign-in and sign-up with address availability (@roammail.net), calendar
+(month/week/day, repeating events, reminders, invitations with Yes/Maybe/No), contacts (import/export, company
+directory), unlimited groups and departments with distribution lists and "send as group", and business billing
+(Friendly Web Services customers: first mailbox free; then $4 per user per month or $48 per year, via Stripe).
+
 
 **Email (Outlook + Gmail)**
 - 3-pane layout: folders · message list · reading pane (right, bottom, or off)

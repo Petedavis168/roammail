@@ -18,6 +18,7 @@ import { legalPages, privacy, startRetention } from './privacy.js';
 import { calendar } from './calendar.js';
 import { contacts } from './contacts.js';
 import { groups } from './groups.js';
+import { billing, billingWebhook } from './billing.js';
 
 const app = express();
 // Number of reverse proxies in front of the app (Caddy = 1). Wrong values let clients fake their IP.
@@ -36,6 +37,7 @@ app.use(helmet({
   },
   crossOriginEmbedderPolicy: false,
 }));
+app.use(billingWebhook); // Stripe → raw body, verified by signature
 app.use(cookieParser());
 app.use(express.json({ limit: '2mb' }));
 app.use((req, res, next) => {
@@ -71,6 +73,7 @@ app.use('/api', privacy);
 app.use('/api', calendar);
 app.use('/api', contacts);
 app.use('/api', groups);
+app.use('/api', billing);
 app.use('/api', (req, res) => res.status(404).json({ error: 'Not found' }));
 app.use('/api', (err, req, res, _next) => {
   const status = err.status || (err.code === 'LIMIT_FILE_SIZE' ? 413 : err.authenticationFailed ? 401 : 500);

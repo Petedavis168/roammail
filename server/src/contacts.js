@@ -3,6 +3,7 @@ import express from 'express';
 import crypto from 'node:crypto';
 import multer from 'multer';
 import ICAL from 'ical.js';
+import rateLimit from 'express-rate-limit';
 import { requireAuth } from './session.js';
 import { q, audit } from './db.js';
 import { mailcow } from './mailcow.js';
@@ -179,7 +180,7 @@ contacts.get('/address-contacts/export', wrap(async (req, res) => {
 function cleanContactSafe(c) { try { return cleanContact(c); } catch { return cleanContact({ ...c, name: c.name || 'Unnamed' }); } }
 
 // Import a .vcf exported from Gmail, Outlook, iPhone etc. Each card is rebuilt from clean fields.
-contacts.post('/address-contacts/import', upload.single('file'), wrap(async (req, res) => {
+contacts.post('/address-contacts/import', rateLimit({ windowMs: 60 * 60 * 1000, limit: 10 }), upload.single('file'), wrap(async (req, res) => {
   if (!req.file) throw fail(400, 'Choose a .vcf file');
   let cards;
   try { cards = parseVCard(req.file.buffer.toString('utf8').replace(/\r?\n/g, '\r\n')); } catch { throw fail(400, 'That file is not a valid vCard (.vcf) file'); }

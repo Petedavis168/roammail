@@ -9,7 +9,7 @@ export async function deliverWelcome({ email, password, name, company }) {
   const app = config.publicUrl || '';
   const first = esc((name || '').split(/\s+/)[0] || 'there');
   const html = `<div style="font-family:Segoe UI,Arial,sans-serif;font-size:14px;color:#242424;max-width:600px">
-  ${app ? `<img src="${esc(app)}/roammail-logo.png" alt="Roammail" width="180" style="width:180px;height:auto;margin-bottom:8px">` : ''}
+  ${app ? `<img src="${esc(app)}/roammail-mark.png" alt="Roammail" width="48" style="width:48px;height:auto;margin-bottom:6px">` : ''}
   <h2 style="color:#244960;margin-bottom:4px">Welcome to ${esc(company || config.appName)}, ${first}!</h2>
   <p>Your new address is <b>${esc(email)}</b>. Here's how to get the most out of it:</p>
   <h3 style="margin-bottom:4px">🔒 Secure your account (2 minutes)</h3>

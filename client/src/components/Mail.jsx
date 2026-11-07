@@ -23,7 +23,11 @@ import Contacts from './contacts/Contacts.jsx';
 export default function Mail({ me, refreshMe, theme, setTheme, onLogout }) {
   const toast = useToast();
   const [prefs, setPrefs] = usePrefs(me.email);
-  const [view, setView] = useState('mail'); // mail | admin
+  const [view, setView] = useState(() => {
+    // Business sign-ups continue straight into domain setup
+    if (localStorage.getItem('startBusiness')) { localStorage.removeItem('startBusiness'); return 'admin'; }
+    return 'mail';
+  });
   const [folders, setFolders] = useState([]);
   const [folder, setFolder] = useState('INBOX');
   const [filter, setFilter] = useState('');
