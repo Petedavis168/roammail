@@ -355,22 +355,59 @@ async function createUser(req, d, body) {
   if (body.welcome !== false) deliverWelcome({ email, password: body.password, name: body.name, company: d.org_name }).catch(() => {});
   await audit(req.user.email, d.org_id, 'user.create', { email, admin: !!body.admin, bulk: !!body.bulk });
   applyDomainSpamDefaults(email).catch(() => {});
+  if (body.inviteEmail) await sendInvite(req, d, email, body.name, body.inviteEmail);
   return email;
 }
+
+// ---------------------------------------------------------------- invitations
+// The invite email never contains a password: it has a one-time link (7 days) where the person chooses their own.
+const INVITE_RE = /^[^\s@<>"]+@[^\s@<>"]+\.[^\s@<>"]{2,}$/;
+const escH = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+async function sendInvite(req, d, email, name, to) {
+  const target = String(to).trim().toLowerCase();
+  if (!INVITE_RE.test(target)) throw fail(400, 'Enter a valid personal email address for the invite');
+  if (target === email) throw fail(400, 'Send the invite to an address they can already read (not the new mailbox)');
+  const token = crypto.randomBytes(24).toString('base64url');
+  await q.run("DELETE FROM password_resets WHERE email = ? AND kind = 'invite'", email);
+  await q.run("INSERT INTO password_resets(token_hash, email, expires, kind, invite_to) VALUES(?, ?, ?, 'invite', ?)",
+    crypto.createHash('sha256').update(token).digest('hex'), email, Date.now() + 7 * 864e5, target);
+  const link = config.loginHost ? `https://${config.loginHost}/?reset=${token}` : `${config.publicUrl || `${req.protocol}://${req.get('host')}`}/login?reset=${token}`;
+  const { sendSystemMail } = await import('./recovery.js');
+  const sent = await sendSystemMail(target, `${req.user.name || req.user.email} invited you to ${config.appName}`, `<div style="font-family:Arial,sans-serif;font-size:15px;color:#172C40;max-width:560px">
+<h2 style="font-family:Georgia,serif;color:#172C40">You're invited to ${escH(d.org_name || config.appName)} email</h2>
+<p>Hi${name ? ` ${escH(String(name).split(' ')[0])}` : ''}, your new email address is ready:</p>
+<p style="font-size:18px"><b>${escH(email)}</b></p>
+<p><a href="${escH(link)}" style="display:inline-block;background:#172C40;color:#fff;padding:12px 22px;border-radius:6px;text-decoration:none">Choose your password and open your inbox</a></p>
+<p style="color:#52657A;font-size:13px">This link works once and expires in 7 days. If you weren't expecting this, you can ignore it.<br>${escH(config.appName)} · Your business. Delivered. · Powered by Friendly Web Services</p></div>`).catch(() => false);
+  await audit(req.user.email, d.org_id, 'user.invite', { email, to: target, sent: !!sent });
+  if (!sent) throw fail(502, 'The mailbox was created, but the invite email could not be sent. Use "Resend invite" or give them the password.');
+}
+
+accounts.post('/admin/users/invite', rateLimit({ windowMs: 3600e3, limit: 60 }), wrap(async (req, res) => {
+  const email = String(req.body.email || '').toLowerCase();
+  const d = await requireDomainAdmin(req, email.split('@')[1]);
+  if (!(await mailcow.getMailbox(email))) throw fail(404, 'No such mailbox');
+  await sendInvite(req, d, email, req.body.name, req.body.inviteEmail);
+  res.json({ ok: true });
+}));
 
 accounts.post('/admin/users', wrap(async (req, res) => {
   const d = await requireDomainAdmin(req, req.body.domain);
   if (d.status !== 'active') throw fail(400, 'Verify the domain before adding users');
   if ((await orgMailboxCount(d.org_id)) >= d.max_mailboxes) throw fail(400, `Your plan allows ${d.max_mailboxes} users`);
   checkLocal(String(req.body.localPart || '').trim().toLowerCase());
+  // Inviting by email: nobody needs to know the starting password (the person sets their own from the invite link)
+  const inviting = !!String(req.body.inviteEmail || '').trim();
+  if (inviting && !req.body.password) req.body.password = `${crypto.randomBytes(18).toString('base64url')}!a1`;
   checkPassword(req.body.password);
   const seat = await seatCheck(d.org_id);
   if (!seat.ok) {
     return res.status(402).json({ error: seat.hasSubscription ? 'Adding this person needs one more paid user.' : 'Choose a plan to add this person.',
       code: seat.hasSubscription ? 'seat_required' : 'checkout_required', perUser: seat.perUser, interval: seat.interval, orgId: d.org_id });
   }
-  const email = await createUser(req, d, req.body);
+  const email = await createUser(req, d, { ...req.body, welcome: inviting ? false : req.body.welcome });
   syncOrgGroups(d.org_id).catch(() => {});
+  if (inviting) return res.json({ ok: true, email, invited: String(req.body.inviteEmail).trim().toLowerCase() });
   // QR code the admin can show the new hire: scan → phone set up, password included (single use, 2 hours)
   const setup = await createSetupLink(req, email, req.body.password, 120);
   res.json({ ok: true, email, setup });
@@ -395,7 +432,7 @@ export function parseCsv(text) {
   return rows;
 }
 const COLS = { name: ['name', 'full name', 'display name'], email: ['email', 'email address', 'username', 'user', 'address'], title: ['title', 'job title'],
-  department: ['department', 'dept', 'team'], phone: ['phone', 'work phone'], mobile: ['mobile', 'cell', 'mobile phone'], admin: ['admin', 'is admin', 'role'], password: ['password'] };
+  department: ['department', 'dept', 'team'], invite: ['personal email', 'invite email', 'invite', 'private email'], phone: ['phone', 'work phone'], mobile: ['mobile', 'cell', 'mobile phone'], admin: ['admin', 'is admin', 'role'], password: ['password'] };
 const genPassword = () => `${crypto.randomBytes(9).toString('base64url')}-${crypto.randomInt(10, 99)}`;
 
 accounts.post('/admin/users/import', rateLimit({ windowMs: 3600e3, limit: 20 }), wrap(async (req, res) => {
@@ -422,7 +459,7 @@ accounts.post('/admin/users/import', rateLimit({ windowMs: 3600e3, limit: 20 }),
     const password = get('password') || genPassword();
     if (!error && get('password')) { try { checkPassword(password); } catch (e) { error = e.message; } }
     return { row: i + 2, email, localPart: local, name: get('name').slice(0, 100), title: get('title'), department: get('department'), phone: get('phone'), mobile: get('mobile'),
-      admin: /^(yes|y|true|1|admin)$/i.test(get('admin')), password, generated: !get('password'), error };
+      admin: /^(yes|y|true|1|admin)$/i.test(get('admin')), password, generated: !get('password'), inviteEmail: get('invite').toLowerCase(), error };
   });
   const valid = people.filter((p) => !p.error);
   const current = await orgMailboxCount(d.org_id);
@@ -444,7 +481,7 @@ accounts.post('/admin/users/import', rateLimit({ windowMs: 3600e3, limit: 20 }),
   for (const p of valid) {
     try {
       await createUser(req, d, { ...p, welcome: req.body.welcome !== false, bulk: true });
-      results.push({ email: p.email, name: p.name, password: p.password, ok: true });
+      results.push({ email: p.email, name: p.name, ...(p.inviteEmail ? { invited: p.inviteEmail } : { password: p.password }), ok: true });
     } catch (e) { results.push({ email: p.email, name: p.name, ok: false, error: e.message }); }
   }
   syncOrgGroups(d.org_id).catch(() => {});

@@ -5,7 +5,7 @@ import { onStoredCredentialsRejected } from './imap.js';
 // is stored only on the server, encrypted (AES-256-GCM) with a key derived from SESSION_SECRET.
 import crypto from 'node:crypto';
 import { config } from './config.js';
-import { q, twoFactorPolicy, rolesFor } from './db.js';
+import { q, twoFactorPolicy, rolesFor, userIdFor } from './db.js';
 
 const COOKIE = 'mc_session';
 const sha = (s) => crypto.createHash('sha256').update(String(s)).digest('hex');
@@ -54,8 +54,8 @@ export async function setSession(res, { email, password, name }, req) {
   const id = sha(token);
   const now = Date.now();
   const expires = now + config.sessionHours * 3600 * 1000;
-  await q.run('INSERT INTO sessions(id, email, creds, name, ip, ua, created, last_seen, expires) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?)',
-    id, email.toLowerCase(), seal({ password }), name || '', req?.ip || null, String(req?.get?.('user-agent') || '').slice(0, 300), now, now, expires);
+  await q.run('INSERT INTO sessions(id, email, creds, name, ip, ua, created, last_seen, expires, user_id) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+    id, email.toLowerCase(), seal({ password }), name || '', req?.ip || null, String(req?.get?.('user-agent') || '').slice(0, 300), now, now, expires, await userIdFor(email));
   // Signing in again to the same mailbox replaces its old session; the newest account becomes the default
   const keep = [];
   for (const t of tokensOf(req)) {
@@ -153,7 +153,7 @@ export async function requireAuth(req, res, next) {
   if (!creds) return res.status(401).json({ error: 'Please sign in again.' });
   if (now - s.last_seen > 60 * 1000) await q.run('UPDATE sessions SET last_seen = ?, ip = ? WHERE id = ?', now, req.ip, id);
   // sid doubles as the IMAP connection-pool key
-  req.user = { email: s.email, password: creds.password, name: s.name, sid: id };
+  req.user = { email: s.email, password: creds.password, name: s.name, sid: id, userId: s.user_id || null };
   req.accounts = live.map((x) => ({ email: x.s.email, name: x.s.name }));
 
   // 2-step verification enforcement

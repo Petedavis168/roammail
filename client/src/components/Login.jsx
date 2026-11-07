@@ -134,9 +134,10 @@ export default function Login({ onLogin, mode = 'signin' }) {
   );
   if (step === 'reset') return (
     <Shell>
-      <Card title="Choose a new password" onSubmit={(e) => { e.preventDefault(); if (f.pw !== f.pw2) return setError('Those passwords didn\'t match'); run(async () => {
+      <Card title="Choose your password" onSubmit={(e) => { e.preventDefault(); if (f.pw !== f.pw2) return setError('Those passwords didn\'t match'); run(async () => {
         const r = await api.post('/api/password/reset', { token: resetToken, password: f.pw });
-        history.replaceState(null, '', '/'); setF((x) => ({ ...x, email: r.email })); go('email'); setInfo('Password changed. Sign in with your new password.');
+        if (r.redirect) { onLogin(r); return; } // accepted an invite: straight into the new inbox
+        history.replaceState(null, '', location.pathname); setF((x) => ({ ...x, email: r.email })); go('email'); setInfo('Password changed. Sign in with your new password.');
       }); }} footer={<button className="g-btn" disabled={busy}>Change password</button>}>
         <Field label="New password" type={show ? 'text' : 'password'} autoComplete="new-password" autoFocus value={f.pw} onChange={set('pw')} />
         <Field label="Confirm" type={show ? 'text' : 'password'} autoComplete="new-password" value={f.pw2} onChange={set('pw2')} error={error} />

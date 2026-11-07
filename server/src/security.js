@@ -171,6 +171,14 @@ publicSecurity.post('/password/reset', resetLimiter, wrap(async (req, res) => {
   await q.run('DELETE FROM password_resets WHERE email = ?', row.email);
   await q.run('UPDATE user_security SET failed_count = 0, locked_until = 0 WHERE email = ?', row.email);
   await bumpEpoch(row.email);
+  if (row.kind === 'invite') {
+    // They proved they own the address the invite went to: make it their verified recovery email and sign them in
+    if (row.invite_to) { await security(row.email); await q.run('UPDATE user_security SET recovery_email = ?, recovery_verified = 1 WHERE email = ?', row.invite_to, row.email); }
+    await audit(row.email, null, 'security.invite_accepted', { ip: req.ip });
+    await setSession(res, { email: row.email, password: req.body.password, name: '' }, req);
+    const mailboxId = await ensureMailboxId(row.email);
+    return res.json({ ok: true, email: row.email, mailboxId, redirect: inboxUrl(mailboxId) });
+  }
   await audit(row.email, null, 'security.password_reset', { ip: req.ip });
   res.json({ ok: true, email: row.email });
 }));

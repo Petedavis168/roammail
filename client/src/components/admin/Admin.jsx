@@ -5,6 +5,7 @@ import { Icon } from '../../icons.jsx';
 import { useToast } from '../Toast.jsx';
 import { DomainWizard, DomainStatus, Copy, setSuper } from './DomainSetup.jsx';
 import { avatarColor, initials, fmtDate } from '../../util.js';
+import { loginHref } from '../../nav.js';
 import OrgSignature from './Signature.jsx';
 import SpamAdmin from './SpamAdmin.jsx';
 import Groups from './Groups.jsx';
@@ -132,7 +133,7 @@ function Users({ org, domains }) {
         <div className="spacer" />
         <span className="muted small">{users?.length ?? '…'} of {org.max_mailboxes} users</span>
         <button className="btn" onClick={() => setImporting(true)}><Icon name="users" size={16} /> Import from spreadsheet</button>
-        <button className="btn primary" onClick={() => setAdding(true)}><Icon name="plus" size={16} /> Add user</button>
+        <button className="btn primary" onClick={() => setAdding(true)}><Icon name="plus" size={16} /> Invite people</button>
       </div>
       <div className="table">
         <div className="tr th"><span>User</span><span>Storage</span><span>Status</span><span>Last sign-in</span><span /></div>
@@ -151,6 +152,7 @@ function Users({ org, domains }) {
             <span className="muted small">{u.lastLogin ? fmtDate(new Date(u.lastLogin).toISOString()) : 'Never'}</span>
             <span className="actions">
               <button className="btn sm" onClick={() => setEdit(u)}>Edit</button>
+              <button className="btn sm" title="Email a new set-password link" onClick={async () => { const to = prompt(`Send ${u.email} a new invite link. Their current email:`); if (!to) return; try { await api.post('/api/admin/users/invite', { email: u.email, name: u.name, inviteEmail: to }); alert(`Invite sent to ${to}`); } catch (e) { alert(e.message); } }}>Resend invite</button>
               <button className="btn sm" onClick={() => { const p = genPassword(); if (confirm(`Reset password for ${u.email}?`)) update(u.email, { password: p }, 'Password reset').then(() => setCreated({ email: u.email, password: p, reset: true })); }}>
                 <Icon name="key" size={14} /> Reset</button>
               {u.twoFactor && <button className="btn sm" title="Turn off 2-step verification (lost phone)" onClick={() => { if (confirm(`Turn off 2-step verification for ${u.email}? They'll be signed out and asked to set it up again.`)) update(u.email, { reset2fa: true }, '2-step verification reset'); }}>
@@ -165,12 +167,19 @@ function Users({ org, domains }) {
       {adding && <AddUser domain={domain} orgId={org.id} onClose={() => setAdding(false)} onCreated={(c) => { setAdding(false); setCreated(c); load(); }} />}
       {edit && <EditUser u={edit} onClose={() => setEdit(null)} onSave={async (patch) => { await update(edit.email, patch, 'User updated'); setEdit(null); }} />}
       {created && (
+        created.invited ? (
+        <Modal title="Invite sent" onClose={() => setCreated(null)}>
+          <p><b>{created.email}</b> is ready. We emailed an invite to <b>{created.invited}</b> with a link to choose a password and open the inbox.</p>
+          <p className="muted small">The link works once, for 7 days. Need to send it again? Use Resend invite next to their name.</p>
+          <div className="step-actions"><button className="btn primary" onClick={() => setCreated(null)}>Done</button></div>
+        </Modal>
+        ) : (
         <Modal title={created.reset ? 'New password' : 'User created'} onClose={() => setCreated(null)}>
           <p>Share these sign-in details with the user. They won't be shown again.</p>
           <div className="creds">
             <div><span>Email</span><b className="mono">{created.email}</b><Copy text={created.email} /></div>
             <div><span>Password</span><b className="mono">{created.password}</b><Copy text={created.password} /></div>
-            <div><span>Sign in at</span><b className="mono">{location.origin}</b><Copy text={location.origin} /></div>
+            <div><span>Sign in at</span><b className="mono">{loginHref()}</b><Copy text={loginHref()} /></div>
           </div>
           {created.setup && (
             <div className="hire-qr">
@@ -182,6 +191,7 @@ function Users({ org, domains }) {
           <Copy text={`Your email is ready!\nSign in at: ${location.origin}\nEmail: ${created.email}\nPassword: ${created.password}\nSet up your phone: ${location.origin}/setup?email=${created.email}\nIt also works in Outlook, Apple Mail and other mail apps.`} />
           <span className="muted small"> ← copy everything as a message</span>
         </Modal>
+        )
       )}
     </div>
   );
@@ -208,15 +218,17 @@ function ProfileFields({ f, setF }) {
   );
 }
 
-function AddUser({ domain, orgId, onClose, onCreated }) {
+function AddUser({ domain, orgId, onClose, onCreated, invite = true }) {
   const [needPlan, setNeedPlan] = useState(false);
   const quota = useQuota();
-  const [f, setF] = useState({ name: '', localPart: '', password: genPassword(), quotaMb: 0, admin: false, title: '', department: '', phone: '', mobile: '', welcome: true });
+  const [mode, setMode] = useState(invite ? 'invite' : 'password'); // invite = they choose their own password from an emailed link
+  const [f, setF] = useState({ name: '', localPart: '', password: genPassword(), inviteEmail: '', quotaMb: 0, admin: false, title: '', department: '', phone: '', mobile: '', welcome: true });
   const [err, setErr] = useState('');
   const [busy, setBusy] = useState(false);
   const submit = async (e) => {
     e.preventDefault(); setErr(''); setBusy(true);
-    const create = async () => { const r = await api.post('/api/admin/users', { ...f, domain }); onCreated({ email: r.email, password: f.password, setup: r.setup }); };
+    const body = mode === 'invite' ? { ...f, password: undefined, domain } : { ...f, inviteEmail: undefined, domain };
+    const create = async () => { const r = await api.post('/api/admin/users', body); onCreated(mode === 'invite' ? { email: r.email, invited: r.invited } : { email: r.email, password: f.password, setup: r.setup }); };
     try { await create(); }
     catch (e2) {
       if (e2.status === 402 && e2.code === 'seat_required') {
@@ -235,15 +247,22 @@ function AddUser({ domain, orgId, onClose, onCreated }) {
           onBlur={() => !f.localPart && f.name && setF((x) => ({ ...x, localPart: x.name.toLowerCase().trim().split(/\s+/)[0].replace(/[^a-z0-9._-]/g, '') }))} /></label>
         <label>Email address<div className="addr-input"><input required value={f.localPart} onChange={(e) => setF({ ...f, localPart: e.target.value.toLowerCase() })} /><span>@{domain}</span></div></label>
         <ProfileFields f={f} setF={setF} />
-        <label>Temporary password<div className="addr-input"><input required minLength={10} value={f.password} onChange={(e) => setF({ ...f, password: e.target.value })} className="mono" />
-          <button type="button" className="btn sm" onClick={() => setF({ ...f, password: genPassword() })}>Generate</button></div></label>
+        <div className="seg" role="radiogroup" style={{ display: 'flex', gap: 6 }}>
+          <button type="button" className={`btn sm ${mode === 'invite' ? 'primary' : ''}`} onClick={() => setMode('invite')}>Email them an invite</button>
+          <button type="button" className={`btn sm ${mode === 'password' ? 'primary' : ''}`} onClick={() => setMode('password')}>Set a password myself</button>
+        </div>
+        {mode === 'invite'
+          ? <label>Their current email (personal or work)<input type="email" required value={f.inviteEmail} onChange={(e) => setF({ ...f, inviteEmail: e.target.value })} placeholder="name@gmail.com" />
+            <small className="muted">We email a link where they choose their own password. It works once, for 7 days. No password is ever emailed.</small></label>
+          : <label>Temporary password<div className="addr-input"><input required minLength={10} value={f.password} onChange={(e) => setF({ ...f, password: e.target.value })} className="mono" />
+            <button type="button" className="btn sm" onClick={() => setF({ ...f, password: genPassword() })}>Generate</button></div></label>}
         <label>Mailbox size<select value={f.quotaMb || quota.business} onChange={(e) => setF({ ...f, quotaMb: Number(e.target.value) })}>
           {sizeOptions(quota).map((m) => <option key={m} value={m}>{(m / 1024).toFixed(m % 1024 ? 1 : 0)} GB{m === quota.business ? ' (standard)' : ''}</option>)}</select></label>
         <label className="check"><input type="checkbox" checked={f.admin} onChange={(e) => setF({ ...f, admin: e.target.checked })} /> Make this person an admin (can manage users &amp; domains)</label>
         <label className="check"><input type="checkbox" checked={f.welcome} onChange={(e) => setF({ ...f, welcome: e.target.checked })} /> Put a welcome &amp; getting-started email in their inbox</label>
         {err && <div className="form-error">{err}</div>}
         {needPlan ? <PlanPicker orgId={orgId} adding={1} title="Choose a plan to add this person" note="You've used your free mailbox. After payment, come back and click Create user again." onCancel={() => setNeedPlan(false)} />
-          : <div className="step-actions"><button type="button" className="btn" onClick={onClose}>Cancel</button><button className="btn primary" disabled={busy}>{busy ? 'Creating…' : 'Create user'}</button></div>}
+          : <div className="step-actions"><button type="button" className="btn" onClick={onClose}>Cancel</button><button className="btn primary" disabled={busy}>{busy ? 'Creating…' : mode === 'invite' ? 'Create and send invite' : 'Create user'}</button></div>}
       </form>
     </Modal>
   );

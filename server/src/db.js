@@ -177,6 +177,8 @@ CREATE TABLE IF NOT EXISTS mailbox_ids (
   status TEXT NOT NULL DEFAULT 'active', created_at INTEGER NOT NULL
 );
 CREATE INDEX IF NOT EXISTS mailbox_ids_email ON mailbox_ids(email, status);
+-- Stable user id, separate from the address and from the public mailbox URL ID (ready for single sign-on)
+CREATE TABLE IF NOT EXISTS users (id TEXT PRIMARY KEY, email TEXT NOT NULL UNIQUE, created_at INTEGER NOT NULL);
 CREATE TABLE IF NOT EXISTS send_counts (email TEXT NOT NULL, day TEXT NOT NULL, count INTEGER NOT NULL DEFAULT 0, PRIMARY KEY (email, day));
 `;
 
@@ -186,7 +188,7 @@ const MIGRATIONS = [['orgs', 'require_2fa', 'INTEGER NOT NULL DEFAULT 0'], ['org
   ['orgs', 'stripe_subscription', 'TEXT'], ['orgs', 'billing_status', "TEXT NOT NULL DEFAULT 'none'"], ['orgs', 'paid_seats', 'INTEGER NOT NULL DEFAULT 0'],
   ['orgs', 'canceled_at', 'TEXT'],
   ['user_security', 'recovery_verified', 'INTEGER NOT NULL DEFAULT 0'], ['user_security', 'recovery_pending', 'TEXT'],
-  ['user_security', 'recovery_code', 'TEXT'], ['user_security', 'recovery_code_exp', 'INTEGER'], ['user_security', 'recovery_code_tries', 'INTEGER NOT NULL DEFAULT 0'], ['jobs', 'claimed_at', 'INTEGER'], ['shared_mailboxes', 'kind', "TEXT NOT NULL DEFAULT 'shared'"], ['orgs', 'account_no', 'TEXT']];
+  ['user_security', 'recovery_code', 'TEXT'], ['user_security', 'recovery_code_exp', 'INTEGER'], ['user_security', 'recovery_code_tries', 'INTEGER NOT NULL DEFAULT 0'], ['jobs', 'claimed_at', 'INTEGER'], ['shared_mailboxes', 'kind', "TEXT NOT NULL DEFAULT 'shared'"], ['orgs', 'account_no', 'TEXT'], ['password_resets', 'kind', "TEXT NOT NULL DEFAULT 'reset'"], ['password_resets', 'invite_to', 'TEXT'], ['sessions', 'user_id', 'TEXT']];
 
 // Indexes on migrated columns (run after MIGRATIONS)
 const AFTER = ['CREATE UNIQUE INDEX IF NOT EXISTS orgs_account_no ON orgs(account_no)'];
@@ -306,6 +308,16 @@ export async function setSetting(key, value) {
 }
 export async function audit(actor, orgId, action, detail = {}) {
   await q.run('INSERT INTO audit(actor, org_id, action, detail) VALUES(?, ?, ?, ?)', actor, orgId ?? null, action, JSON.stringify(detail));
+}
+
+/** The stable user id for a mailbox address (created on first use; never changes, never reused). */
+export async function userIdFor(email) {
+  const e = String(email).toLowerCase();
+  const r = await q.get('SELECT id FROM users WHERE email = ?', e);
+  if (r) return r.id;
+  const { randomUUID } = await import('node:crypto');
+  await q.run('INSERT INTO users(id, email, created_at) VALUES(?, ?, ?) ON CONFLICT(email) DO NOTHING', randomUUID(), e, Date.now());
+  return (await q.get('SELECT id FROM users WHERE email = ?', e)).id;
 }
 
 /** Roles for an email: super admin + org memberships. */

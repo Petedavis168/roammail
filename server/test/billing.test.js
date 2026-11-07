@@ -317,3 +317,40 @@ test('business mailbox IDs: account-number-mailbox-initials; renaming moves the 
   assert.equal(page.status, 301);
   assert.equal(page.headers.get('location'), `/${acct}-${no}-PJ/inbox`);
 });
+
+test('invite people: mailbox via the provisioner, emailed one-time link, no password in the email, lands in the inbox', async () => {
+  const a = await newAdmin(`inv${run}`);
+  const domain = `inv${run}.test`;
+  const { orgId } = (await a.post('/api/domains', { domain, orgName: `Inv ${run}` })).data;
+  await a.post(`/api/domains/${domain}/verify`);
+  const { url } = (await a.post(`/api/billing/${orgId}/checkout`, { interval: 'year', seats: 2 })).data;
+  const sid = new URL((await fetch(url, { method: 'POST', redirect: 'manual' })).headers.get('location')).searchParams.get('session_id');
+  await a.post('/api/billing/confirm', { sessionId: sid });
+  // the invitee's existing address: another mailbox we can read
+  const personal = new Client(); const ps = await personal.post('/api/signup', { name: 'Kim Personal', username: `kimp${run}`, password: PW, acceptTerms: true });
+  assert.equal(ps.status, 200); await sleep(1200);
+  const r = await a.post('/api/admin/users', { domain, localPart: 'kim', name: 'Kim Lee', inviteEmail: ps.data.email });
+  assert.equal(r.status, 200, JSON.stringify(r.data));
+  assert.equal(r.data.invited, ps.data.email); assert.ok(!r.data.setup, 'no password or QR when inviting');
+  await sleep(1500);
+  const list = (await personal.get('/api/messages?folder=INBOX')).data.messages;
+  const inv = list.find((m) => /invited you/.test(m.subject));
+  assert.ok(inv, 'invite email arrived');
+  const msg = (await personal.get(`/api/message?folder=INBOX&uid=${inv.uid}`)).data;
+  const body = `${msg.html || ''} ${msg.text || ''}`;
+  assert.ok(body.includes(`kim@${domain}`));
+  const token = /reset=([A-Za-z0-9_-]+)/.exec(body)[1];
+  // accept: choose a password, signed straight in, recovery email set from the invite
+  const kim = new Client();
+  const acc = await kim.post('/api/password/reset', { token, password: 'Blue-Harbor-73x!Q' });
+  assert.equal(acc.status, 200, JSON.stringify(acc.data));
+  assert.match(acc.data.redirect, /\/\d{6}-\d{3}-KL\/inbox$/);
+  const me = (await kim.get('/api/me')).data;
+  assert.equal(me.email, `kim@${domain}`);
+  const sec = (await kim.get('/api/security')).data;
+  assert.equal(sec.recoveryEmail, ps.data.email); assert.equal(sec.recoveryVerified, true);
+  assert.equal((await new Client().post('/api/password/reset', { token, password: 'Another-9x!Pw' })).status, 400, 'link works once');
+  // only admins of that business can invite or resend
+  assert.equal((await kim.post('/api/admin/users/invite', { email: `kim@${domain}`, inviteEmail: ps.data.email })).status, 403);
+  assert.equal((await a.post('/api/admin/users/invite', { email: `kim@${domain}`, inviteEmail: ps.data.email })).status, 200);
+});
