@@ -47,6 +47,7 @@ export default function Mail({ me, route, refreshMe, theme, setTheme, onLogout }
   const [showHelp, setShowHelp] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(window.innerWidth > 900);
   const [userMenu, setUserMenu] = useState(false);
+  const [opsHelp, setOpsHelp] = useState(false);
   const searchRef = useRef();
   const goPending = useRef(0);
   const [sigData, reloadSigs] = useSignatures();
@@ -63,6 +64,7 @@ export default function Mail({ me, route, refreshMe, theme, setTheme, onLogout }
   const activeMsg = msgs.find((m) => m.uid === active) || null;
   const special = (use) => folders.find((f) => f.specialUse === use)?.path;
   const currentFolderObj = folders.find((f) => f.path === folder);
+  const folderUse = currentFolderObj?.specialUse;
 
   // ---------- loading ----------
   const loadFolders = useCallback(() => api.folders().then(setFolders).catch(() => {}), []);
@@ -218,7 +220,7 @@ export default function Mail({ me, route, refreshMe, theme, setTheme, onLogout }
         const r = await api.remove(from, uids);
         loadFolders();
         const newUids = uids.map((u) => r.uidMap?.[u]).filter(Boolean);
-        toast(r.permanent ? 'Permanently deleted' : `${uids.length > 1 ? `${uids.length} conversations` : 'Conversation'} moved to Deleted Items`, {
+        toast(r.permanent ? 'Permanently deleted' : `${uids.length > 1 ? `${uids.length} conversations` : 'Conversation'} moved to Deleted`, {
           action: newUids.length ? 'Undo' : undefined,
           onAction: async () => { await api.move(r.to, newUids, from); loadFolders(); load({ quiet: true }); },
         });
@@ -338,21 +340,24 @@ export default function Mail({ me, route, refreshMe, theme, setTheme, onLogout }
         {view === 'mail' ? (
           <form className="search" onSubmit={(e) => { e.preventDefault(); runSearch(searchInput); }}>
             <Icon name="search" />
-            <input ref={searchRef} value={searchInput} onChange={(e) => setSearchInput(e.target.value)}
-              placeholder="Search mail  (from:  to:  subject:  has:attachment  is:unread  newer_than:7d)" aria-label="Search mail" />
+            <input ref={searchRef} value={searchInput} onChange={(e) => setSearchInput(e.target.value)} placeholder="Search mail" aria-label="Search mail" />
             {search && <button type="button" className="icon-btn" onClick={clearSearch} aria-label="Clear search"><Icon name="close" /></button>}
+            <div className="dd">
+              <button type="button" className="icon-btn" onClick={() => setOpsHelp((o) => !o)} title="Search tips" aria-label="Search tips"><Icon name="filter" /></button>
+              {opsHelp && (
+                <div className="menu right search-help" onMouseLeave={() => setOpsHelp(false)}>
+                  <div className="menu-note">Search tips</div>
+                  {[['from:ann', 'From a person'], ['to:bob', 'Sent to'], ['subject:invoice', 'Words in the subject'], ['has:attachment', 'With files'], ['is:unread', 'Unread only'], ['newer_than:7d', 'Last 7 days']].map(([op, l]) => (
+                    <button type="button" key={op} onClick={() => { setSearchInput((v) => `${v ? `${v} ` : ''}${op.split(':')[0]}:`); setOpsHelp(false); searchRef.current?.focus(); }}><code>{op}</code><span className="muted">{l}</span></button>
+                  ))}
+                </div>
+              )}
+            </div>
           </form>
         ) : <div className="spacer" />}
         <div className="topbar-right">
-          {(isAdmin || !inOrg) && (
-            <button className={`top-btn ${view === 'admin' ? 'on' : ''}`} onClick={() => setView(view === 'admin' ? 'mail' : 'admin')} title="Admin & business email">
-              <Icon name={view === 'admin' ? 'mail' : 'shield'} /> <span>{view === 'admin' ? 'Back to mail' : isAdmin ? 'Admin' : 'Business email'}</span>
-            </button>
-          )}
-          <button className="icon-btn on-dark" onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')} title="Toggle dark mode"><Icon name={theme === 'dark' ? 'sun' : 'moon'} /></button>
-          <a className="icon-btn on-dark" href="/help" target="_blank" rel="noreferrer" title="Help" aria-label="Help" style={{ fontWeight: 700, textDecoration: 'none' }}>?</a>
-          <button className="icon-btn on-dark" onClick={() => setShowSettings(true)} title="Settings"><Icon name="settings" /></button>
-          <button className="icon-btn on-dark" onClick={() => setShowHelp(true)} title="Keyboard shortcuts (?)">?</button>
+          {view === 'admin' && <button className="top-btn" onClick={() => setView('mail')}><Icon name="mail" /> <span>Back to mail</span></button>}
+          <button className="icon-btn on-dark" onClick={() => setShowSettings(true)} title="Settings" aria-label="Settings"><Icon name="settings" /></button>
           <div className="user-menu-wrap">
             <button className="avatar sm" style={{ background: avatarColor(me.email) }} onClick={() => setUserMenu((u) => !u)} title={me.email}>
               {initials({ name: prefs.displayName || me.name, address: me.email })}
@@ -361,6 +366,9 @@ export default function Mail({ me, route, refreshMe, theme, setTheme, onLogout }
               <div className="menu right" onMouseLeave={() => setUserMenu(false)}>
                 <div className="menu-head"><b>{prefs.displayName || me.name || me.email.split('@')[0]}</b><small>{me.email}</small></div>
                 <button onClick={() => { setShowSettings(true); setUserMenu(false); }}><Icon name="settings" /> Settings</button>
+                <button onClick={() => { setTheme(theme === 'dark' ? 'light' : 'dark'); setUserMenu(false); }}><Icon name={theme === 'dark' ? 'sun' : 'moon'} /> {theme === 'dark' ? 'Light mode' : 'Dark mode'}</button>
+                <button onClick={() => { setShowHelp(true); setUserMenu(false); }}><Icon name="key" /> Keyboard shortcuts</button>
+                <a className="menu-link" href="/help" target="_blank" rel="noreferrer"><Icon name="external" /> Help center</a>
                 {(isAdmin || !inOrg) && <button onClick={() => { setView('admin'); setUserMenu(false); }}><Icon name="shield" /> {isAdmin ? 'Admin portal' : 'Set up business email'}</button>}
                 {(me.accounts || []).filter((a) => a.mailboxId !== me.mailboxId).length > 0 && <div className="menu-note">Your other accounts</div>}
                 {(me.accounts || []).filter((a) => a.mailboxId !== me.mailboxId).map((a) => (
@@ -396,14 +404,20 @@ export default function Mail({ me, route, refreshMe, theme, setTheme, onLogout }
               onDropMessages={(dest, uids) => act.move(dest, uids)} onScheduled={() => { setFolder('@scheduled'); clearSearch(); }} onQuarantine={() => { setFolder('@quarantine'); clearSearch(); }} qCount={qCount}
               categories={prefs.categories} onCategory={(c) => runSearch(`label:${catKeyword(c.name).slice(4)}`)} />
           )}
-          <main className={`main ${paneClass}`}>
-            <Ribbon
-              hasSelection={!!(selected.size || active)} folderUse={currentFolderObj?.specialUse} folders={folders}
-              onCompose={() => compose()} act={act} categories={prefs.categories}
-              onReply={(mode) => activeMsg && reply(activeMsg, mode)} canReply={!!activeMsg}
+          <main className={`main ${paneClass} ${active ? 'has-active' : ''}`}>
+            {(folderUse === '\\Junk' || folder === '@quarantine') && !search && (
+              <div className="tabs" role="tablist">
+                <button role="tab" aria-selected={folder !== '@quarantine'} className={folder !== '@quarantine' ? 'on' : ''} onClick={() => special('\\Junk') && setFolder(special('\\Junk'))}>Junk</button>
+                <button role="tab" aria-selected={folder === '@quarantine'} className={folder === '@quarantine' ? 'on' : ''} onClick={() => setFolder('@quarantine')} title="Definite spam held back by the server">Quarantine{qCount > 0 ? ` (${qCount})` : ''}</button>
+              </div>
+            )}
+            {!folder.startsWith('@') && <Ribbon
+              hasSelection={!!(selected.size || active)} count={selected.size} folderUse={folderUse} folders={folders}
+              act={act} categories={prefs.categories}
               onRefresh={() => { load(); loadFolders(); }}
               readingPane={prefs.readingPane} setReadingPane={(v) => setPrefs({ readingPane: v })}
-            />
+              density={prefs.density} setDensity={(v) => setPrefs({ density: v })}
+            />}
             <div className="panes">
               {folder === '@quarantine' && !search ? <QuarantineList onChanged={setQCount} /> : folder === '@scheduled' && !search ? <ScheduledList onCompose={compose} /> : <MessageList
                 snoozeMap={folder.toLowerCase() === 'snoozed' ? snoozeMap : null}

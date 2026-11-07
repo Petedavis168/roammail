@@ -112,10 +112,11 @@ export default function MessageList({ list, title, search, onClearSearch, folder
                     : <span className="date">{fmtDate(m.date)}</span>}
                 </div>
                 <div className="row-sub">
+                  {!m.seen && <span className="unread-dot" aria-label="Unread" />}
                   <span className="subject">{m.draft && <span className="draft-tag">[Draft] </span>}{m.subject}</span>
+                  {density !== 'compact' && m.snippet && <span className="snippet"> — {m.snippet}</span>}
                   {m.categories?.map((c) => <span key={c} className="cat" style={{ '--c': catColor(c) }}>{c}</span>)}
                 </div>
-                {density !== 'compact' && <div className="snippet">{m.snippet}</div>}
               </div>
               <div className="row-actions" onClick={(e) => e.stopPropagation()}>
                 {snoozeMap?.[m.uid] ? <button title="Unsnooze now" onClick={() => act.unsnooze(m.uid)}><Icon name="inbox" size={16} /></button>
@@ -133,8 +134,10 @@ export default function MessageList({ list, title, search, onClearSearch, folder
         {loading && <div className="list-msg"><div className="spinner" /></div>}
         {!loading && messages.length === 0 && (
           <div className="empty">
-            <Icon name={search ? 'search' : 'inbox'} size={48} />
-            <p>{search ? 'No messages match your search.' : filter ? 'Nothing here with this filter.' : 'All caught up!'}</p>
+            <Icon name={search ? 'search' : filter ? 'filter' : folderUse === '\\Junk' ? 'shield' : 'inbox'} size={40} />
+            <b>{search ? 'No results' : filter ? 'Nothing matches this filter' : folderUse === '\\Inbox' ? "You're all caught up" : folderUse === '\\Junk' ? 'No junk' : folderUse === '\\Drafts' ? 'No drafts' : folderUse === '\\Sent' ? 'Nothing sent yet' : 'This folder is empty'}</b>
+            <p className="muted">{search ? 'Try fewer words, or a search tip like from: or has:attachment.' : filter ? 'Switch back to All to see everything.' : folderUse === '\\Inbox' ? 'New mail will show up here.' : folderUse === '\\Junk' ? 'Suspected spam lands here, so your inbox stays clean.' : ''}</p>
+            {filter && !search && <button className="btn sm" onClick={() => setFilter('')}>Show all</button>}
           </div>
         )}
         {!loading && !search && messages.length > 0 && messages.length >= total && <div className="list-msg muted">{total} message{total === 1 ? '' : 's'}</div>}

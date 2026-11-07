@@ -2,49 +2,62 @@ import { useState } from 'react';
 import { Icon } from '../icons.jsx';
 import { folderIcon, folderLabel } from '../util.js';
 
-function Dropdown({ label, icon, disabled, children }) {
+// Icon-only buttons with a tooltip; names stay available to screen readers.
+function Tool({ icon, label, onClick, disabled, active }) {
+  return (
+    <button className={`tb ${active ? 'on' : ''}`} onClick={onClick} disabled={disabled} title={label} aria-label={label}>
+      <Icon name={icon} size={18} />
+    </button>
+  );
+}
+
+function Dropdown({ icon, label, children, right }) {
   const [open, setOpen] = useState(false);
   return (
     <div className="dd" onMouseLeave={() => setOpen(false)}>
-      <button className="rb" disabled={disabled} onClick={() => setOpen((o) => !o)}><Icon name={icon} /> <span>{label}</span> <Icon name="down" size={12} /></button>
-      {open && <div className="menu" onClick={() => setOpen(false)}>{children}</div>}
+      <Tool icon={icon} label={label} onClick={() => setOpen((o) => !o)} active={open} />
+      {open && <div className={`menu ${right ? 'right' : ''}`} onClick={() => setOpen(false)}>{children}</div>}
     </div>
   );
 }
 
-export default function Ribbon({ hasSelection, folderUse, folders, onCompose, act, categories, onReply, canReply, onRefresh, readingPane, setReadingPane }) {
-  const sel = !hasSelection;
+/** Message toolbar. Actions only appear once something is selected; Reply/Forward live in the reading pane. */
+export default function Ribbon({ hasSelection, count = 0, folderUse, folders, act, categories, onRefresh, readingPane, setReadingPane, density, setDensity }) {
   return (
-    <div className="ribbon" role="toolbar" aria-label="Message actions">
-      <button className="rb primary" onClick={onCompose}><Icon name="pen" /> <span>New mail</span></button>
-      <span className="rb-sep" />
-      <button className="rb" disabled={sel} onClick={() => act.del()} title="Delete (#)"><Icon name="trash" /> <span>Delete</span></button>
-      <button className="rb" disabled={sel || folderUse === '\\Archive'} onClick={() => act.archive()} title="Archive (e)"><Icon name="archive" /> <span>Archive</span></button>
-      {folderUse === '\\Junk'
-        ? <button className="rb" disabled={sel} onClick={() => act.notJunk()}><Icon name="inbox" /> <span>Not junk</span></button>
-        : <button className="rb" disabled={sel} onClick={() => act.junk()} title="Report junk (!)"><Icon name="junk" /> <span>Junk</span></button>}
-      <button className="rb" disabled={sel} onClick={() => act.snooze()} title="Snooze (b)"><Icon name="clock" /> <span>Snooze</span></button>
-      <Dropdown label="Move to" icon="move" disabled={sel}>
-        {folders.filter((f) => !f.flags.includes('\\Noselect')).map((f) => (
-          <button key={f.path} onClick={() => act.move(f.path)}><Icon name={folderIcon(f)} /> {folderLabel(f)}</button>
+    <div className="toolbar" role="toolbar" aria-label="Message actions">
+      {hasSelection ? (
+        <>
+          {count > 1 && <span className="tb-count">{count} selected</span>}
+          {folderUse !== '\\Archive' && <Tool icon="archive" label="Archive (e)" onClick={() => act.archive()} />}
+          <Tool icon="trash" label="Delete (#)" onClick={() => act.del()} />
+          <Tool icon="clock" label="Snooze (b)" onClick={() => act.snooze()} />
+          <Dropdown icon="move" label="Move to">
+            {folders.filter((f) => !f.flags.includes('\\Noselect')).map((f) => (
+              <button key={f.path} onClick={() => act.move(f.path)}><Icon name={folderIcon(f)} /> {folderLabel(f)}</button>
+            ))}
+          </Dropdown>
+          <Tool icon="flag" label="Flag (s)" onClick={() => act.flag()} />
+          <Dropdown icon="more" label="More actions">
+            {folderUse === '\\Junk'
+              ? <button onClick={() => act.notJunk()}><Icon name="inbox" /> Not junk</button>
+              : <button onClick={() => act.junk()}><Icon name="junk" /> Report junk (!)</button>}
+            <button onClick={() => act.read(true)}><Icon name="mailOpen" /> Mark as read</button>
+            <button onClick={() => act.read(false)}><Icon name="mail" /> Mark as unread</button>
+            {categories.length > 0 && <div className="menu-note">Label</div>}
+            {categories.map((c) => <button key={c.name} onClick={() => act.category(c.name)}><span className="cat-dot" style={{ background: c.color }} /> {c.name}</button>)}
+          </Dropdown>
+        </>
+      ) : <span className="tb-hint">Select a message for actions</span>}
+      <div className="tb-spacer" />
+      <Tool icon="refresh" label="Refresh" onClick={onRefresh} />
+      <Dropdown icon="max" label="View options" right>
+        <div className="menu-note">Reading pane</div>
+        {[['right', 'Right'], ['bottom', 'Bottom'], ['off', 'Off']].map(([v, l]) => (
+          <button key={v} onClick={() => setReadingPane(v)}><Icon name="check" style={{ opacity: readingPane === v ? 1 : 0 }} /> {l}</button>
         ))}
-      </Dropdown>
-      <span className="rb-sep" />
-      <button className="rb" disabled={!canReply} onClick={() => onReply('reply')} title="Reply (r)"><Icon name="reply" /> <span>Reply</span></button>
-      <button className="rb" disabled={!canReply} onClick={() => onReply('all')} title="Reply all (a)"><Icon name="replyAll" /> <span>Reply all</span></button>
-      <button className="rb" disabled={!canReply} onClick={() => onReply('forward')} title="Forward (f)"><Icon name="forward" /> <span>Forward</span></button>
-      <span className="rb-sep" />
-      <button className="rb" disabled={sel} onClick={() => act.read(true)} title="Mark as read (Shift+I)"><Icon name="mailOpen" /> <span>Read</span></button>
-      <button className="rb" disabled={sel} onClick={() => act.read(false)} title="Mark as unread (Shift+U)"><Icon name="mail" /> <span>Unread</span></button>
-      <button className="rb" disabled={sel} onClick={() => act.flag()} title="Flag / star (s)"><Icon name="flag" /> <span>Flag</span></button>
-      <Dropdown label="Categorize" icon="tag" disabled={sel}>
-        {categories.map((c) => <button key={c.name} onClick={() => act.category(c.name)}><span className="cat-dot" style={{ background: c.color }} /> {c.name}</button>)}
-      </Dropdown>
-      <div className="rb-spacer" />
-      <button className="rb" onClick={onRefresh} title="Refresh"><Icon name="refresh" /></button>
-      <Dropdown label="View" icon="max">
-        {[['right', 'Reading pane on right'], ['bottom', 'Reading pane on bottom'], ['off', 'Hide reading pane']].map(([v, l]) => (
-          <button key={v} onClick={() => setReadingPane(v)}>{readingPane === v ? <Icon name="check" /> : <Icon name="check" style={{ opacity: 0 }} />} {l}</button>
+        <div className="menu-note">Density</div>
+        {[['comfortable', 'Comfortable'], ['compact', 'Compact']].map(([v, l]) => (
+          <button key={v} onClick={() => setDensity(v)}><Icon name="check" style={{ opacity: density === v ? 1 : 0 }} /> {l}</button>
         ))}
       </Dropdown>
     </div>

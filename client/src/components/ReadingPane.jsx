@@ -114,7 +114,7 @@ function ThreadMessage({ m, expanded, onToggle, onReply, prefs, setPrefs, last, 
             {m.security?.dkim === 'pass' && m.security?.dmarc === 'pass' && <span className="verified" title="Sender's domain verified (DKIM + DMARC)"><Icon name="lock" size={12} /></span>}
           </div>
           <div className="muted small" onClick={(e) => { e.stopPropagation(); setDetails((d) => !d); }} style={{ cursor: 'pointer' }}>
-            to {[...(m.to || []), ...(m.cc || [])].map(personName).join(', ') || 'undisclosed recipients'} <Icon name="down" size={12} />
+            to {[...(m.to || []), ...(m.cc || [])].map((a) => (a.address?.toLowerCase() === me?.email?.toLowerCase() ? 'me' : personName(a))).join(', ') || 'undisclosed recipients'} <Icon name="down" size={12} />
           </div>
           {details && (
             <div className="details">
@@ -194,8 +194,9 @@ export default function ReadingPane({ folder, msg, me, prefs, setPrefs, conversa
   if (!msg) {
     return (
       <section className="reading empty-pane">
-        <Icon name="mail" size={64} />
-        <p>Select an item to read</p>
+        <Icon name="mail" size={48} />
+        <b>Nothing selected</b>
+        <p className="muted">Pick a message to read it here.</p>
         <small className="muted">Tip: press <kbd>?</kbd> for keyboard shortcuts</small>
       </section>
     );
@@ -209,13 +210,6 @@ export default function ReadingPane({ folder, msg, me, prefs, setPrefs, conversa
         <h1>{msg.subject}</h1>
         <div className="reading-tools">
           {msg.categories?.map((c) => <span key={c} className="cat" style={{ '--c': catColor(c) }}>{c}</span>)}
-          <button className="icon-btn" title="Snooze (b)" onClick={() => act.snooze(msg.uid)}><Icon name="clock" /></button>
-          <button className="icon-btn" title="Archive (e)" onClick={() => act.archive(msg.uid)}><Icon name="archive" /></button>
-          <button className="icon-btn" title="Delete (#)" onClick={() => act.del(msg.uid)}><Icon name="trash" /></button>
-          <button className="icon-btn" title={msg.flagged ? 'Unflag' : 'Flag (s)'} onClick={() => act.flag(msg.uid)}>
-            <Icon name="flag" fill={msg.flagged ? 'currentColor' : 'none'} style={{ color: msg.flagged ? '#d13438' : undefined }} />
-          </button>
-          <button className="icon-btn" title="Mark unread" onClick={() => { act.read(false, msg.uid); onClose(); }}><Icon name="mail" /></button>
         </div>
       </div>
       {isJunk && <div className="banner warn">This message was identified as junk. Be careful with links and attachments. <button className="link" onClick={() => act.notJunk(msg.uid, msg.from?.[0]?.address)}>It's not junk</button></div>}
@@ -231,14 +225,14 @@ export default function ReadingPane({ folder, msg, me, prefs, setPrefs, conversa
               onReply={onReply} orgDomains={orgDomains} onBlock={act.block} isJunk={isJunk} me={me} />
           );
         })}
-        {thread && (
-          <div className="quick-reply">
-            <button className="btn" onClick={() => onReply(thread.messages[thread.messages.length - 1], 'reply')}><Icon name="reply" /> Reply</button>
-            <button className="btn" onClick={() => onReply(thread.messages[thread.messages.length - 1], 'all')}><Icon name="replyAll" /> Reply all</button>
-            <button className="btn" onClick={() => onReply(thread.messages[thread.messages.length - 1], 'forward')}><Icon name="forward" /> Forward</button>
-          </div>
-        )}
       </div>
+      {thread && (
+        <div className="reply-bar">
+          <button className="btn" onClick={() => onReply(thread.messages[thread.messages.length - 1], 'reply')}><Icon name="reply" /> Reply</button>
+          <button className="btn" onClick={() => onReply(thread.messages[thread.messages.length - 1], 'all')}><Icon name="replyAll" /> Reply all</button>
+          <button className="btn" onClick={() => onReply(thread.messages[thread.messages.length - 1], 'forward')}><Icon name="forward" /> Forward</button>
+        </div>
+      )}
     </section>
   );
 }
