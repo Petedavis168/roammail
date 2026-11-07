@@ -68,16 +68,62 @@ export const mailcow = {
   editFilter: (id, attr) => call('POST', 'edit/filter', { items: [String(id)], attr }),
   deleteFilter: (id) => call('POST', 'delete/filter', [String(id)]),
 
-  // IMAP import (sync jobs)
+  // IMAP import (sync jobs). mailcow 2026+ uses "sync sources" (source_id); older versions take host1/port1 directly.
   listSyncJobs: async (email) => list(await call('GET', 'get/syncjobs/all/no_log')).filter((j) => j.user2 === email),
-  addSyncJob: (email, { host, port, user, password, enc }) => call('POST', 'add/syncjob', {
-    username: email, host1: host, port1: port, user1: user, password1: password, enc1: enc || 'SSL',
-    mins_interval: 20, subfolder2: '', maxage: 0, maxbytespersecond: 0, timeout1: 600, timeout2: 600,
-    exclude: '(?i)spam|(?i)junk|(?i)trash|(?i)bin|(?i)all mail|(?i)important|(?i)starred', custom_params: '',
-    delete2duplicates: 1, delete1: 0, delete2: 0, automap: 1, skipcrossduplicates: 1, subscribeall: 1, active: 1,
-  }),
+  listSyncSources: async () => {
+    try { return list(await call('GET', 'get/syncjob_source/all')); } catch { return null; } // null = old mailcow
+  },
+  addSyncSource: ({ name, host, port }) => call('POST', 'add/syncjob_source', { name, description: 'Created by webmail import', host, port, enc: 'SSL', verify_cert: 1, auth_type: 'PLAIN', scope: 'all' }),
+  addSyncJob: async (email, { host, port, user, password }) => {
+    const common = {
+      username: email, user1: user, password1: password, mins_interval: 20, subfolder2: '', maxage: 0, maxbytespersecond: 0,
+      timeout1: 600, timeout2: 600, exclude: '(?i)spam|(?i)junk|(?i)trash|(?i)bin|(?i)all mail|(?i)important|(?i)starred',
+      delete2duplicates: 1, delete1: 0, delete2: 0, automap: 1, skipcrossduplicates: 1, subscribeall: 1, active: 1,
+    };
+    const sources = await mailcow.listSyncSources();
+    if (sources === null) return call('POST', 'add/syncjob', { ...common, host1: host, port1: port, enc1: 'SSL', custom_params: '' });
+    const find = (all) => all.find((x) => String(x.host).toLowerCase() === host && Number(x.port) === Number(port) && x.auth_type !== 'XOAUTH2');
+    let src = find(sources);
+    if (!src) {
+      await mailcow.addSyncSource({ name: `Import ${host}:${port}`, host, port });
+      src = find((await mailcow.listSyncSources()) || []);
+      if (!src) throw new Error('mailcow did not create the import source');
+    }
+    return call('POST', 'add/syncjob', { ...common, source_id: Number(src.id), custom_params: [] });
+  },
   editSyncJob: (id, attr) => call('POST', 'edit/syncjob', { items: [String(id)], attr }),
   deleteSyncJob: (id) => call('POST', 'delete/syncjob', [String(id)]),
+
+  // ---- spam filter (rspamd via mailcow)
+  getSpamScore: async (email) => {
+    const r = await call('GET', `get/spam-score/${encodeURIComponent(email)}`);
+    const v = String((Array.isArray(r) ? r[0] : r)?.score || '').split(',').map(Number);
+    return v.length === 2 && v.every((n) => !Number.isNaN(n)) ? { low: v[0], high: v[1] } : null;
+  },
+  setSpamScore: (emails, score) => call('POST', 'edit/spam-score', { items: [].concat(emails), attr: { spam_score: score } }),
+  // Safe (wl) / blocked (bl) senders. Mailbox lists also include the domain-wide entries (object = domain).
+  getMailboxPolicy: async (email) => ({
+    wl: list(await call('GET', `get/policy_wl_mailbox/${encodeURIComponent(email)}`)),
+    bl: list(await call('GET', `get/policy_bl_mailbox/${encodeURIComponent(email)}`)),
+  }),
+  getDomainPolicy: async (domain) => ({
+    wl: list(await call('GET', `get/policy_wl_domain/${encodeURIComponent(domain)}`)),
+    bl: list(await call('GET', `get/policy_bl_domain/${encodeURIComponent(domain)}`)),
+  }),
+  addMailboxPolicy: (email, kind, from) => call('POST', 'add/mailbox-policy', { username: email, object_list: kind, object_from: from }),
+  addDomainPolicy: (domain, kind, from) => call('POST', 'add/domain-policy', { domain, object_list: kind, object_from: from }),
+  deleteMailboxPolicy: (prefids) => call('POST', 'delete/mailbox-policy', [].concat(prefids).map(String)),
+  deleteDomainPolicy: (prefids) => call('POST', 'delete/domain-policy', [].concat(prefids).map(String)),
+  // Quarantine (definite spam held by the server)
+  listQuarantine: async () => list(await call('GET', 'get/quarantine/all')).map((x) => ({
+    id: Number(x.id), qid: x.qid, subject: x.subject || '(no subject)', sender: x.sender || '', rcpt: String(x.rcpt || '').toLowerCase(),
+    score: Number(x.score), virus: Number(x.virus_flag) > 0, action: x.action, created: Number(x.created) * 1000, notified: Number(x.notified) === 1,
+  })),
+  quarantineItem: async (id) => (await call('GET', `get/quarantine/${encodeURIComponent(id)}`)) || null,
+  quarantineAction: (ids, action) => call('POST', 'edit/qitem', { items: [].concat(ids).map(String), attr: { action } }),
+  deleteQuarantine: (ids) => call('POST', 'delete/qitem', [].concat(ids).map(String)),
+  setQuarantineNotification: (emails, freq) => call('POST', 'edit/quarantine_notification', { items: [].concat(emails), attr: { quarantine_notification: freq } }),
+  setQuarantineCategory: (emails, cat) => call('POST', 'edit/quarantine_category', { items: [].concat(emails), attr: { quarantine_category: cat } }),
 
   listAliases: async (domain) => list(await call('GET', 'get/alias/all'))
     .filter((a) => a.domain === domain || String(a.address).endsWith(`@${domain}`))

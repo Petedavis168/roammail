@@ -16,6 +16,7 @@ import { useSignatures } from '../signatures.js';
 import { fmtWhen } from '../snooze.js';
 import ScheduledList from './ScheduledList.jsx';
 import SnoozeMenu from './SnoozeMenu.jsx';
+import QuarantineList from './QuarantineList.jsx';
 
 export default function Mail({ me, refreshMe, theme, setTheme, onLogout }) {
   const toast = useToast();
@@ -38,6 +39,8 @@ export default function Mail({ me, refreshMe, theme, setTheme, onLogout }) {
   const [sigData, reloadSigs] = useSignatures();
   const [snoozeMap, setSnoozeMap] = useState({});
   const [snoozeFor, setSnoozeFor] = useState(null); // uids awaiting a snooze time
+  const [qCount, setQCount] = useState(0);
+  useEffect(() => { api.get('/api/spam').then((r) => setQCount(r.quarantineCount)).catch(() => {}); }, []);
   const reqId = useRef(0);
 
   const isAdmin = me.superAdmin || me.orgs?.some((o) => o.role === 'admin');
@@ -69,7 +72,7 @@ export default function Mail({ me, refreshMe, theme, setTheme, onLogout }) {
   }, [folder, filter, search, toast]);
 
   useEffect(() => { loadFolders(); }, [loadFolders]);
-  useEffect(() => { setSelected(new Set()); setActive(null); if (folder !== '@scheduled') load(); }, [load]);
+  useEffect(() => { setSelected(new Set()); setActive(null); if (!folder.startsWith('@')) load(); }, [load]);
   const loadSnoozed = useCallback(() => api.get('/api/snoozed').then((jobs) => {
     const m = {};
     for (const j of jobs) for (const u of j.summary.uids || []) m[u] = j;
@@ -106,7 +109,7 @@ export default function Mail({ me, refreshMe, theme, setTheme, onLogout }) {
   // Page title with unread count
   useEffect(() => {
     const inbox = folders.find((f) => f.specialUse === '\\Inbox');
-    document.title = `${inbox?.unread ? `(${inbox.unread}) ` : ''}${view === 'admin' ? 'Admin' : folder === '@scheduled' ? 'Scheduled' : folderLabel(currentFolderObj || { name: 'Inbox' })} - ${me.email}`;
+    document.title = `${inbox?.unread ? `(${inbox.unread}) ` : ''}${view === 'admin' ? 'Admin' : folder === '@scheduled' ? 'Scheduled' : folder === '@quarantine' ? 'Spam quarantine' : folderLabel(currentFolderObj || { name: 'Inbox' })} - ${me.email}`;
   }, [folders, currentFolderObj, me.email, view]);
 
   // ---------- helpers ----------
@@ -176,7 +179,13 @@ export default function Mail({ me, refreshMe, theme, setTheme, onLogout }) {
       } catch (e) { toast(e.message, { error: true }); load({ quiet: true }); }
     },
     junk(uid) { return act.move('@junk', uid, 'marked as junk'); },
-    async notJunk(uid) { return act.move('INBOX', uid, 'moved to Inbox'); },
+    async notJunk(uid, sender) {
+      const addr = sender || msgs.find((m) => m.uid === (Array.isArray(uid) ? uid[0] : uid || active))?.from?.[0]?.address;
+      await act.move('INBOX', uid, 'moved to Inbox');
+      if (addr) {
+        toast(`Always trust ${addr}?`, { duration: 9000, action: 'Trust sender', onAction: () => api.post('/api/spam/senders', { list: 'safe', value: addr }).then(() => toast(`Mail from ${addr} will never go to Junk`)).catch((e) => toast(e.message, { error: true })) });
+      }
+    },
     snooze(uid) { const uids = targetUids(uid); if (uids.length) setSnoozeFor(uids); },
     async doSnooze(until) {
       const uids = snoozeFor; setSnoozeFor(null);
@@ -194,7 +203,7 @@ export default function Mail({ me, refreshMe, theme, setTheme, onLogout }) {
       toast('Moved back to your inbox'); load({ quiet: true }); loadFolders();
     },
     async block(address) {
-      if (!confirm(`Block ${address}? Future messages from them go straight to Junk.`)) return;
+      if (!confirm(`Block ${address}? The server will reject their future messages, in every app.`)) return;
       try { await api.post('/api/block', { address }); toast(`Blocked ${address}`); act.junk(); } catch (e) { toast(e.message, { error: true }); }
     },
     async emptyFolder() {
@@ -313,7 +322,7 @@ export default function Mail({ me, refreshMe, theme, setTheme, onLogout }) {
           {sidebarOpen && (
             <Sidebar folders={folders} current={search ? null : folder} onCompose={() => compose()} reload={loadFolders}
               onSelect={(p) => { setFolder(p); clearSearch(); setFilter(''); if (window.innerWidth <= 900) setSidebarOpen(false); }}
-              onDropMessages={(dest, uids) => act.move(dest, uids)} onScheduled={() => { setFolder('@scheduled'); clearSearch(); }}
+              onDropMessages={(dest, uids) => act.move(dest, uids)} onScheduled={() => { setFolder('@scheduled'); clearSearch(); }} onQuarantine={() => { setFolder('@quarantine'); clearSearch(); }} qCount={qCount}
               categories={prefs.categories} onCategory={(c) => runSearch(`label:${catKeyword(c.name).slice(4)}`)} />
           )}
           <main className={`main ${paneClass}`}>
@@ -325,7 +334,7 @@ export default function Mail({ me, refreshMe, theme, setTheme, onLogout }) {
               readingPane={prefs.readingPane} setReadingPane={(v) => setPrefs({ readingPane: v })}
             />
             <div className="panes">
-              {folder === '@scheduled' && !search ? <ScheduledList onCompose={compose} /> : <MessageList
+              {folder === '@quarantine' && !search ? <QuarantineList onChanged={setQCount} /> : folder === '@scheduled' && !search ? <ScheduledList onCompose={compose} /> : <MessageList
                 snoozeMap={folder.toLowerCase() === 'snoozed' ? snoozeMap : null}
                 list={list} title={search ? `Results for "${search}"` : folderLabel(currentFolderObj || { name: folder })}
                 search={search} onClearSearch={clearSearch}
@@ -335,7 +344,7 @@ export default function Mail({ me, refreshMe, theme, setTheme, onLogout }) {
                 onLoadMore={() => !search && list.messages.length < list.total && !list.loading && load({ page: list.page + 1, append: true })}
                 onEmpty={act.emptyFolder} onMarkAllRead={act.markAllRead}
               />}
-              {folder !== '@scheduled' && (prefs.readingPane !== 'off' || active) ? (
+              {!folder.startsWith('@') && (prefs.readingPane !== 'off' || active) ? (
                 <ReadingPane
                   key={`${listFolder}:${active}`} folder={listFolder} msg={activeMsg} me={me} prefs={prefs} setPrefs={setPrefs}
                   conversation={prefs.conversation} onReply={reply} act={act} categories={prefs.categories}

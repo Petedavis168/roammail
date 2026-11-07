@@ -10,6 +10,7 @@ import { publicAccounts, accounts } from './accounts.js';
 import { publicSecurity, securityApi } from './security.js';
 import { signatures, publicAssets } from './signatures.js';
 import { mailtools } from './mailtools.js';
+import { spam } from './spam.js';
 import { startJobs } from './jobs.js';
 import { deviceSetup, deviceSetupApi } from './devicesetup.js';
 
@@ -50,6 +51,7 @@ app.use('/api', accounts);
 app.use('/api', signatures);
 app.use('/api', securityApi);
 app.use('/api', mailtools);
+app.use('/api', spam);
 app.use('/api', deviceSetupApi);
 app.use('/api', (req, res) => res.status(404).json({ error: 'Not found' }));
 app.use('/api', (err, req, res, _next) => {

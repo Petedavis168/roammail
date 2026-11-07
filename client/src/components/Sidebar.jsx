@@ -4,7 +4,7 @@ import { Icon } from '../icons.jsx';
 import { folderIcon, folderLabel, SPECIAL_ORDER } from '../util.js';
 import { useToast } from './Toast.jsx';
 
-export default function Sidebar({ folders, current, onSelect, onCompose, reload, onDropMessages, categories, onCategory, onScheduled }) {
+export default function Sidebar({ folders, current, onSelect, onCompose, reload, onDropMessages, categories, onCategory, onScheduled, onQuarantine, qCount }) {
   const toast = useToast();
   const [collapsed, setCollapsed] = useState(() => JSON.parse(localStorage.getItem('collapsed') || '{}'));
   const [dragOver, setDragOver] = useState(null);
@@ -79,7 +79,21 @@ export default function Sidebar({ folders, current, onSelect, onCompose, reload,
     <nav className="sidebar" onClick={() => setMenu(null)}>
       <button className="compose-btn" onClick={onCompose}><Icon name="pen" /> New mail</button>
       <div className="nav-section">
-        {specials.map((f) => <Row key={f.path} f={f} />)}
+        {specials.map((f) => (
+          <span key={f.path}>
+            <Row f={f} />
+            {f.specialUse === '\\Junk' && (
+              <div className={`folder ${current === '@quarantine' ? 'on' : ''}`} style={{ paddingLeft: 10 }} onClick={onQuarantine} role="button" title="Definite spam held back by the server">
+                <span className="twisty" /><Icon name="shield" /><span className="fname">Spam quarantine</span>{qCount > 0 && <span className="count muted">{qCount}</span>}
+              </div>
+            )}
+          </span>
+        ))}
+        {!specials.some((f) => f.specialUse === '\\Junk') && (
+          <div className={`folder ${current === '@quarantine' ? 'on' : ''}`} style={{ paddingLeft: 10 }} onClick={onQuarantine} role="button">
+            <span className="twisty" /><Icon name="shield" /><span className="fname">Spam quarantine</span>{qCount > 0 && <span className="count muted">{qCount}</span>}
+          </div>
+        )}
         {snoozedFolder && <Row f={snoozedFolder} />}
         <div className={`folder ${current === '@scheduled' ? 'on' : ''}`} style={{ paddingLeft: 10 }} onClick={onScheduled} role="button">
           <span className="twisty" /><Icon name="clock" /><span className="fname">Scheduled</span>

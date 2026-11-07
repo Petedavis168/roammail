@@ -12,6 +12,7 @@ import { saveProfile, getProfile, deleteUserData } from './signatures.js';
 import { setRecoveryEmail } from './security.js';
 import { deliverWelcome } from './welcome.js';
 import { createSetupLink } from './devicesetup.js';
+import { applyDomainSpamDefaults } from './spam.js';
 
 const wrap = (fn) => (req, res, next) => Promise.resolve(fn(req, res, next)).catch(next);
 const fail = (status, message) => Object.assign(new Error(message), { status });
@@ -278,6 +279,7 @@ accounts.post('/admin/users', wrap(async (req, res) => {
   saveProfile(email, { name: req.body.name || '', title: req.body.title, department: req.body.department, phone: req.body.phone, mobile: req.body.mobile });
   if (req.body.welcome !== false) deliverWelcome({ email, password: req.body.password, name: req.body.name, company: d.org_name }).catch(() => {});
   audit(req.user.email, d.org_id, 'user.create', { email, admin: !!req.body.admin });
+  applyDomainSpamDefaults(email).catch(() => {});
   // QR code the admin can show the new hire: scan → phone set up, password included (single use, 2 hours)
   const setup = await createSetupLink(req, email, req.body.password, 120);
   res.json({ ok: true, email, setup });

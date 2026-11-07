@@ -5,6 +5,7 @@ import { useToast } from '../Toast.jsx';
 import { DomainWizard, DomainStatus, Copy, setSuper } from './DomainSetup.jsx';
 import { avatarColor, initials, fmtDate } from '../../util.js';
 import OrgSignature from './Signature.jsx';
+import SpamAdmin from './SpamAdmin.jsx';
 
 const genPassword = () => {
   const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnpqrstuvwxyz23456789';
@@ -253,7 +254,7 @@ function Activity({ org }) {
   const [rows, setRows] = useState(null);
   useEffect(() => { api.get(`/api/admin/orgs/${org.id}/audit`).then(setRows).catch(() => setRows([])); }, [org.id]);
   const label = { 'user.create': 'created user', 'user.update': 'updated user', 'user.delete': 'deleted user', 'alias.create': 'created alias', 'alias.delete': 'deleted alias',
-    'signature.update': 'updated the company signature', 'domain.add': 'added domain', 'domain.activate': 'activated domain', 'domain.delete': 'removed domain', 'domain.route53': 'set up DNS for', 'org.create': 'created organization', 'org.update': 'renamed organization' };
+    'signature.update': 'updated the company signature', 'spam.apply_all': 'applied spam settings to everyone at', 'spam.domain_block': 'blocked company-wide', 'spam.domain_trust': 'trusted company-wide', 'domain.add': 'added domain', 'domain.activate': 'activated domain', 'domain.delete': 'removed domain', 'domain.route53': 'set up DNS for', 'org.create': 'created organization', 'org.update': 'renamed organization' };
   return (
     <div className="table">
       {rows?.length === 0 && <div className="list-msg muted">No activity yet.</div>}
@@ -337,7 +338,7 @@ export default function Admin({ me, refreshMe, onExit }) {
   }
 
   const tabs = [
-    ...(org ? [['users', 'Users', 'users'], ['signature', 'Signature', 'pen'], ['aliases', 'Aliases', 'mail'], ['domains', 'Domains', 'globe'], ['activity', 'Activity', 'refresh']] : []),
+    ...(org ? [['users', 'Users', 'users'], ['signature', 'Signature', 'pen'], ['spam', 'Spam filter', 'junk'], ['aliases', 'Aliases', 'mail'], ['domains', 'Domains', 'globe'], ['activity', 'Activity', 'refresh']] : []),
     ...(me.superAdmin ? [['platform', 'Platform (super-admin)', 'shield'], ['new', 'New business', 'plus']] : []),
   ];
   const current = tabs.some((t) => t[0] === tab) ? tab : tabs[0][0];
@@ -359,6 +360,7 @@ export default function Admin({ me, refreshMe, onExit }) {
         <h1>{current === 'platform' ? 'Platform' : current === 'new' ? 'Add a business' : org?.name} <small className="muted">{tabs.find((t) => t[0] === current)?.[1]}</small></h1>
         {current === 'users' && org && <Users key={org.id} org={org} domains={org.domains} />}
         {current === 'signature' && org && <SignatureTab key={org.id} org={org} />}
+        {current === 'spam' && org && <SpamAdmin key={org.id} org={org} />}
         {current === 'aliases' && org && <Aliases key={org.id} domains={org.domains} />}
         {current === 'domains' && org && <Domains key={org.id} org={org} reload={load} refreshMe={refreshMe} goUsers={() => setTab('users')} />}
         {current === 'activity' && org && <Activity org={org} />}

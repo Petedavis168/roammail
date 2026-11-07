@@ -526,3 +526,34 @@ kbd { font: 12px ui-monospace, monospace; background: var(--panel-2); border: 1p
 .hire-qr { display: flex; gap: 14px; align-items: center; padding: 10px; border: 1px solid var(--border); border-radius: 10px; margin-bottom: 12px; background: var(--panel-2); }
 .hire-qr img { background: #fff; border-radius: 8px; padding: 4px; }
 .hire-qr p { margin: 4px 0 0; }
+
+/* ===================== junk & spam ===================== */
+.quarantine { flex: 1; display: flex; min-width: 0; min-height: 0; }
+.q-list { width: 420px; }
+.q-reading .thread { padding: 16px 20px; }
+.q-subject { font-size: 19px; margin: 0 0 12px; overflow-wrap: anywhere; }
+.q-why { margin: 10px 0; padding: 10px 14px; background: #fff4ce; border: 1px solid #f3d18e; border-radius: 8px; color: #5c4400; }
+.q-why ul, .why-junk ul { margin: 4px 0 0; padding-left: 18px; }
+[data-theme='dark'] .q-why { background: #3d3214; color: #f2d98c; border-color: #6b5220; }
+.q-text { white-space: pre-wrap; font: 13px/1.5 ui-monospace, monospace; background: var(--panel-2); border: 1px solid var(--border); border-radius: 6px; padding: 12px; max-height: 50vh; overflow: auto; }
+.avatar.q { background: #ca5010; }
+.avatar.virus { background: #a4262c; font-size: 16px; }
+.admin-quarantine { height: 70vh; display: flex; border: 1px solid var(--border); border-radius: 10px; overflow: hidden; }
+.why-junk { display: flex; gap: 10px; margin: 0 14px 10px 66px; padding: 10px 12px; border-radius: 8px; background: #fff4ce; color: #5c4400; border: 1px solid #f3d18e; font-size: 13px; }
+[data-theme='dark'] .why-junk { background: #3d3214; color: #f2d98c; border-color: #6b5220; }
+.how-spam { display: flex; align-items: stretch; gap: 8px; flex-wrap: wrap; }
+.how-spam > div { flex: 1; min-width: 150px; display: flex; flex-direction: column; gap: 2px; padding: 10px 12px; border: 1px solid var(--border); border-radius: 8px; background: var(--panel-2); }
+.how-spam > div small { color: var(--muted); }
+.how-spam > span { align-self: center; color: var(--muted); }
+.preset-row { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 8px; }
+.radio-card.on { border-color: var(--brand); background: var(--brand-soft); }
+.sender-list h3 { margin: 2px 0 !important; }
+.chips-wrap { display: flex; flex-wrap: wrap; gap: 6px; }
+.rchip.locked { background: var(--panel-2); color: var(--muted); padding-right: 8px; }
+.adv { margin-top: 18px; border-top: 1px solid var(--border); padding-top: 12px; }
+.adv summary { cursor: pointer; font-weight: 600; color: var(--brand); }
+.rule-item.col { flex-direction: column; align-items: stretch; }
+.sieve { margin: 6px 0 0; font: 12px/1.45 ui-monospace, monospace; background: var(--panel-2); border-radius: 6px; padding: 8px 10px; max-height: 200px; overflow: auto; white-space: pre-wrap; }
+.small-seg { width: auto; }
+.small-seg button { padding: 5px 14px; }
+@media (max-width: 900px) { .q-list { width: 100%; } .quarantine .q-reading { display: none; } .why-junk { margin-left: 14px; } }

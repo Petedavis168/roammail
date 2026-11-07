@@ -3,6 +3,7 @@ import { Icon } from '../icons.jsx';
 import Signatures from './settings/Signatures.jsx';
 import Security from './settings/Security.jsx';
 import { AutoReply, Rules, ImportMail } from './settings/MailTools.jsx';
+import SpamSettings from './settings/Spam.jsx';
 import { api } from '../api.js';
 import { useToast } from './Toast.jsx';
 
@@ -116,7 +117,7 @@ function Apps({ me, sigData }) {
 
 const TABS = [
   ['general', 'General', 'settings'], ['signatures', 'Signatures', 'pen'], ['security', 'Security', 'lock'],
-  ['autoreply', 'Automatic replies', 'reply'], ['rules', 'Rules', 'filter'], ['import', 'Import mail', 'import'], ['apps', 'Phone & apps', 'phone'],
+  ['autoreply', 'Automatic replies', 'reply'], ['junk', 'Junk & spam', 'junk'], ['rules', 'Rules', 'filter'], ['import', 'Import mail', 'import'], ['apps', 'Phone & apps', 'phone'],
 ];
 
 export default function SettingsPanel({ prefs, setPrefs, me, folders, sigData, reloadSigs, onClose, initialTab = 'general' }) {
@@ -135,6 +136,7 @@ export default function SettingsPanel({ prefs, setPrefs, me, folders, sigData, r
             {tab === 'signatures' && <Signatures sigData={sigData} reloadSigs={reloadSigs} prefs={prefs} setPrefs={setPrefs} />}
             {tab === 'security' && <Security me={me} />}
             {tab === 'autoreply' && <AutoReply me={me} />}
+            {tab === 'junk' && <SpamSettings />}
             {tab === 'rules' && <Rules folders={folders} categories={prefs.categories} me={me} />}
             {tab === 'import' && <ImportMail />}
             {tab === 'apps' && <Apps me={me} sigData={sigData} />}

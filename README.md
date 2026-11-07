@@ -24,6 +24,15 @@ existing **mailcow** server (IMAP/SMTP for mail, the mailcow API for accounts).
 - **Automatic replies** (out of office, with dates and "only my organization"), **Rules** (move, mark read, flag,
   categorize, forward, junk, delete) and **Block sender**. These run on the server (Sieve), so they work in every app.
 - **Import mail** from Gmail, Outlook, Yahoo, iCloud or any IMAP account (keeps syncing until stopped)
+- **Junk & spam, the mailcow way.** Probable spam lands in **Junk Email** with a "Why is this in Junk?" explanation
+  (from rspamd's scores), and links and pictures are turned off. Definite spam is held in the server's **Spam
+  quarantine**, where you get a safe text-only preview, release, "not spam", delete, a virus warning and a daily
+  summary email. Strictness presets (Relaxed / Standard / Strict / Custom) set mailcow's spam scores. **Safe senders**
+  and **Blocked senders** are mailcow's own allow and block lists, so they work in every app. "Not junk" offers to
+  trust the sender, and moving mail in or out of Junk trains the filter. Business admins get company-wide safe and
+  blocked senders, a team quarantine, and "apply strictness to everyone", which new hires inherit.
+- Rules always send spam to Junk first (mailcow files spam *after* user filters, so a rule could otherwise rescue
+  spam or auto-reply to it). Settings → Rules → Advanced shows every mailcow Sieve filter on the mailbox.
 - **Phishing protection:** warnings for failed SPF/DKIM/DMARC, display-name spoofing, odd Reply-To, fake
   "internal" mail; **External** tag for business users; verified-sender lock
 - **One-scan phone setup:** Settings → Phone & apps shows a QR code. On iPhone/iPad/Mac it installs a configuration
@@ -66,6 +75,8 @@ and later updates go out with the same command (with automatic rollback).
    - *System → Configuration → Options → Fail2ban parameters*: add the new server's IP to the
      **whitelist**. All logins come from this server, so without this a few wrong passwords could
      get it banned and lock everyone out.
+   - *System → Configuration → Quarantine*: make sure quarantine is enabled (retention > 0), or definite spam is simply
+     rejected and the Spam quarantine view stays empty.
    - The API key is also used for rules and auto-replies (Sieve filters), mail import (sync jobs) and password changes.
    - Create the domain you'll use for free sign-ups (e.g. `yourdomain.com`) if it doesn't exist.
 2. **Launch EC2**: Ubuntu 24.04, `t3.small` is plenty to start. Security group: allow 22 (your IP), 80, 443.

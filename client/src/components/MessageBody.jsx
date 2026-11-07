@@ -5,13 +5,20 @@ import { escapeHtml } from '../util.js';
 
 // Render an email safely: sanitized HTML in a sandboxed iframe (no scripts),
 // remote images blocked until the user allows them (privacy / tracking pixels).
-export function prepareHtml(msg, allowRemote) {
+export function prepareHtml(msg, allowRemote, disableLinks) {
   let blocked = 0;
   const cidMap = Object.fromEntries((msg.attachments || []).filter((a) => a.cid).map((a) => [a.cid, api.attachmentUrl(msg.folder, msg.uid, a.index, true)]));
   const source = msg.html || `<pre style="white-space:pre-wrap;font-family:inherit;margin:0">${linkify(escapeHtml(msg.text || ''))}</pre>`;
 
   DOMPurify.addHook('afterSanitizeAttributes', (node) => {
-    if (node.tagName === 'A') { node.setAttribute('target', '_blank'); node.setAttribute('rel', 'noopener noreferrer'); }
+    if (node.tagName === 'A') {
+      node.setAttribute('target', '_blank'); node.setAttribute('rel', 'noopener noreferrer');
+      if (disableLinks && node.hasAttribute('href')) {
+        node.setAttribute('title', `Link disabled because this message is in Junk: ${node.getAttribute('href')}`);
+        node.removeAttribute('href');
+        node.setAttribute('style', `${node.getAttribute('style') || ''};color:#888;text-decoration:line-through;cursor:not-allowed`);
+      }
+    }
     for (const attr of ['src', 'background', 'poster']) {
       const v = node.getAttribute?.(attr);
       if (!v) continue;
@@ -41,10 +48,10 @@ const BASE_CSS = `<style>
   table{max-width:100%}
 </style>`;
 
-export default function MessageBody({ msg, allowRemote, onBlocked }) {
+export default function MessageBody({ msg, allowRemote, onBlocked, disableLinks }) {
   const ref = useRef();
   const [height, setHeight] = useState(120);
-  const { html, blocked } = useMemo(() => prepareHtml(msg, allowRemote), [msg, allowRemote]);
+  const { html, blocked } = useMemo(() => prepareHtml(msg, allowRemote, disableLinks), [msg, allowRemote, disableLinks]);
   useEffect(() => { onBlocked?.(blocked); }, [blocked, onBlocked]);
 
   const srcDoc = html.replace(/<head>/i, `<head><base target="_blank">${BASE_CSS}`);

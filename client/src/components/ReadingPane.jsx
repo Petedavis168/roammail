@@ -29,7 +29,19 @@ function SecurityBanner({ m, sender, orgDomains }) {
   );
 }
 
-function ThreadMessage({ m, expanded, onToggle, onReply, prefs, setPrefs, last, orgDomains, onBlock }) {
+function WhyJunk({ m }) {
+  if (!m.spam || !(m.spam.score >= 0)) return null;
+  return (
+    <div className="why-junk">
+      <Icon name="junk" size={16} />
+      <div><b>Why is this in Junk?</b> <span className="muted small">Spam score {m.spam.score.toFixed(1)} (blocked at {m.spam.threshold})</span>
+        {m.spam.reasons.length > 0 ? <ul>{m.spam.reasons.map((r) => <li key={r}>{r}</li>)}</ul> : <div className="small">Several small spam signals added up.</div>}
+      </div>
+    </div>
+  );
+}
+
+function ThreadMessage({ m, expanded, onToggle, onReply, prefs, setPrefs, last, orgDomains, onBlock, isJunk }) {
   const sender = m.from?.[0] || {};
   const trusted = prefs.showImages === 'always' || prefs.trustedSenders.includes(sender.address?.toLowerCase());
   const [allow, setAllow] = useState(trusted);
@@ -87,8 +99,10 @@ function ThreadMessage({ m, expanded, onToggle, onReply, prefs, setPrefs, last, 
           </div>
         </div>
       </header>
+      {isJunk && <WhyJunk m={m} />}
       <SecurityBanner m={m} sender={sender} orgDomains={orgDomains} />
-      {blocked > 0 && !allow && (
+      {isJunk && <div className="img-banner"><Icon name="shield" size={16} /> Links and pictures are turned off in Junk. Mark it as not junk to use them.</div>}
+      {blocked > 0 && !allow && !isJunk && (
         <div className="img-banner">
           <Icon name="shield" size={16} /> Pictures were blocked to protect your privacy.
           <button className="link" onClick={() => setAllow(true)}>Show pictures</button>
@@ -97,7 +111,7 @@ function ThreadMessage({ m, expanded, onToggle, onReply, prefs, setPrefs, last, 
       )}
       {unsubUrl && <div className="unsub">Mailing list · <a href={unsubUrl} target="_blank" rel="noreferrer">Unsubscribe</a></div>}
       <div className="tmsg-body" data-msg={`${m.folder}:${m.uid}`}>
-        <MessageBody msg={m} allowRemote={allow} onBlocked={setBlocked} />
+        <MessageBody msg={m} allowRemote={allow && !isJunk} onBlocked={setBlocked} disableLinks={isJunk} />
       </div>
       {files.length > 0 && (
         <div className="attachments">
@@ -156,7 +170,7 @@ export default function ReadingPane({ folder, msg, me, prefs, setPrefs, conversa
           <button className="icon-btn" title="Mark unread" onClick={() => { act.read(false, msg.uid); onClose(); }}><Icon name="mail" /></button>
         </div>
       </div>
-      {isJunk && <div className="banner warn">This message was identified as junk. Be careful with links and attachments. <button className="link" onClick={() => act.notJunk(msg.uid)}>It's not junk</button></div>}
+      {isJunk && <div className="banner warn">This message was identified as junk. Be careful with links and attachments. <button className="link" onClick={() => act.notJunk(msg.uid, msg.from?.[0]?.address)}>It's not junk</button></div>}
       <div className="thread">
         {error && <div className="form-error">{error}</div>}
         {!thread && !error && <div className="list-msg"><div className="spinner" /></div>}
@@ -166,7 +180,7 @@ export default function ReadingPane({ folder, msg, me, prefs, setPrefs, conversa
           return (
             <ThreadMessage key={k} m={m} last={i === thread.messages.length - 1} expanded={expanded.has(k)} prefs={prefs} setPrefs={setPrefs}
               onToggle={() => setExpanded((s) => { const n = new Set(s); n.has(k) ? n.delete(k) : n.add(k); return n; })}
-              onReply={onReply} orgDomains={orgDomains} onBlock={act.block} />
+              onReply={onReply} orgDomains={orgDomains} onBlock={act.block} isJunk={isJunk} />
           );
         })}
         {thread && (

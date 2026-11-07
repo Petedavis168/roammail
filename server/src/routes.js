@@ -10,6 +10,7 @@ import { getClient, closeClient, withMailbox, specialFolder, makeClient } from '
 import { parseQuery } from './search.js';
 import { rolesFor, q } from './db.js';
 import { applyEnforcedSignature } from './signatures.js';
+import { spamInfo } from './spam.js';
 import { addJob, listJobs, getJob, deleteJob } from './jobs.js';
 import { config as appConfig } from './config.js';
 
@@ -222,6 +223,7 @@ function fullMessage(folder, msg, parsed) {
     text: parsed.text || '',
     listUnsubscribe: parsed.headers.get('list-unsubscribe') || null,
     security: senderSecurity(parsed),
+    spam: spamInfo(parsed.headers.get('x-spamd-result')),
     attachments: (parsed.attachments || []).map((a, i) => ({
       index: i,
       filename: a.filename || `attachment-${i + 1}`,

@@ -96,7 +96,45 @@ export function Rules({ folders, categories, me }) {
           </div>
         </div>
       ) : <button className="btn" onClick={() => setEdit(blank)}><Icon name="plus" size={16} /> New rule</button>}
+      <ServerFilters />
     </div>
+  );
+}
+
+function ServerFilters() {
+  const toast = useToast();
+  const [list, setList] = useState(null);
+  const [open, setOpen] = useState(false);
+  const [add, setAdd] = useState(null);
+  const load = () => api.get('/api/filters/server').then(setList).catch(() => setList([]));
+  useEffect(() => { if (open) load(); }, [open]);
+  const run = async (fn, msg) => { try { await fn(); toast(msg); load(); return true; } catch (e) { toast(e.message, { error: true }); } };
+  return (
+    <details className="adv" onToggle={(e) => setOpen(e.currentTarget.open)}>
+      <summary>Advanced: all mailcow server filters (Sieve)</summary>
+      <p className="muted small">Every filter stored for your mailbox on the mail server, including ones made in other tools. Order on the server: mailcow's global filters → <b>pre-filters</b> → <b>post-filters</b> → mailcow moves spam to Junk. Only one filter of each type can be active at a time.</p>
+      {list?.map((f) => (
+        <div key={f.id} className="rule-item col">
+          <div className="rule-row">
+            <label className="switch"><input type="checkbox" checked={f.active} onChange={(e) => run(() => api.patch('/api/filters/server', { id: f.id, active: e.target.checked }), e.target.checked ? 'Filter activated' : 'Filter turned off')} /></label>
+            <b>{f.managed ? 'Rules & automatic replies (managed here)' : f.desc}</b><span className="pill">{f.type}</span><div className="spacer" />
+            {!f.managed && <button className="icon-btn" onClick={() => confirm(`Delete filter "${f.desc}"?`) && run(() => api.del('/api/filters/server', { id: f.id }), 'Filter deleted')}><Icon name="trash" size={16} /></button>}
+          </div>
+          <pre className="sieve">{f.script}</pre>
+        </div>
+      ))}
+      {list?.length === 0 && <div className="muted small">No server filters yet.</div>}
+      {add ? (
+        <div className="card form">
+          <label>Name<input value={add.desc} onChange={(e) => setAdd({ ...add, desc: e.target.value })} /></label>
+          <label>Type<select value={add.type} onChange={(e) => setAdd({ ...add, type: e.target.value })}><option value="prefilter">Pre-filter</option><option value="postfilter">Post-filter</option></select></label>
+          <label>Sieve script<textarea rows={8} className="mono" value={add.script} onChange={(e) => setAdd({ ...add, script: e.target.value })} /></label>
+          <small className="muted">Saving activates it and turns off any other active {add.type}. The server checks the script and refuses invalid ones.</small>
+          <div className="step-actions"><button className="btn" onClick={() => setAdd(null)}>Cancel</button>
+            <button className="btn primary" onClick={async () => (await run(() => api.post('/api/filters/server', add), 'Filter saved')) && setAdd(null)}>Save filter</button></div>
+        </div>
+      ) : <button className="btn sm" onClick={() => setAdd({ desc: '', type: 'postfilter', script: 'require ["fileinto"];\n\nif header :contains "subject" "[newsletter]" {\n  fileinto "Newsletters";\n}\n' })}><Icon name="plus" size={14} /> Add raw Sieve filter</button>}
+    </details>
   );
 }
 

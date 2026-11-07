@@ -56,7 +56,10 @@ export function buildSieve({ vacation, rules }, me, orgDomains) {
     lines.push(`# ${String(r.name || 'Rule').replace(/[\r\n]/g, ' ')}\nif ${r.match === 'all' ? 'allof' : 'anyof'}(${tests.join(', ')}) {\n  ${acts.join('\n  ')}\n}`);
   }
   if (!lines.length) return null;
-  return `require [${[...req].map(str).join(', ')}];\n\n${lines.join('\n\n')}\n`;
+  // mailcow files spam into Junk in global_sieve_after, which runs after this script. File it here first so
+  // no rule can pull spam into a normal folder and automatic replies never answer spammers.
+  const spamFirst = '# Spam always goes to Junk (same as mailcow), before any rule or automatic reply\nif header :contains "X-Spam-Flag" "YES" {\n  fileinto "Junk";\n  stop;\n}';
+  return `require [${[...req].map(str).join(', ')}];\n\n${[spamFirst, ...lines].join('\n\n')}\n`;
 }
 
 async function sync(user) {
@@ -105,18 +108,6 @@ mailtools.put('/rules', wrap(async (req, res) => {
   res.json(rules);
 }));
 
-mailtools.post('/block', wrap(async (req, res) => {
-  const address = String(req.body.address || '').trim().toLowerCase();
-  if (!/^[^\s@]+@[^\s@]+$/.test(address)) throw fail(400, 'Invalid address');
-  const rules = userSetting(req.user.email, 'rules', []);
-  if (!rules.some((r) => r.blocked === address)) {
-    rules.unshift({ ...cleanRule({ name: `Block ${address}`, conditions: [{ field: 'from', value: address }], actions: [{ type: 'junk' }] }, 0), blocked: address });
-  }
-  setUserSetting(req.user.email, 'rules', rules);
-  await sync(req.user);
-  res.json({ ok: true });
-}));
-
 // ---------------------------------------------------------------- import old mail
 export const PROVIDERS = {
   gmail: { label: 'Gmail', host: 'imap.gmail.com', port: 993, help: 'Turn on 2-Step Verification in your Google account, then create an App Password at myaccount.google.com/apppasswords and paste it here.' },
@@ -142,7 +133,7 @@ mailtools.post('/imports', wrap(async (req, res) => {
   const password = String(req.body.password || '');
   if (!user || !password) throw fail(400, 'Enter the email address and password of the old account');
   if ((await mailcow.listSyncJobs(req.user.email)).length >= 5) throw fail(400, 'You can have up to 5 imports');
-  await mailcow.addSyncJob(req.user.email, { host, port: Number(req.body.port || p.port || 993), user, password, enc: 'SSL' });
+  await mailcow.addSyncJob(req.user.email, { host, port: Number(req.body.port || p.port || 993), user, password });
   audit(req.user.email, null, 'import.add', { host, user });
   res.json({ ok: true });
 }));
@@ -158,5 +149,38 @@ mailtools.delete('/imports', wrap(async (req, res) => {
   const j = (await mailcow.listSyncJobs(req.user.email)).find((x) => String(x.id) === String(req.query.id));
   if (!j) throw fail(404, 'Import not found');
   await mailcow.deleteSyncJob(j.id);
+  res.json({ ok: true });
+}));
+
+// ---------------------------------------------------------------- advanced: all of the user's mailcow Sieve filters
+mailtools.get('/filters/server', wrap(async (req, res) => {
+  res.json((await mailcow.listFilters(req.user.email)).map((f) => ({
+    id: f.id, desc: f.script_desc, type: f.filter_type, active: Number(f.active) === 1, script: f.script_data, managed: f.script_desc === SCRIPT_DESC,
+  })));
+}));
+mailtools.post('/filters/server', wrap(async (req, res) => {
+  const desc = String(req.body.desc || '').trim().slice(0, 120);
+  const script = String(req.body.script || '');
+  if (!desc || !script.trim()) throw fail(400, 'Give the filter a name and a script');
+  if (desc === SCRIPT_DESC) throw fail(400, 'That name is reserved');
+  if (script.length > 50000) throw fail(400, 'Script too long');
+  await mailcow.addFilter(req.user.email, desc, script, req.body.type === 'postfilter' ? 'postfilter' : 'prefilter');
+  audit(req.user.email, null, 'filter.raw_add', { desc });
+  res.json({ ok: true });
+}));
+mailtools.patch('/filters/server', wrap(async (req, res) => {
+  const f = (await mailcow.listFilters(req.user.email)).find((x) => String(x.id) === String(req.body.id));
+  if (!f) throw fail(404, 'Filter not found');
+  const attr = {};
+  if (req.body.active !== undefined) attr.active = req.body.active ? 1 : 0;
+  if (req.body.script !== undefined && f.script_desc !== SCRIPT_DESC) attr.script_data = String(req.body.script);
+  await mailcow.editFilter(f.id, attr);
+  res.json({ ok: true });
+}));
+mailtools.delete('/filters/server', wrap(async (req, res) => {
+  const f = (await mailcow.listFilters(req.user.email)).find((x) => String(x.id) === String(req.query.id));
+  if (!f) throw fail(404, 'Filter not found');
+  if (f.script_desc === SCRIPT_DESC) throw fail(400, 'This filter is managed by Rules and Automatic replies. Turn those off instead.');
+  await mailcow.deleteFilter(f.id);
   res.json({ ok: true });
 }));
