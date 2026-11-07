@@ -5,7 +5,7 @@ import MailComposer from 'nodemailer/lib/mail-composer/index.js';
 import addressparser from 'nodemailer/lib/addressparser/index.js';
 import { simpleParser } from 'mailparser';
 import { config } from './config.js';
-import { clearSession, requireAuth, onRevoke } from './session.js';
+import { clearSession, requireAuth, onRevoke, unseal } from './session.js';
 import { createCache } from './cache.js';
 import { sharedMailboxContext } from './sharedboxes.js';
 import { ensureMailboxId } from './mailboxids.js';
@@ -184,6 +184,38 @@ api.get('/messages', wrap(async (req, res) => {
     return { total, messages: await fetchSummaries(client, `${start}:${end}`) };
   });
   res.json({ folder, page, pageSize, ...result });
+}));
+
+// ---------- several signed-in accounts (item 10) ----------
+// Each signed-in mailbox on this browser, as its own IMAP user (its own session id = its own connection)
+const liveUsers = (req) => (req.liveSessions || []).map((s) => {
+  const c = unseal(s.creds);
+  return c && { email: s.email, name: s.name, password: c.password, sid: s.id };
+}).filter(Boolean);
+// Unread counts for the account avatars on the rail
+api.get('/accounts/summary', wrap(async (req, res) => {
+  const out = await Promise.all(liveUsers(req).map(async (u) => {
+    let unread = null;
+    try { unread = (await (await getClient(u)).status('INBOX', { unseen: true })).unseen; } catch { /* that mailbox is unreachable right now */ }
+    return { email: u.email, name: u.name, mailboxId: await ensureMailboxId(u.email), unread };
+  }));
+  res.json({ accounts: out });
+}));
+// All inboxes: the newest messages from every signed-in mailbox, merged by date
+api.get('/all-inboxes', wrap(async (req, res) => {
+  const per = Math.min(100, Math.max(10, Number(req.query.pageSize || 50)));
+  const lists = await Promise.all(liveUsers(req).map(async (u) => {
+    try {
+      const mailboxId = await ensureMailboxId(u.email);
+      const msgs = await withMailbox(u, 'INBOX', async (client) => {
+        const total = client.mailbox.exists;
+        return total ? fetchSummaries(client, `${Math.max(1, total - per + 1)}:${total}`) : [];
+      }, { readOnly: true });
+      return msgs.map((m) => ({ ...m, account: u.email, mailboxId }));
+    } catch { return []; }
+  }));
+  const messages = lists.flat().sort((a, b) => new Date(b.date) - new Date(a.date)).slice(0, per * 2);
+  res.json({ folder: '@all', total: messages.length, messages, accounts: lists.length });
 }));
 
 // ---------- search ----------

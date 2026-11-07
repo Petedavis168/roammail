@@ -193,7 +193,7 @@ const MIGRATIONS = [['orgs', 'require_2fa', 'INTEGER NOT NULL DEFAULT 0'], ['org
   ['orgs', 'stripe_subscription', 'TEXT'], ['orgs', 'billing_status', "TEXT NOT NULL DEFAULT 'none'"], ['orgs', 'paid_seats', 'INTEGER NOT NULL DEFAULT 0'],
   ['orgs', 'canceled_at', 'TEXT'],
   ['user_security', 'recovery_verified', 'INTEGER NOT NULL DEFAULT 0'], ['user_security', 'recovery_pending', 'TEXT'],
-  ['user_security', 'recovery_code', 'TEXT'], ['user_security', 'recovery_code_exp', 'INTEGER'], ['user_security', 'recovery_code_tries', 'INTEGER NOT NULL DEFAULT 0'], ['jobs', 'claimed_at', 'INTEGER'], ['shared_mailboxes', 'kind', "TEXT NOT NULL DEFAULT 'shared'"], ['orgs', 'account_no', 'TEXT'], ['password_resets', 'kind', "TEXT NOT NULL DEFAULT 'reset'"], ['password_resets', 'invite_to', 'TEXT'], ['sessions', 'user_id', 'TEXT']];
+  ['user_security', 'recovery_code', 'TEXT'], ['user_security', 'recovery_code_exp', 'INTEGER'], ['user_security', 'recovery_code_tries', 'INTEGER NOT NULL DEFAULT 0'], ['jobs', 'claimed_at', 'INTEGER'], ['shared_mailboxes', 'kind', "TEXT NOT NULL DEFAULT 'shared'"], ['orgs', 'account_no', 'TEXT'], ['password_resets', 'kind', "TEXT NOT NULL DEFAULT 'reset'"], ['password_resets', 'invite_to', 'TEXT'], ['sessions', 'user_id', 'TEXT'], ['sessions', 'remember', 'INTEGER NOT NULL DEFAULT 0']];
 
 // Indexes on migrated columns (run after MIGRATIONS)
 const AFTER = ['CREATE UNIQUE INDEX IF NOT EXISTS orgs_account_no ON orgs(account_no)'];

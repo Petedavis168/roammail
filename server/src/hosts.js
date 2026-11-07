@@ -16,7 +16,7 @@ export const loginUrl = (path = '/') => (config.loginHost ? `https://${config.lo
 export const appUrl = (path = '/') => (root() ? `https://${root()}${path}` : path);
 
 // Section names allowed under /{id}/
-const SECTIONS = /^\/(inbox|sent|drafts|spam|trash|archive|calendar|contacts|settings|scheduled|quarantine|snoozed|search|admin(\/[a-z-]+)?|folder\/[^/]{1,300}|message\/[A-Za-z0-9_.-]{1,400})\/?$/;
+const SECTIONS = /^\/(inbox|sent|drafts|spam|trash|archive|calendar|contacts|settings|scheduled|quarantine|all|snoozed|search|admin(\/[a-z-]+)?|folder\/[^/]{1,300}|message\/[A-Za-z0-9_.-]{1,400})\/?$/;
 const ID_PATH = /^\/(\d{8}|\d{6}-\d{3}-[A-Z]{2})(\/.*)?$/;
 
 const notFound = (res) => res.status(404).type('html').set('Cache-Control', 'no-store').send(`<!doctype html><meta name="viewport" content="width=device-width,initial-scale=1"><title>Not found</title>

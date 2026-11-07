@@ -72,6 +72,15 @@ export default function Mail({ me, route, refreshMe, theme, setTheme, onLogout }
   const [snoozeMap, setSnoozeMap] = useState({});
   const [snoozeFor, setSnoozeFor] = useState(null); // uids awaiting a snooze time
   const [qCount, setQCount] = useState(0);
+  // Item 10: every signed-in account with its unread count (rail avatars, All inboxes)
+  const [accounts, setAccounts] = useState(me.accounts || []);
+  const multi = (me.accounts || []).length > 1;
+  useEffect(() => {
+    if (!multi) return undefined;
+    const get = () => api.get('/api/accounts/summary').then((r) => setAccounts(r.accounts)).catch(() => {});
+    get(); const t = setInterval(get, 60_000);
+    return () => clearInterval(t);
+  }, [multi]);
   useEffect(() => { api.get('/api/spam').then((r) => setQCount(r.quarantineCount)).catch(() => {}); }, []);
   const reqId = useRef(0);
 
@@ -91,7 +100,9 @@ export default function Mail({ me, route, refreshMe, theme, setTheme, onLogout }
     const id = ++reqId.current;
     if (!quiet) setList((l) => ({ ...l, loading: true, ...(append ? {} : { messages: page ? l.messages : [] }) }));
     try {
-      const r = search ? await api.search(search, folder) : await api.messages(folder, page, filter);
+      const r = folder === '@all' && !search
+        ? await api.get('/api/all-inboxes').then((x) => ({ ...x, messages: x.messages.map((m) => ({ ...m, origUid: m.uid, uid: `${m.mailboxId}:${m.uid}` })) }))
+        : await api.messages(folder, page, filter);
       if (id !== reqId.current) return;
       setList((l) => ({
         messages: append ? [...l.messages, ...r.messages.filter((m) => !l.messages.some((x) => x.uid === m.uid))] : r.messages,
@@ -120,7 +131,7 @@ export default function Mail({ me, route, refreshMe, theme, setTheme, onLogout }
     return !fl.length ? false : (setFolder('INBOX'), true);
   }, []);
   const routeApplied = useRef(false);
-  useEffect(() => { if (!routeApplied.current && (folders.length || ['inbox', 'folder', 'calendar', 'contacts', 'settings', 'admin', 'message', 'scheduled', 'quarantine'].includes(route.section))) routeApplied.current = applyRoute(route, folders); }, [folders, applyRoute]);
+  useEffect(() => { if (!routeApplied.current && (folders.length || ['inbox', 'folder', 'calendar', 'contacts', 'settings', 'admin', 'message', 'scheduled', 'quarantine', 'all'].includes(route.section))) routeApplied.current = applyRoute(route, folders); }, [folders, applyRoute]);
   useEffect(() => {
     const onPop = () => {
       const m = /^\/[^/]+\/(.*)$/.exec(location.pathname);
@@ -138,7 +149,7 @@ export default function Mail({ me, route, refreshMe, theme, setTheme, onLogout }
     const path = `/${route.id}/${section}`;
     if (location.pathname !== path) history[active || showSettings ? 'replaceState' : 'pushState'](null, '', path);
   }, [view, folder, active, showSettings, folders]);
-  useEffect(() => { setSelected(new Set()); setActive(null); if (!folder.startsWith('@')) load(); }, [load]);
+  useEffect(() => { setSelected(new Set()); setActive(null); if (!folder.startsWith('@') || folder === '@all') load(); }, [load]);
   const loadSnoozed = useCallback(() => api.get('/api/snoozed').then((jobs) => {
     const m = {};
     for (const j of jobs) for (const u of j.summary.uids || []) m[u] = j;
@@ -175,7 +186,7 @@ export default function Mail({ me, route, refreshMe, theme, setTheme, onLogout }
   // Page title with unread count
   useEffect(() => {
     const inbox = folders.find((f) => f.specialUse === '\\Inbox');
-    document.title = `${inbox?.unread ? `(${inbox.unread}) ` : ''}${view === 'admin' ? 'Admin' : folder === '@scheduled' ? 'Scheduled' : folder === '@quarantine' ? 'Spam quarantine' : folderLabel(currentFolderObj || { name: 'Inbox' })} - ${me.email}`;
+    document.title = `${inbox?.unread ? `(${inbox.unread}) ` : ''}${view === 'admin' ? 'Admin' : folder === '@scheduled' ? 'Scheduled' : folder === '@quarantine' ? 'Spam quarantine' : folder === '@all' ? 'All inboxes' : folderLabel(currentFolderObj || { name: 'Inbox' })} - ${me.email}`;
   }, [folders, currentFolderObj, me.email, view]);
 
   // ---------- helpers ----------
@@ -294,6 +305,8 @@ export default function Mail({ me, route, refreshMe, theme, setTheme, onLogout }
   const reply = (msg, mode) => compose(replyDraft({ folder: listFolder, ...msg }, mode, me.email));
 
   const openMessage = (m) => {
+    // All inboxes: open the message in its own account
+    if (m.mailboxId && m.origUid) { location.assign(`/${m.mailboxId}/message/${messageKey('INBOX', m.origUid)}`); return; }
     if (m.draft || listFolder === special('\\Drafts')) {
       api.get('/api/message', { folder: listFolder, uid: m.uid }).then((full) => compose({
         to: full.to, cc: full.cc, bcc: full.bcc, subject: full.subject === '(no subject)' ? '' : full.subject,
@@ -327,6 +340,7 @@ export default function Mail({ me, route, refreshMe, theme, setTheme, onLogout }
       }
       if (e.ctrlKey || e.metaKey || e.altKey) {
         if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'n') { e.preventDefault(); compose(); }
+        if ((e.ctrlKey || e.metaKey) && !e.shiftKey && !e.altKey && /^[1-9]$/.test(e.key) && accounts[Number(e.key) - 1]) { e.preventDefault(); switchMailbox(accounts[Number(e.key) - 1].mailboxId); }
         return;
       }
       const idx = msgs.findIndex((m) => m.uid === active);
@@ -350,7 +364,7 @@ export default function Mail({ me, route, refreshMe, theme, setTheme, onLogout }
     return () => window.removeEventListener('keydown', onKey);
   });
 
-  const paneClass = `pane-${active ? prefs.readingPane : prefs.readingPane === 'off' ? 'off' : prefs.readingPane}`;
+  const paneClass = folder === '@all' ? 'pane-off' : `pane-${active ? prefs.readingPane : prefs.readingPane === 'off' ? 'off' : prefs.readingPane}`;
 
   return (
     <div className={`app density-${prefs.density}`}>
@@ -408,6 +422,18 @@ export default function Mail({ me, route, refreshMe, theme, setTheme, onLogout }
         {[['mail', 'mail', 'Mail'], ['calendar', 'calendar', 'Calendar'], ['contacts', 'users', 'Contacts']].map(([v, i, l]) => (
           <button key={v} className={view === v ? 'on' : ''} onClick={() => setView(v)} title={l} aria-label={l}><Icon name={i} size={20} /><small>{l}</small></button>
         ))}
+        {multi && (
+          <div className="rail-accounts" aria-label="Accounts">
+            {accounts.map((a, i) => (
+              <button key={a.mailboxId} className={`rail-acct ${a.mailboxId === route.id ? 'on' : ''}`} onClick={() => switchMailbox(a.mailboxId)}
+                title={`${a.name || a.email}\n${a.email}${i < 9 ? `  (Ctrl/⌘+${i + 1})` : ''}`} aria-label={`Switch to ${a.email}${a.unread ? `, ${a.unread} unread` : ''}`}>
+                <span className="avatar" style={{ background: avatarColor(a.email) }}>{initials({ name: a.name, address: a.email })}</span>
+                {a.unread > 0 && <span className="rail-badge">{a.unread > 99 ? '99+' : a.unread}</span>}
+              </button>
+            ))}
+            {accounts.length < 10 && <a className="rail-acct add" href={loginHref('?add=1')} title="Add another account" aria-label="Add another account"><Icon name="plus" size={18} /></a>}
+          </div>
+        )}
       </nav>
       {view === 'admin' ? (
         <Suspense fallback={<div className="spinner" />}><Admin me={me} refreshMe={refreshMe} onExit={() => setView('mail')} /></Suspense>
@@ -423,6 +449,7 @@ export default function Mail({ me, route, refreshMe, theme, setTheme, onLogout }
               me={me} mailboxes={sharedBoxes} mailbox={mailbox} onMailbox={switchMailbox}
               onSelect={(p) => { setFolder(p); clearSearch(); setFilter(''); if (vw < 1280) setNavPeek(false); }}
               onDropMessages={(dest, uids) => act.move(dest, uids)} onScheduled={() => { setFolder('@scheduled'); clearSearch(); }} onQuarantine={() => { setFolder('@quarantine'); clearSearch(); }} qCount={qCount}
+              allInboxes={multi ? accounts.reduce((n, a) => n + (a.unread || 0), 0) : null} onAllInboxes={() => { setFolder('@all'); clearSearch(); }}
               categories={prefs.categories} onCategory={(c) => runSearch(`label:${catKeyword(c.name).slice(4)}`)} />
           )}
           <main className={`main ${paneClass} ${active ? 'has-active' : ''}`}>
@@ -442,15 +469,15 @@ export default function Mail({ me, route, refreshMe, theme, setTheme, onLogout }
             <div className="panes">
               {folder === '@quarantine' && !search ? <QuarantineList onChanged={setQCount} /> : folder === '@scheduled' && !search ? <ScheduledList onCompose={compose} /> : <MessageList
                 snoozeMap={folder.toLowerCase() === 'snoozed' ? snoozeMap : null}
-                list={list} title={search ? `Results for "${search}"` : folderLabel(currentFolderObj || { name: folder })}
+                list={list} title={search ? `Results for "${search}"` : folder === '@all' ? 'All inboxes' : folderLabel(currentFolderObj || { name: folder })}
                 search={search} onClearSearch={clearSearch}
                 folderUse={currentFolderObj?.specialUse} filter={filter} setFilter={setFilter}
                 selected={selected} setSelected={setSelected} active={active} onOpen={openMessage}
-                act={act} categories={prefs.categories} density={prefs.density}
+                act={act} categories={prefs.categories} density={prefs.density} allInboxes={folder === '@all'}
                 onLoadMore={() => !search && list.messages.length < list.total && !list.loading && load({ page: list.page + 1, append: true })}
                 onEmpty={act.emptyFolder} onMarkAllRead={act.markAllRead}
               />}
-              {!folder.startsWith('@') && (prefs.readingPane !== 'off' || active) ? (
+              {(!folder.startsWith('@')) && (prefs.readingPane !== 'off' || active) ? (
                 <ReadingPane
                   key={`${listFolder}:${active}`} folder={listFolder} msg={activeMsg} me={me} prefs={prefs} setPrefs={setPrefs}
                   conversation={prefs.conversation} onReply={reply} act={act} categories={prefs.categories}

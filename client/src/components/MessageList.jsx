@@ -4,7 +4,7 @@ import { fmtDate, dateGroup, personName, avatarColor, initials } from '../util.j
 import { fmtWhen } from '../snooze.js';
 
 export default function MessageList({ list, title, search, onClearSearch, folderUse, filter, setFilter, selected, setSelected,
-  active, onOpen, act, categories, density, onLoadMore, onEmpty, onMarkAllRead, snoozeMap }) {
+  active, onOpen, act, categories, density, onLoadMore, onEmpty, onMarkAllRead, snoozeMap, allInboxes }) {
   const ref = useRef();
   const { messages, loading, total } = list;
   const showTo = folderUse === '\\Sent' || folderUse === '\\Drafts';
@@ -62,7 +62,7 @@ export default function MessageList({ list, title, search, onClearSearch, folder
         <h2 title={title}>{title}</h2>
         {search ? (
           <button className="link" onClick={onClearSearch}>Clear</button>
-        ) : (
+        ) : allInboxes ? null : (
           <div className="filters">
             {[['', 'All'], ['unread', 'Unread'], ['flagged', 'Flagged'], ['attachments', 'Files']].map(([v, l]) => (
               <button key={v} className={`chip ${filter === v ? 'on' : ''}`} onClick={() => setFilter(v)}>{l}</button>
@@ -70,7 +70,7 @@ export default function MessageList({ list, title, search, onClearSearch, folder
           </div>
         )}
       </div>
-      {selected.size > 0 && (
+      {selected.size > 0 && !allInboxes && (
         <div className="selbar">
           <b>{selected.size} selected</b>
           <button onClick={() => act.archive()}><Icon name="archive" size={16} /> Archive</button>
@@ -94,7 +94,7 @@ export default function MessageList({ list, title, search, onClearSearch, folder
             header,
             <div key={m.uid} role="option" aria-selected={active === m.uid}
               className={`row ${m.seen ? '' : 'unread'} ${active === m.uid ? 'active' : ''} ${selected.has(m.uid) ? 'selected' : ''}`}
-              onClick={(e) => onRowClick(m, e)} draggable onDragStart={(e) => onDragStart(m, e)}>
+              onClick={(e) => onRowClick(m, e)} draggable={!allInboxes} onDragStart={(e) => onDragStart(m, e)}>
               <div className="row-left" onClick={(e) => toggle(m.uid, e)}>
                 {density === 'compact' ? null : (
                   <span className="avatar" style={{ background: avatarColor(person.address) }}>{initials(person)}</span>
@@ -117,8 +117,9 @@ export default function MessageList({ list, title, search, onClearSearch, folder
                   {density !== 'compact' && m.snippet && <span className="snippet"> — {m.snippet}</span>}
                   {m.categories?.map((c) => <span key={c} className="cat" style={{ '--c': catColor(c) }}>{c}</span>)}
                 </div>
+                {allInboxes && <div className="acct-tag">{m.account}</div>}
               </div>
-              <div className="row-actions" onClick={(e) => e.stopPropagation()}>
+              {!allInboxes && <><div className="row-actions" onClick={(e) => e.stopPropagation()}>
                 {snoozeMap?.[m.uid] ? <button title="Unsnooze now" onClick={() => act.unsnooze(m.uid)}><Icon name="inbox" size={16} /></button>
                   : <button title="Snooze" onClick={() => act.snooze(m.uid)}><Icon name="clock" size={16} /></button>}
                 <button title="Archive" onClick={() => act.archive(m.uid)}><Icon name="archive" size={16} /></button>
@@ -127,7 +128,7 @@ export default function MessageList({ list, title, search, onClearSearch, folder
               </div>
               <button className={`flag-btn ${m.flagged ? 'on' : ''}`} title={m.flagged ? 'Unflag' : 'Flag'} onClick={(e) => { e.stopPropagation(); act.flag(m.uid); }}>
                 <Icon name="flag" size={16} fill={m.flagged ? 'currentColor' : 'none'} />
-              </button>
+              </button></>}
             </div>,
           ];
         })}

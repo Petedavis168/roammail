@@ -39,7 +39,7 @@ export default function Login({ onLogin, mode = 'signin' }) {
   const signupType = params.get('type') === 'domain' ? 'domain' : 'free';
   const billing = ['monthly', 'yearly'].includes(params.get('billing')) ? params.get('billing') : '';
   const [step, setStep] = useState(resetToken ? 'reset' : mode === 'signup' || params.get('signup') ? 'name' : 'email');
-  const [f, setF] = useState({ email: '', password: '', code: '', first: '', last: '', purpose: signupType === 'domain' ? 'business' : 'personal', username: '', custom: false, pw: '', pw2: '', recovery: '', terms: false });
+  const [f, setF] = useState({ email: '', password: '', code: '', first: '', last: '', purpose: signupType === 'domain' ? 'business' : 'personal', username: '', custom: false, pw: '', pw2: '', recovery: '', terms: false, remember: localStorage.getItem('remember') === '1' });
   const [show, setShow] = useState(false);
   const [error, setError] = useState('');
   const [info, setInfo] = useState('');
@@ -83,12 +83,15 @@ export default function Login({ onLogin, mode = 'signin' }) {
   if (step === 'password') return (
     <Shell>
       <Card title="Welcome" onSubmit={(e) => { e.preventDefault(); run(async () => {
-        const r = await api.login(fullEmail, f.password);
+        localStorage.setItem('remember', f.remember ? '1' : '0');
+        const r = await api.login(fullEmail, f.password, f.remember);
         if (r.twoFactor) { setTicket(r.ticket); go('code'); } else await onLogin(r);
       }); }} footer={<><button type="button" className="g-link" onClick={() => go('forgot')}>Forgot password?</button><button className="g-btn" disabled={busy}>{busy ? 'Signing in…' : 'Next'}</button></>}>
         <button type="button" className="g-chip" onClick={() => go('email')}><Icon name="mail" size={14} /> {fullEmail} <Icon name="down" size={12} /></button>
+        <input type="email" name="username" autoComplete="username" value={fullEmail} readOnly hidden />
         <Field label="Enter your password" type={show ? 'text' : 'password'} autoComplete="current-password" autoFocus value={f.password} onChange={set('password')} error={error} />
         <label className="g-check"><input type="checkbox" checked={show} onChange={(e) => setShow(e.target.checked)} /> Show password</label>
+        <label className="g-check" title="Stay signed in on this device for 30 days, renewed each time you use it. Don't use on shared computers."><input type="checkbox" checked={f.remember} onChange={set('remember')} /> Keep me signed in</label>
       </Card>
     </Shell>
   );

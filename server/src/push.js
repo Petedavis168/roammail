@@ -45,17 +45,24 @@ push.get('/push/key', wrap(async (req, res) => res.json({ publicKey: (await vapi
 push.post('/push/subscribe', wrap(async (req, res) => {
   const s = req.body.subscription || {};
   if (!validEndpoint(s.endpoint) || !s.keys?.p256dh || !s.keys?.auth) throw fail(400, 'Invalid push subscription');
-  const id = crypto.createHash('sha256').update(s.endpoint).digest('hex');
-  const creds = seal({ email: req.user.email, password: req.user.password, exp: Date.now() + SUB_DAYS * 864e5 });
-  await q.run(`INSERT INTO push_subs(id, email, endpoint, p256dh, auth, creds, created_at) VALUES(?, ?, ?, ?, ?, ?, ?)
-    ON CONFLICT(id) DO UPDATE SET email = excluded.email, creds = excluded.creds, p256dh = excluded.p256dh, auth = excluded.auth`,
-  id, req.user.email, s.endpoint, s.keys.p256dh, s.keys.auth, creds, Date.now());
+  // One subscription per signed-in mailbox on this device, so each account notifies (item 10)
+  const users = (req.liveSessions || []).map((x) => ({ email: x.email, password: unseal(x.creds)?.password })).filter((u) => u.password);
+  if (!users.some((u) => u.email === req.user.email)) users.unshift({ email: req.user.email, password: req.user.password });
+  await q.run('DELETE FROM push_subs WHERE endpoint = ? AND id = ?', s.endpoint, crypto.createHash('sha256').update(s.endpoint).digest('hex')); // pre-multi-account row
+  for (const u of users) {
+    const id = crypto.createHash('sha256').update(`${s.endpoint}|${u.email}`).digest('hex');
+    const creds = seal({ email: u.email, password: u.password, exp: Date.now() + SUB_DAYS * 864e5 });
+    await q.run(`INSERT INTO push_subs(id, email, endpoint, p256dh, auth, creds, created_at) VALUES(?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT(id) DO UPDATE SET email = excluded.email, creds = excluded.creds, p256dh = excluded.p256dh, auth = excluded.auth`,
+    id, u.email, s.endpoint, s.keys.p256dh, s.keys.auth, creds, Date.now());
+  }
   await audit(req.user.email, null, 'push.subscribe');
   res.json({ ok: true });
 }));
 push.post('/push/unsubscribe', wrap(async (req, res) => {
   const endpoint = String(req.body.endpoint || '');
-  await q.run('DELETE FROM push_subs WHERE email = ? AND endpoint = ?', req.user.email, endpoint);
+  const emails = (req.liveSessions || []).map((x) => x.email);
+  for (const e of new Set([req.user.email, ...emails])) await q.run('DELETE FROM push_subs WHERE email = ? AND endpoint = ?', e, endpoint);
   res.json({ ok: true });
 }));
 
@@ -91,7 +98,7 @@ async function watch(email, user) {
         for await (const m of client.fetch(`${d.prevCount + 1}:${d.count}`, { envelope: true, flags: true })) {
           if (m.flags?.has('\\Seen')) continue;
           const from = m.envelope.from?.[0];
-          await notify(email, { title: from?.name || from?.address || 'New mail', body: String(m.envelope.subject || '(no subject)').slice(0, 140), tag: `mail-${m.uid || m.seq}`, url: '/' });
+          await notify(email, { title: from?.name || from?.address || 'New mail', body: String(m.envelope.subject || '(no subject)').slice(0, 140), tag: `mail-${email}-${m.uid || m.seq}`, url: '/app' });
         }
       } catch { /* next time */ }
     });

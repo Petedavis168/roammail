@@ -56,6 +56,8 @@ function Composer({ c, me, prefs, sigData, identities, onClose, onSend, focusInd
   const fileInput = useRef();
   const dirty = useRef(false);
   const isReply = !!init.mode;
+  // Identities of this mailbox, plus every other signed-in account (item 10: compose From across accounts)
+  const fromChoices = [...(identities || [{ address: me.email }]), ...(me.accounts || []).filter((a) => a.email !== me.email && !(identities || []).some((i) => i.address === a.email)).map((a) => ({ address: a.email, name: a.name, other: true, mailboxId: a.mailboxId }))];
   // Reply from the group address when the original was sent to a group you can send as
   const [fromAddress, setFromAddress] = useState(() => {
     if (init.fromAddress) return init.fromAddress;
@@ -120,7 +122,7 @@ function Composer({ c, me, prefs, sigData, identities, onClose, onSend, focusInd
     to, cc, bcc, subject, files, html: editor.current?.innerHTML || '', text: editor.current?.innerText || '',
     inReplyTo: init.inReplyTo, references: init.references, replyFolder: init.replyFolder, replyUid: init.replyUid,
     forwardFolder: init.forwardFolder, forwardUid: init.forwardUid, draftUid: draft.uid, draftFolder: draft.folder,
-    priority: important ? 'high' : 'normal', fromAddress,
+    priority: important ? 'high' : 'normal', fromAddress, asMailbox: fromChoices.find((i) => i.address === fromAddress)?.mailboxId,
     fromName: fromAddress !== me.email ? ((identities || []).find((i) => i.address === fromAddress)?.name || '') : (prefs.displayName || me.name || ''),
   });
 
@@ -183,10 +185,10 @@ function Composer({ c, me, prefs, sigData, identities, onClose, onSend, focusInd
         <button className="icon-btn on-dark xs" title="Save & close" onClick={(e) => { e.stopPropagation(); close(); }}><Icon name="close" size={14} /></button>
       </div>
       <div className="composer-body" style={{ display: state === 'min' ? 'none' : undefined }}>
-        {(identities || []).length > 1 && (
+        {fromChoices.length > 1 && (
           <div className="rcpt from-row"><span className="rcpt-label">From</span>
             <select value={fromAddress} onChange={(e) => { setFromAddress(e.target.value); markDirty(); }}>
-              {identities.map((i) => <option key={i.address} value={i.address}>{i.group ? `${i.name} <${i.address}>` : i.address}</option>)}
+              {fromChoices.map((i) => <option key={i.address} value={i.address}>{i.group ? `${i.name} <${i.address}>` : i.other ? `${i.address} (other account)` : i.address}</option>)}
             </select></div>
         )}
         <RecipientInput label="To" value={to} onChange={setTo} autoFocus={!to.length}
@@ -306,11 +308,13 @@ export default function ComposeManager({ composers, setComposers, me, prefs, sig
 
   const onSend = (c, payload) => {
     remove(c.id);
+    // Sending from another signed-in account: references to this mailbox's folders don't apply there
+    if (payload.asMailbox) payload = { ...payload, draftUid: undefined, replyFolder: undefined, replyUid: undefined, forwardFolder: undefined, forwardUid: undefined };
     let undone = false;
     const doSend = async () => {
       if (undone) return;
       try {
-        await api.form('/api/send', toForm(payload));
+        await api.form('/api/send', toForm(payload), payload.asMailbox);
         toast('Message sent');
         onSent();
       } catch (e) {
@@ -319,7 +323,7 @@ export default function ComposeManager({ composers, setComposers, me, prefs, sig
       }
     };
     if (payload.sendAt) {
-      return api.form('/api/send', toForm(payload)).then(() => { toast(`Scheduled for ${fmtWhen(payload.sendAt)}`); onSent(); })
+      return api.form('/api/send', toForm(payload), payload.asMailbox).then(() => { toast(`Scheduled for ${fmtWhen(payload.sendAt)}`); onSent(); })
         .catch((e) => { toast(`Couldn't schedule: ${e.message}`, { error: true }); setComposers((cs) => [...cs, { id: Date.now(), initial: { ...c.initial, ...payload } }]); });
     }
     const delay = Number(prefs.undoSeconds) || 0;

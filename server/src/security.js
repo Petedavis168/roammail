@@ -95,12 +95,12 @@ publicSecurity.post('/login', loginLimiter, wrap(async (req, res) => {
   }
   if (sec.totp_enabled) {
     // Password OK: hand back a short-lived ticket; the session is only issued after the code
-    const ticket = seal({ email, password, exp: Date.now() + 5 * 60 * 1000, t: '2fa' });
+    const ticket = seal({ email, password, exp: Date.now() + 5 * 60 * 1000, t: '2fa', remember: req.body.remember === true });
     return res.json({ twoFactor: true, ticket });
   }
   await loginSucceeded(email, req.ip);
   await logEvent(req, email, true);
-  await setSession(res, { email, password, name: '' }, req);
+  await setSession(res, { email, password, name: '', remember: req.body.remember === true }, req);
   await newDeviceCheck(req, email, password);
   const mailboxId = await ensureMailboxId(email);
   await ensureSetupRow(email);
@@ -136,7 +136,7 @@ publicSecurity.post('/login/2fa', loginLimiter, wrap(async (req, res) => {
   }
   await loginSucceeded(t.email, req.ip);
   await logEvent(req, t.email, true, '2fa');
-  await setSession(res, { email: t.email, password: t.password, name: '' }, req);
+  await setSession(res, { email: t.email, password: t.password, name: '', remember: !!t.remember }, req);
   await newDeviceCheck(req, t.email, t.password);
   const mailboxId = await ensureMailboxId(t.email);
   await ensureSetupRow(t.email);

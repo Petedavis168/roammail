@@ -4,7 +4,7 @@ import { Icon } from '../icons.jsx';
 import { folderIcon, folderLabel, SPECIAL_ORDER } from '../util.js';
 import { useToast } from './Toast.jsx';
 
-export default function Sidebar({ folders, current, onSelect, onCompose, reload, onDropMessages, categories, onCategory, onScheduled, onQuarantine, qCount, me, mailboxes = [], mailbox = '', onMailbox, mode = 'full', width = 240, onResizeStart, overlay }) {
+export default function Sidebar({ folders, current, onSelect, onCompose, reload, onDropMessages, categories, onCategory, onScheduled, onQuarantine, qCount, me, mailboxes = [], mailbox = '', onMailbox, mode = 'full', width = 240, onResizeStart, overlay, allInboxes = null, onAllInboxes }) {
   const toast = useToast();
   const [collapsed, setCollapsed] = useState(() => JSON.parse(localStorage.getItem('collapsed') || '{}'));
   const [dragOver, setDragOver] = useState(null);
@@ -78,7 +78,7 @@ export default function Sidebar({ folders, current, onSelect, onCompose, reload,
   return (
     <nav className={`sidebar ${mode} ${overlay ? 'overlay' : ''}`} style={mode === 'rail' ? undefined : { width }} onClick={() => setMenu(null)} aria-label="Folders">
       <button className="compose-btn" onClick={onCompose} title="New mail (c)"><Icon name="pen" /> <span>New mail</span></button>
-      {(mailboxes.length > 0 || (me?.accounts || []).length > 1) && (
+      {mailboxes.length > 0 && (
         <label className="mailbox-pick" title="Switch between your accounts and shared mailboxes">
           <Icon name="users" size={14} />
           <select value={mailbox} onChange={(e) => onMailbox(e.target.value)} aria-label="Mailbox">
@@ -88,6 +88,11 @@ export default function Sidebar({ folders, current, onSelect, onCompose, reload,
         </label>
       )}
       <div className="nav-section">
+        {allInboxes !== null && (
+          <div className={`folder ${current === '@all' ? 'on' : ''}`} style={{ paddingLeft: 10 }} onClick={onAllInboxes} role="button" tabIndex={0} title="All inboxes">
+            <span className="twisty" /><Icon name="users" /><span className="fname">All inboxes</span>{allInboxes > 0 && <span className="count">{allInboxes}</span>}
+          </div>
+        )}
         {specials.map((f) => <Row key={f.path} f={f} />)}
         <div className={`folder ${current === '@scheduled' ? 'on' : ''}`} style={{ paddingLeft: 10 }} onClick={onScheduled} role="button" tabIndex={0} title="Scheduled">
           <span className="twisty" /><Icon name="clock" /><span className="fname">Scheduled</span>
