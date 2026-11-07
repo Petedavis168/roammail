@@ -64,6 +64,8 @@ config.signup = {
   // Mailbox size for free accounts. FREE_MAILBOX_QUOTA_GB (or SIGNUP_QUOTA_MB). The site says 10 GB (item 1).
   quotaMb: env.FREE_MAILBOX_QUOTA_GB ? Number(env.FREE_MAILBOX_QUOTA_GB) * 1024 : Number(env.SIGNUP_QUOTA_MB || 10240),
   perIpPerDay: Number(env.SIGNUP_PER_IP_PER_DAY || 3),
+  requireDetails: (env.SIGNUP_REQUIRE_DETAILS ?? 'true') === 'true', // birthday, recovery email and mobile number at sign-up
+  minAge: Number(env.SIGNUP_MIN_AGE || 13),
 };
 config.business = {
   maxMailboxes: Number(env.ORG_MAX_MAILBOXES || 50),

@@ -69,3 +69,17 @@ export async function requireVerifiedPhone(token) {
   if (Number(used?.n || 0) >= ACCOUNTS_PER_PHONE) throw fail(409, 'This number was already used for a free account.');
   return t.h;
 }
+
+/** Birthday as YYYY-MM-DD: a real date, at least minAge years ago and not more than 120. Returns the clean string. */
+export function checkBirthday(v, minAge) {
+  const s = String(v || '').trim();
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(s);
+  const d = m && new Date(Date.UTC(+m[1], +m[2] - 1, +m[3]));
+  if (!d || d.getUTCMonth() !== +m[2] - 1 || d.getUTCDate() !== +m[3]) throw fail(400, 'Enter your date of birth');
+  const now = new Date();
+  let age = now.getUTCFullYear() - d.getUTCFullYear();
+  if (now.getUTCMonth() < d.getUTCMonth() || (now.getUTCMonth() === d.getUTCMonth() && now.getUTCDate() < d.getUTCDate())) age--;
+  if (age > 120 || d > now) throw fail(400, 'Check your date of birth');
+  if (age < minAge) throw fail(400, `You need to be at least ${minAge} to create an account`);
+  return s;
+}

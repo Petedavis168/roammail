@@ -35,7 +35,7 @@ function totp(secret) {
 }
 async function newAdmin(username) {
   const c = new Client();
-  let r = await c.post('/api/signup', { name: username, username, password: PW, acceptTerms: true });
+  let r = await c.post('/api/signup', { name: username, username, password: PW, acceptTerms: true, birthday: '1990-01-15', recoveryEmail: 'recovery@example.org', phone: '+15555550123' });
   if (r.status === 409) { r = await c.post('/api/login', { email: `${username}@${D}`, password: PW }); if (r.data?.twoFactor) return null; }
   assert.ok(r.status === 200, JSON.stringify(r.data));
   await sleep(1200);
@@ -109,7 +109,7 @@ test('business sign-up: their own domain is taken at sign-up; their address ther
   const domain = `marley${run}.test`;
   assert.equal((await c.get(`/api/signup/domain-check?domain=${D}`)).data.ok, false, 'not our free domain');
   assert.equal((await c.get(`/api/signup/domain-check?domain=https://www.${domain}/`)).data.domain, domain, 'cleaned up');
-  const s = await c.post('/api/signup', { name: 'Bob Marley', username: `bm${run}`, password: PW, acceptTerms: true, business: { domain, local: 'bob', orgName: 'Marley Music' } });
+  const s = await c.post('/api/signup', { name: 'Bob Marley', username: `bm${run}`, password: PW, acceptTerms: true, birthday: '1990-01-15', recoveryEmail: 'recovery@example.org', phone: '+15555550123', business: { domain, local: 'bob', orgName: 'Marley Music' } });
   assert.equal(s.status, 200, JSON.stringify(s.data));
   await sleep(1200);
   const { secret } = (await c.post('/api/security/2fa/setup')).data; // business owners are admins: 2-step verification
@@ -121,7 +121,7 @@ test('business sign-up: their own domain is taken at sign-up; their address ther
   assert.equal(st.status, 'pending'); assert.deepEqual(st.ownerMailbox, { address: `bob@${domain}`, created: false, mine: true });
   assert.equal((await c.post(`/api/domains/${domain}/owner-mailbox`)).status, 400, 'not before the domain is live');
   // someone else can't take the same domain
-  const other = await new Client().post('/api/signup', { name: 'X', username: `bx${run}`, password: PW, acceptTerms: true, business: { domain, local: 'x' } });
+  const other = await new Client().post('/api/signup', { name: 'X', username: `bx${run}`, password: PW, acceptTerms: true, birthday: '1990-01-15', recoveryEmail: 'recovery@example.org', phone: '+15555550123', business: { domain, local: 'x' } });
   assert.equal(other.status, 409);
   // connect + pay, then the owner's own address is created with the same password
   assert.equal((await c.post(`/api/domains/${domain}/verify`)).data.status, 'verified');
@@ -388,7 +388,7 @@ test('invite people: mailbox via the provisioner, emailed one-time link, no pass
   const sid = new URL((await fetch(url, { method: 'POST', redirect: 'manual' })).headers.get('location')).searchParams.get('session_id');
   await a.post('/api/billing/confirm', { sessionId: sid });
   // the invitee's existing address: another mailbox we can read
-  const personal = new Client(); const ps = await personal.post('/api/signup', { name: 'Kim Personal', username: `kimp${run}`, password: PW, acceptTerms: true });
+  const personal = new Client(); const ps = await personal.post('/api/signup', { name: 'Kim Personal', username: `kimp${run}`, password: PW, acceptTerms: true, birthday: '1990-01-15', recoveryEmail: 'recovery@example.org', phone: '+15555550123' });
   assert.equal(ps.status, 200); await sleep(1200);
   const r = await a.post('/api/admin/users', { domain, localPart: 'kim', name: 'Kim Lee', inviteEmail: ps.data.email });
   assert.equal(r.status, 200, JSON.stringify(r.data));

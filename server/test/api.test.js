@@ -43,7 +43,7 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const PW = 'Tq9-vLm2-Zx81';
 
 async function signup(c, username) {
-  const r = await c.post('/api/signup', { name: `Test ${username}`, username, password: PW, acceptTerms: true });
+  const r = await c.post('/api/signup', { name: `Test ${username}`, username, password: PW, acceptTerms: true, birthday: '1990-01-15', recoveryEmail: 'recovery@example.org', phone: '+15555550123' });
   assert.equal(r.status, 200, JSON.stringify(r.data));
   await sleep(1500); // mailbox provisioning
   return r.data.email;
@@ -82,8 +82,29 @@ test('CSRF: state-changing requests need the custom header', async () => {
 test('sign-up: terms required, weak passwords refused', async () => {
   const c = new Client();
   assert.equal((await c.post('/api/signup', { name: 'A', username: `t${run}a`, password: PW })).status, 400);
-  assert.equal((await c.post('/api/signup', { name: 'A', username: `t${run}a`, password: 'password123', acceptTerms: true })).status, 400);
-  assert.equal((await c.post('/api/signup', { name: 'A', username: 'admin', password: PW, acceptTerms: true })).status, 400);
+  assert.equal((await c.post('/api/signup', { name: 'A', username: `t${run}a`, password: 'password123', acceptTerms: true, birthday: '1990-01-15', recoveryEmail: 'recovery@example.org', phone: '+15555550123' })).status, 400);
+  assert.equal((await c.post('/api/signup', { name: 'A', username: 'admin', password: PW, acceptTerms: true, birthday: '1990-01-15', recoveryEmail: 'recovery@example.org', phone: '+15555550123' })).status, 400);
+});
+
+test('sign-up: birthday, recovery email and mobile number are required and stored', async () => {
+  const c = new Client(); const base = { name: 'Dee Tails', password: PW, acceptTerms: true };
+  const kid = new Date(Date.now() - 10 * 365 * 864e5).toISOString().slice(0, 10);
+  const r1 = await c.post('/api/signup', { ...base, username: `d${run}a`, recoveryEmail: 'recovery@example.org', phone: '+15555550123' });
+  assert.equal(r1.status, 400); assert.match(r1.data.error, /date of birth/);
+  const r2 = await c.post('/api/signup', { ...base, username: `d${run}a`, birthday: kid, recoveryEmail: 'recovery@example.org', phone: '+15555550123' });
+  assert.equal(r2.status, 400); assert.match(r2.data.error, /at least 13/);
+  const r3 = await c.post('/api/signup', { ...base, username: `d${run}a`, birthday: '1990-01-15', phone: '+15555550123' });
+  assert.equal(r3.status, 400); assert.match(r3.data.error, /recovery email/);
+  const r4 = await c.post('/api/signup', { ...base, username: `d${run}a`, birthday: '1990-01-15', recoveryEmail: 'recovery@example.org', phone: '12' });
+  assert.equal(r4.status, 400); assert.match(r4.data.error, /mobile number/);
+  const email = await signup(c, `d${run}b`);
+  const sec = (await c.get('/api/security')).data;
+  assert.equal(sec.birthday, '1990-01-15'); assert.equal(sec.phone, '+15555550123');
+  assert.equal(sec.recoveryEmail || sec.recoveryPending, 'recovery@example.org');
+  assert.equal((await c.req('PUT', '/api/security/details', { password: 'wrong', phone: '+15555550199' })).status, 401);
+  assert.equal((await c.req('PUT', '/api/security/details', { password: PW, phone: '+1 (555) 555-0199' })).status, 200);
+  assert.equal((await c.get('/api/security')).data.phone, '+15555550199');
+  assert.ok(email);
 });
 
 test('sessions: opaque cookie, logout kills stolen copies, devices can be signed out', async () => {
@@ -150,7 +171,7 @@ test('first-name rule: customers cannot take a bare first name; staff can be giv
     const chk = (await c.get(`/api/signup/check?username=${encodeURIComponent(u)}`)).data;
     assert.equal(chk.available, false, u); assert.match(chk.reason, /Roammail staff/);
   }
-  const s = await c.post('/api/signup', { name: 'John Q', username: 'john', password: PW, acceptTerms: true });
+  const s = await c.post('/api/signup', { name: 'John Q', username: 'john', password: PW, acceptTerms: true, birthday: '1990-01-15', recoveryEmail: 'recovery@example.org', phone: '+15555550123' });
   assert.equal(s.status, 400); assert.match(s.data.error, /first name/);
   const sug = (await c.get('/api/signup/suggest?first=John&last=Quill')).data.suggestions;
   assert.ok(sug.length && !sug.includes('john'), JSON.stringify(sug));

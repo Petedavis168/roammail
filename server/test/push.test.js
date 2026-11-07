@@ -27,7 +27,7 @@ test('push: new mail triggers an encrypted web push; sign-out everywhere stops i
   const server = https.createServer({ key: fs.readFileSync(path.join(dir, 'k.pem')), cert: fs.readFileSync(path.join(dir, 'c.pem')) }, (req, res) => { let b = []; req.on('data', (c) => b.push(c)); req.on('end', () => { received.push({ headers: req.headers, body: Buffer.concat(b) }); res.writeHead(201); res.end(); }); });
   await new Promise((r) => server.listen(12999, '127.0.0.1', r));
   try {
-    const s = await call('POST', '/api/signup', { name: 'Pusher', username: `push${Date.now() % 1e6}`, password: PW, acceptTerms: true });
+    const s = await call('POST', '/api/signup', { name: 'Pusher', username: `push${Date.now() % 1e6}`, password: PW, acceptTerms: true, birthday: '1990-01-15', recoveryEmail: 'recovery@example.org', phone: '+15555550123' });
     assert.equal(s.status, 200);
     await call('POST', '/api/setup/2fa/remind', {}); await call('POST', '/api/setup/step', { step: 'done' });
     await sleep(1300);

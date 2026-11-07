@@ -39,7 +39,7 @@ function totp(secret) {
 }
 async function signup(username) {
   const c = new Client();
-  const r = await c.post('/api/signup', { name: username, username, password: PW, acceptTerms: true });
+  const r = await c.post('/api/signup', { name: username, username, password: PW, acceptTerms: true, birthday: '1990-01-15', recoveryEmail: 'recovery@example.org', phone: '+15555550123' });
   if (r.status !== 200) return { c, r };
   await sleep(1300);
   return { c, r, email: r.data.email };
