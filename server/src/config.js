@@ -59,15 +59,20 @@ config.mailHostname = env.MAIL_HOSTNAME || config.imap.host;
 config.signup = {
   enabled: (env.SIGNUP_ENABLED ?? 'true') === 'true',
   domain: (env.SIGNUP_DOMAIN || config.rootDomain || '').toLowerCase(), // free addresses: @roammail.net
-  quotaMb: Number(env.SIGNUP_QUOTA_MB || 2048),
+  // Mailbox size for free accounts. FREE_MAILBOX_QUOTA_GB (or SIGNUP_QUOTA_MB). Pending final decision; the site says 20 GB.
+  quotaMb: env.FREE_MAILBOX_QUOTA_GB ? Number(env.FREE_MAILBOX_QUOTA_GB) * 1024 : Number(env.SIGNUP_QUOTA_MB || 10240),
   perIpPerDay: Number(env.SIGNUP_PER_IP_PER_DAY || 3),
 };
 config.business = {
   maxMailboxes: Number(env.ORG_MAX_MAILBOXES || 50),
-  defaultQuotaMb: Number(env.ORG_DEFAULT_QUOTA_MB || 5120),
-  maxQuotaMb: Number(env.ORG_MAX_QUOTA_MB || 20480),
-  totalQuotaMb: Number(env.ORG_TOTAL_QUOTA_MB || 102400),
+  // Mailbox size for business accounts. BUSINESS_MAILBOX_QUOTA_GB (or ORG_DEFAULT_QUOTA_MB). Pending; the site says 50 GB.
+  defaultQuotaMb: env.BUSINESS_MAILBOX_QUOTA_GB ? Number(env.BUSINESS_MAILBOX_QUOTA_GB) * 1024 : Number(env.ORG_DEFAULT_QUOTA_MB || 10240),
+  maxQuotaMb: 0, totalQuotaMb: 0, // set below
 };
+// Largest single mailbox an admin may set (at least the default), and the domain total mailcow enforces
+// (enough for every mailbox at that size unless ORG_TOTAL_QUOTA_MB says otherwise).
+config.business.maxQuotaMb = Math.max(config.business.defaultQuotaMb, Number(env.ORG_MAX_QUOTA_MB || 0) || config.business.defaultQuotaMb);
+config.business.totalQuotaMb = Number(env.ORG_TOTAL_QUOTA_MB || 0) || config.business.maxMailboxes * config.business.maxQuotaMb;
 // Comma separated emails that get the super-admin portal (you).
 config.superAdmins = (env.SUPERADMIN_EMAILS || '').split(',').map((s) => s.trim().toLowerCase()).filter(Boolean);
 // Optional AWS Route 53 auto-DNS (uses the EC2 instance role / standard AWS credentials).
@@ -131,11 +136,13 @@ config.billing = {
   stripeKey: env.STRIPE_SECRET_KEY || '',
   webhookSecret: env.STRIPE_WEBHOOK_SECRET || '',
   apiBase: (env.STRIPE_API_BASE || 'https://api.stripe.com').replace(/\/$/, ''),
-  // Stripe Price IDs for one user ("seat"): $4/month and $48/year by default (create them in the Stripe dashboard)
-  priceMonthly: env.STRIPE_PRICE_MONTHLY || '',
-  priceYearly: env.STRIPE_PRICE_YEARLY || '',
+  // Stripe Price IDs for one mailbox ("seat"). Live prices (product prod_VZwXdptKuEjxJW 'Extra mailbox'):
+  // US$4/month = price_1UZAsW2BJzzFFmWAaUiUBgh4, US$44/year = price_1UZAtR2BJzzFFmWAGxwLeDfa
+  priceMonthly: env.STRIPE_PRICE_MONTHLY || 'price_1UZAsW2BJzzFFmWAaUiUBgh4',
+  priceYearly: env.STRIPE_PRICE_YEARLY || 'price_1UZAtR2BJzzFFmWAGxwLeDfa',
+  // Shown in the app and legal pages; must match the Stripe prices above
   perUserMonthly: Number(env.PRICE_PER_USER_MONTHLY || 4),
-  perUserYearly: Number(env.PRICE_PER_USER_YEARLY || 48),
+  perUserYearly: Number(env.PRICE_PER_USER_YEARLY || 44),
   currency: env.BILLING_CURRENCY || 'USD',
   friendlyFreeMailboxes: Number(env.FRIENDLY_FREE_MAILBOXES || 1),
   standardFreeMailboxes: Number(env.STANDARD_FREE_MAILBOXES || 0),

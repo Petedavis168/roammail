@@ -42,7 +42,7 @@ on the web, by phone or desktop mail apps, or through our APIs. Please read them
 <li>A business is responsible for its users following these Terms and for having the right to use its domain.</li></ul>
 
 <h2>4. Paid plans, billing and cancelling</h2><ul>
-<li>Business email costs ${usd(B.perUserMonthly)} per user per month or ${usd(B.perUserYearly)} per user per year, plus any sales tax or VAT. Prices are shown before you buy. Friendly Web Services customers may receive their first mailbox free as described at checkout. Shared mailboxes and the company archive are included at no extra cost.</li>
+<li>Business email costs ${usd(B.perUserMonthly)} per mailbox per month or ${usd(B.perUserYearly)} per mailbox per year, plus any sales tax or VAT. Prices are shown before you buy. Friendly Web Services customers may receive their first mailbox free as described at checkout. Shared mailboxes and the company archive are included at no extra cost.</li>
 <li><b>Your plan renews automatically</b> each month or year until you cancel. We charge the card on file through our payment processor, Stripe. Adding a user adds a paid seat straight away with a prorated charge. Removing one reduces your next bill.</li>
 <li><b>Cancel any time online</b> in Admin → Billing → Manage billing. Cancelling stops future renewals. You keep access until the end of the paid period. We don't give refunds for partial periods unless the law requires it or we say otherwise in writing.</li>
 <li>${B.trialDays ? `Free trials last ${B.trialDays} days. We email you before a trial ends, and the plan starts automatically unless you cancel first.` : 'If we offer a free trial, we will tell you its length and remind you before it ends; the plan starts automatically unless you cancel first.'}</li>

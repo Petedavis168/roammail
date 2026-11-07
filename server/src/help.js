@@ -35,7 +35,7 @@ const ARTICLES = () => [
 <li>Choose a plan (or enter your Friendly Web Services customer code), then add your people.</li></ol>
 <p>Each record has a job: <b>MX</b> sends your mail to us, <b>SPF</b> and <b>DKIM</b> prove mail from us is really from you, and <b>DMARC</b> tells Gmail and Outlook to reject fakes. Together they keep your mail out of spam folders.</p>`],
   ['billing', 'Plans, billing and invoices', 'Business', `<ul>
-<li>Business email is <b>$${config.billing.perUserMonthly} per person per month</b>, or $${config.billing.perUserYearly} per person per year. Friendly Web Services customers get their first mailbox free.</li>
+<li>Business email is <b>US$${config.billing.perUserMonthly} per mailbox per month</b>, or US$${config.billing.perUserYearly} per mailbox per year. Friendly Web Services customers get their first mailbox free.</li>
 <li>Shared mailboxes (like support@) and the company archive are free.</li>
 <li>Adding a person adds a seat right away (prorated). Removing someone lowers your next bill.</li>
 <li>Receipts are emailed to your admins. Invoices, card changes, switching to yearly and cancelling are all in <b>Admin → Billing → Manage billing</b>.</li>

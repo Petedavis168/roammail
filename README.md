@@ -11,7 +11,7 @@ existing **mailcow** server (IMAP/SMTP for mail, the mailcow API for accounts).
 **New in this version:** Gmail-style sign-in and sign-up with address availability (@roammail.net), calendar
 (month/week/day, repeating events, reminders, invitations with Yes/Maybe/No), contacts (import/export, company
 directory), unlimited groups and departments with distribution lists and "send as group", and business billing
-(Friendly Web Services customers: first mailbox free; then $4 per user per month or $48 per year, via Stripe).
+(Friendly Web Services customers: first mailbox free; then US$4 per mailbox per month or US$44 per year, via Stripe).
 
 
 **Email (Outlook + Gmail)**

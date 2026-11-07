@@ -23,13 +23,15 @@ Digest `sha256:bb5d3d7d53d322b87fc550f563f814cb2afcbf0b717ef95c35a2e5ebdb445ad5`
 - **Add these secrets** (the app won't work without them). Store them in `roammail/app`:
   - `MAILCOW_API_KEY`: read-write key from mailcow → System → Configuration → Access → API.
   - `SYSTEM_MAIL_USER` / `SYSTEM_MAIL_PASS`: a `no-reply@roammail.net` mailbox for password resets, verification codes and receipts.
-  - `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET`, `STRIPE_PRICE_MONTHLY`, `STRIPE_PRICE_YEARLY` (only when billing goes live). Also `BILLING_ENABLED=true`.
+  - `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET` (live). Also `BILLING_ENABLED=true`. Webhook endpoint: `https://roammail.net/api/billing/webhook` (events: checkout.session.completed, customer.subscription.updated/deleted/trial_will_end, invoice.paid, invoice.payment_failed).
   - `TURNSTILE_SITE_KEY` / `TURNSTILE_SECRET` (Cloudflare bot protection on sign-up, recommended).
 - **Add these environment variables:**
   - `SUPERADMIN_EMAILS=<Pete's Roammail address>`
   - `SYSTEM_MAIL_FROM=no-reply@roammail.net`
   - `LEGAL_CONTACT_EMAIL`, `ABUSE_EMAIL=abuse@roammail.net`
   - `MAIL_SERVER_IPS=<mailcow public IP>` (for blocklist checks)
+  - `FREE_MAILBOX_QUOTA_GB`, `BUSINESS_MAILBOX_QUOTA_GB`: mailbox sizes. Both default to 10 (today's mailcow setting); set them once Pete decides (the site says 20 / 50).
+  - Stripe prices default to the live ones: US$4/month `price_1UZAsW2BJzzFFmWAaUiUBgh4`, US$44/year `price_1UZAtR2BJzzFFmWAGxwLeDfa`. Only `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET` and `BILLING_ENABLED=true` are needed.
   - `TRUST_PROXY=1` (the default; the ALB adds X-Forwarded-For)
 - `REDIS_URL` is empty. That's fine for **one** web task. Before scaling past one web task, add ElastiCache Redis and set `REDIS_URL=rediss://…`. Without it, each task keeps its own rate limits and sign-out-everywhere only reaches one task.
 

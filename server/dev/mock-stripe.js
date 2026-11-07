@@ -39,7 +39,7 @@ http.createServer(async (req, res) => {
       if (url.searchParams.get('webhook') !== '0') {
         await webhook('checkout.session.completed', s);
         await webhook('invoice.paid', { id: id('in'), object: 'invoice', customer: s.customer, subscription: subId, number: `MOCK-${db.subs.size}`, currency: 'usd',
-          amount_paid: Number(s.line_items[0].quantity) * (s.metadata.interval === 'year' ? 4800 : 400), hosted_invoice_url: 'http://127.0.0.1:12111/invoice', subscription_details: { metadata: s.metadata } });
+          amount_paid: Number(s.line_items[0].quantity) * (s.metadata.interval === 'year' ? 4400 : 400), hosted_invoice_url: 'http://127.0.0.1:12111/invoice', subscription_details: { metadata: s.metadata } });
       }
       res.writeHead(303, { Location: s.success_url.replace('{CHECKOUT_SESSION_ID}', s.id) }); return res.end();
     }

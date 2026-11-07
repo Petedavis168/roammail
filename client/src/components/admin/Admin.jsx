@@ -35,6 +35,12 @@ function Modal({ title, onClose, children }) {
 }
 
 // ------------------------------------------------------------------ users
+// Mailbox size choices from the server's configured default and maximum (FREE/BUSINESS_MAILBOX_QUOTA_GB)
+let quotaCfg = null;
+const loadQuota = () => (quotaCfg ||= api.signupConfig().then((c) => c.quota || { business: 10240, businessMax: 10240 }).catch(() => ({ business: 10240, businessMax: 10240 })));
+const sizeOptions = (q, current) => [...new Set([1024, 2048, 5120, 10240, 20480, 51200, 102400].filter((m) => m <= q.businessMax).concat([q.business, current].filter(Boolean)))].sort((a, b) => a - b);
+function useQuota() { const [q, setQ] = useState({ business: 10240, businessMax: 10240 }); useEffect(() => { loadQuota().then(setQ); }, []); return q; }
+
 function ImportUsers({ domain, onClose }) {
   const toast = useToast();
   const [csv, setCsv] = useState('');
@@ -204,7 +210,8 @@ function ProfileFields({ f, setF }) {
 
 function AddUser({ domain, orgId, onClose, onCreated }) {
   const [needPlan, setNeedPlan] = useState(false);
-  const [f, setF] = useState({ name: '', localPart: '', password: genPassword(), quotaMb: 5120, admin: false, title: '', department: '', phone: '', mobile: '', welcome: true });
+  const quota = useQuota();
+  const [f, setF] = useState({ name: '', localPart: '', password: genPassword(), quotaMb: 0, admin: false, title: '', department: '', phone: '', mobile: '', welcome: true });
   const [err, setErr] = useState('');
   const [busy, setBusy] = useState(false);
   const submit = async (e) => {
@@ -230,8 +237,8 @@ function AddUser({ domain, orgId, onClose, onCreated }) {
         <ProfileFields f={f} setF={setF} />
         <label>Temporary password<div className="addr-input"><input required minLength={10} value={f.password} onChange={(e) => setF({ ...f, password: e.target.value })} className="mono" />
           <button type="button" className="btn sm" onClick={() => setF({ ...f, password: genPassword() })}>Generate</button></div></label>
-        <label>Mailbox size<select value={f.quotaMb} onChange={(e) => setF({ ...f, quotaMb: Number(e.target.value) })}>
-          {[1024, 2048, 5120, 10240, 20480].map((m) => <option key={m} value={m}>{m / 1024} GB</option>)}</select></label>
+        <label>Mailbox size<select value={f.quotaMb || quota.business} onChange={(e) => setF({ ...f, quotaMb: Number(e.target.value) })}>
+          {sizeOptions(quota).map((m) => <option key={m} value={m}>{(m / 1024).toFixed(m % 1024 ? 1 : 0)} GB{m === quota.business ? ' (standard)' : ''}</option>)}</select></label>
         <label className="check"><input type="checkbox" checked={f.admin} onChange={(e) => setF({ ...f, admin: e.target.checked })} /> Make this person an admin (can manage users &amp; domains)</label>
         <label className="check"><input type="checkbox" checked={f.welcome} onChange={(e) => setF({ ...f, welcome: e.target.checked })} /> Put a welcome &amp; getting-started email in their inbox</label>
         {err && <div className="form-error">{err}</div>}
@@ -243,6 +250,7 @@ function AddUser({ domain, orgId, onClose, onCreated }) {
 }
 
 function EditUser({ u, onClose, onSave }) {
+  const quota = useQuota();
   const [f, setF] = useState({ name: u.name, quotaMb: u.quotaMb, active: u.active, admin: u.admin, title: u.title, department: u.department, phone: u.phone, mobile: u.mobile });
   return (
     <Modal title={`Edit ${u.email}`} onClose={onClose}>
@@ -250,7 +258,7 @@ function EditUser({ u, onClose, onSave }) {
         <label>Full name<input value={f.name} onChange={(e) => setF({ ...f, name: e.target.value })} /></label>
         <ProfileFields f={f} setF={setF} />
         <label>Mailbox size<select value={f.quotaMb} onChange={(e) => setF({ ...f, quotaMb: Number(e.target.value) })}>
-          {[...new Set([1024, 2048, 5120, 10240, 20480, u.quotaMb])].sort((a, b) => a - b).map((m) => <option key={m} value={m}>{(m / 1024).toFixed(m % 1024 ? 1 : 0)} GB</option>)}</select></label>
+          {sizeOptions(quota, u.quotaMb).map((m) => <option key={m} value={m}>{(m / 1024).toFixed(m % 1024 ? 1 : 0)} GB</option>)}</select></label>
         <label className="check"><input type="checkbox" checked={f.admin} onChange={(e) => setF({ ...f, admin: e.target.checked })} /> Admin</label>
         <label className="check"><input type="checkbox" checked={!f.active} onChange={(e) => setF({ ...f, active: !e.target.checked })} /> Suspended (can't sign in or receive mail)</label>
         <div className="step-actions"><button type="button" className="btn" onClick={onClose}>Cancel</button><button className="btn primary">Save</button></div>

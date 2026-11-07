@@ -48,6 +48,8 @@ publicAccounts.get('/signup/config', async (req, res) => res.json({
   turnstileSiteKey: config.turnstile.siteKey || null,
   // where sign-in and the app live (the web app uses these to build links)
   rootDomain: config.rootDomain || null, loginHost: config.loginHost || null,
+  // mailbox sizes (config values, in MB)
+  quota: { free: config.signup.quotaMb, business: config.business.defaultQuotaMb, businessMax: config.business.maxQuotaMb },
 }));
 
 async function checkCaptcha(token, ip) {
