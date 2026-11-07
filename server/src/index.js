@@ -9,7 +9,9 @@ import { config } from './config.js';
 import { api } from './routes.js';
 import { sharedboxes } from './sharedboxes.js';
 import { archive } from './archive.js';
-import { push, startPush, pushStats } from './push.js';
+import { push, startPush, pushStats, notify } from './push.js';
+import { tasksApi, startReminders, setReminderNotifier } from './tasks.js';
+import { sendSystemMail } from './recovery.js';
 import { help } from './help.js';
 import { hosts, siteRouter } from './hosts.js';
 import { requireAuth } from './session.js';
@@ -96,6 +98,7 @@ app.use('/api', mailtools);
 app.use('/api', spam);
 app.use('/api', deviceSetupApi);
 app.use('/api', privacy);
+app.use('/api', tasksApi);
 app.use('/api', calendar);
 app.use('/api', contacts);
 app.use('/api', groups);
@@ -126,6 +129,13 @@ if (fs.existsSync(dist)) {
 
 startOutboundChecks();
 startPush();
+// Task reminders and follow-ups: a push to the person's devices; email if they have none
+setReminderNotifier(async (email, n) => {
+  if (await notify(email, { title: n.title, body: n.body, tag: `${n.kind}-${Date.now()}`, url: n.url })) return;
+  const esc = (x) => String(x).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]);
+  await sendSystemMail(email, n.title, `<p style="font-family:Segoe UI,Arial,sans-serif;font-size:14px">${esc(n.body)}</p><p><a href="${esc(config.publicUrl || '')}${n.url}">Open ${esc(config.appName)}</a></p>`);
+});
+startReminders();
 gauge('push_watchers', () => pushStats().watching);
 if (config.runsBackground) {
   await startJobs();
