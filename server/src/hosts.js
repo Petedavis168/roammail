@@ -9,7 +9,7 @@ import { config } from './config.js';
 import { resolveMailboxId, ensureMailboxId, ID_RE } from './mailboxids.js';
 import { browserMailboxes } from './session.js';
 import { q } from './db.js';
-import { counter } from './shared.js';
+import { counter, rateLimit } from './shared.js';
 
 const root = () => config.rootDomain;
 export const loginUrl = (path = '/') => (config.loginHost ? `https://${config.loginHost}${path}` : `/login${path === '/' ? '' : path.replace(/^\/(?=\?)/, '')}`);
@@ -50,7 +50,8 @@ hosts.get(['/', '/login'], async (req, res, next) => {
   return res.redirect(302, appUrl(`/${await ensureMailboxId(emails[0])}/inbox`));
 });
 // Installed app (PWA start_url): the first signed-in mailbox, or sign-in
-hosts.get('/app', async (req, res) => {
+const appLimiter = rateLimit({ windowMs: 60 * 1000, limit: 60, standardHeaders: true, legacyHeaders: false });
+hosts.get('/app', appLimiter, async (req, res) => {
   const emails = await browserMailboxes(req);
   if (!emails.length) return res.redirect(302, loginUrl('/'));
   const section = ['calendar', 'contacts'].includes(req.query.view) ? req.query.view : 'inbox';
