@@ -27,6 +27,14 @@ import { sendSystemMail } from './recovery.js';
 import { needsPaymentToActivate, seatCheck, shrinkSeats, onPaid, startBillingChecks, orgBilling, setSeats } from './billing.js';
 
 const wrap = (fn) => (req, res, next) => Promise.resolve(fn(req, res, next)).catch(next);
+// a@b.c shape without a regex (input is user-provided; keeps it linear-time and bounded)
+function looksLikeEmail(v) {
+  if (v.length > 254 || /\s/.test(v)) return false;
+  const at = v.indexOf('@');
+  if (at < 1 || at !== v.lastIndexOf('@')) return false;
+  const dom = v.slice(at + 1); const dot = dom.lastIndexOf('.');
+  return dot > 0 && dot < dom.length - 1;
+}
 const fail = (status, message) => Object.assign(new Error(message), { status });
 
 const RESERVED = new Set(['admin', 'administrator', 'root', 'postmaster', 'abuse', 'hostmaster', 'webmaster', 'security',
@@ -153,7 +161,7 @@ publicAccounts.post('/signup', rateLimit({ windowMs: 60 * 60_000, limit: 10 }), 
   if (config.signup.requireDetails || req.body.birthday || req.body.phone) {
     const birthday = checkBirthday(req.body.birthday, config.signup.minAge);
     const recovery = String(req.body.recoveryEmail || '').trim().toLowerCase();
-    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(recovery)) throw fail(400, 'Enter a recovery email address (a different account you can get into)');
+    if (!looksLikeEmail(recovery)) throw fail(400, 'Enter a recovery email address (a different account you can get into)');
     if (recovery === `${local}@${config.signup.domain}`) throw fail(400, 'Use a different address than the new one for recovery');
     details = { birthday, phone: normalizePhone(req.body.phone) };
   }
