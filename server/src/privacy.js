@@ -1,3 +1,4 @@
+import { LEGAL_DOCS, legalBody } from './legaltext.js';
 // Privacy & legal: mail export (mbox), account deletion, legal pages, security.txt, log retention.
 import express from 'express';
 import fs from 'node:fs';
@@ -29,61 +30,8 @@ legalPages.get('/.well-known/security.txt', (req, res) => {
   ].filter(Boolean).join('\n') + '\n');
 });
 
-const DOCS = {
-  terms: 'Terms of Service',
-  privacy: 'Privacy Policy',
-  'acceptable-use': 'Acceptable Use Policy',
-  security: 'Security & Responsible Disclosure',
-};
-
-function body(doc) {
-  const L = config.legal; const app = esc(config.appName); const co = esc(L.company);
-  const mail = (a) => (a ? `<a href="mailto:${esc(a)}">${esc(a)}</a>` : 'our support team');
-  switch (doc) {
-    case 'terms': return `
-<p>These terms apply to your use of ${app}, operated by ${co} ("we"). By creating or using an account you agree to them.</p>
-<h2>Your account</h2><ul><li>You must be at least 16 years old (or the age of digital consent where you live).</li>
-<li>Keep your password safe and turn on 2-step verification. You're responsible for activity on your account.</li>
-<li>Free accounts are for personal use and have limits on storage and sending. Business accounts are managed by the business's administrators, who can create, suspend and delete their users' mailboxes.</li></ul>
-<h2>Acceptable use</h2><p>You must follow our <a href="/legal/acceptable-use">Acceptable Use Policy</a>. We may limit, suspend or close accounts that break it, especially for spam, phishing or malware.</p>
-<h2>Your content</h2><p>Your email belongs to you. We store and process it only to provide the service (for example: delivering mail, filtering spam and viruses, search, backups). See our <a href="/legal/privacy">Privacy Policy</a>.</p>
-<h2>Availability</h2><p>We work hard to keep the service running and your data safe, with encrypted storage and daily backups, but the service is provided "as is" without guarantees of uninterrupted availability. Keep copies of anything critical; you can download all your mail at any time (Settings → Privacy).</p>
-<h2>Ending your account</h2><p>You can delete a free account at any time in Settings → Privacy. Inactive free accounts may be closed after 12 months of no sign-ins, after a warning email.</p>
-<h2>Liability</h2><p>To the extent permitted by law, ${co} is not liable for indirect or consequential losses. Nothing in these terms limits rights you have under consumer law.</p>
-<h2>Changes</h2><p>We'll announce material changes in advance. Version: ${esc(L.termsVersion)}. Governing law: ${esc(L.country)}.</p>
-<h2>Contact</h2><p>${mail(L.contact)}</p>`;
-    case 'privacy': return `
-<p>This policy explains what ${co} ("we") collects when you use ${app}, and why.</p>
-<h2>What we store</h2><ul>
-<li><b>Your email and folders</b>, to provide the service. Stored encrypted on our servers.</li>
-<li><b>Account details</b>: your name, address, optional recovery email, and (for business users) job title and phone numbers set by your administrator.</li>
-<li><b>Security records</b>: sign-in times, IP addresses and device type, kept for ${L.retentionDays} days to protect your account and investigate abuse.</li>
-<li><b>Settings</b> such as signatures, rules and spam preferences.</li></ul>
-<h2>What we don't do</h2><ul><li>We don't sell your data or show ads.</li><li>We don't read your email. Automated systems scan messages only to filter spam and viruses.</li>
-<li>Remote images in emails are blocked until you allow them, so senders can't track when you open their messages.</li></ul>
-<h2>Who processes data for us</h2><p>Our servers run on Amazon Web Services. If enabled, password checks use the Have I Been Pwned range API, which only receives the first 5 characters of a hashed password, and the sign-up check uses Cloudflare Turnstile.</p>
-<h2>Business accounts</h2><p>If your address belongs to a business, that business is the data controller for your mailbox and its administrators can manage it.</p>
-<h2>Your rights</h2><p>You can download all your mail (Settings → Privacy → Download), correct your details, and delete a free account at any time. For other requests contact ${mail(L.contact)}. Depending on where you live (for example under GDPR or CCPA) you may also complain to your data protection authority.</p>
-<h2>Retention</h2><p>Deleted accounts are removed from live systems immediately and from backups within 30 days. Security logs are deleted after ${L.retentionDays} days.</p>`;
-    case 'acceptable-use': return `
-<p>To keep ${app} safe and our mail trusted by other providers, you must not use it to:</p>
-<ul><li>Send spam, bulk unsolicited mail, or mail to purchased or scraped lists.</li>
-<li>Send phishing, scams, malware, or impersonate other people or organizations.</li>
-<li>Harass, threaten or abuse anyone, or send illegal content.</li>
-<li>Try to break into other accounts or our systems, or get around sending limits.</li></ul>
-<p>Free accounts have daily sending limits, and new accounts start lower. We may suspend accounts that cause spam complaints or blocklistings, sometimes automatically.</p>
-<h2>Reporting abuse</h2><p>Report spam or phishing sent from our service to ${mail(L.abuse)}. Please include the full message headers.</p>`;
-    case 'security': return `
-<p>We take the security of ${app} and your data seriously. Highlights:</p>
-<ul><li>All connections use HTTPS/TLS; data and backups are encrypted at rest.</li>
-<li>2-step verification (authenticator app) with backup codes; administrators are required to use it.</li>
-<li>Email content is sanitized and shown in an isolated frame; remote content is blocked by default.</li>
-<li>Passwords are checked against known data breaches; repeated failed sign-ins are throttled.</li>
-<li>You can see and sign out your devices and get alerts about sign-ins from new devices.</li></ul>
-<h2>Reporting a vulnerability</h2><p>Please email ${mail(L.security)} with details and steps to reproduce. We'll acknowledge within 3 business days and keep you updated. Please give us reasonable time to fix issues before disclosure, don't access other people's data, and don't degrade the service. We won't take legal action against good-faith research that follows these rules.</p>`;
-    default: return '';
-  }
-}
+const DOCS = LEGAL_DOCS;
+const body = legalBody;
 
 legalPages.get('/legal/:doc', async (req, res) => {
   const doc = req.params.doc;
@@ -96,7 +44,7 @@ legalPages.get('/legal/:doc', async (req, res) => {
   res.setHeader('Cache-Control', 'public, max-age=3600');
   res.send(`<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>${esc(DOCS[doc])} · ${esc(config.appName)}</title><link rel="icon" href="/favicon.png">
-<style>body{margin:0;font:16px/1.6 -apple-system,Segoe UI,Roboto,Arial,sans-serif;color:#242424;background:#f5f5f5}
+<style>table{border-collapse:collapse;width:100%;margin:10px 0;font-size:14px}th,td{border:1px solid #ddd;padding:6px 8px;text-align:left;vertical-align:top}th{background:#f0f3f6}body{margin:0;font:16px/1.6 -apple-system,Segoe UI,Roboto,Arial,sans-serif;color:#242424;background:#f5f5f5}
 main{max-width:760px;margin:0 auto;padding:32px 22px 60px;background:#fff;min-height:100vh}h1{font-size:28px;margin:0 0 4px}
 h2{font-size:18px;margin:26px 0 6px}a{color:#244960}nav{font-size:14px;margin-bottom:24px}nav a{margin-right:14px}.muted{color:#666;font-size:14px}</style></head>
 <body><main><a href="/" style="display:flex;align-items:center;gap:10px;text-decoration:none;color:#0a1e2e;font:700 22px Georgia,serif;margin-bottom:12px"><img src="/roammail-mark.png" alt="" style="width:40px;height:auto">${esc(config.appName)}</a><nav><a href="/">← Back to ${esc(config.appName)}</a>${Object.entries(DOCS).map(([k, v]) => `<a href="/legal/${k}">${esc(v)}</a>`).join('')}</nav>
@@ -170,6 +118,10 @@ export async function startRetention() {
     await q.run('DELETE FROM password_resets WHERE expires < ?', Date.now());
     await q.run('DELETE FROM setup_tokens WHERE expires < ?', Date.now());
     await q.run("DELETE FROM signups WHERE created_at < datetime('now', '-400 days')");
+    const twoYears = Date.now() - 730 * 864e5;
+    await q.run("DELETE FROM support_tickets WHERE status = 'closed' AND at < ?", twoYears);
+    await q.run("DELETE FROM abuse_reports WHERE status = 'closed' AND at < ?", twoYears);
+    await q.run('DELETE FROM push_subs WHERE created_at < ?', Date.now() - 30 * 864e5);
   };
   await run();
   setInterval(() => run().catch((e) => console.error('APP_ERROR retention', e.message)), 6 * 3600e3).unref();

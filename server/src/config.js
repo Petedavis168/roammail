@@ -105,7 +105,11 @@ config.legal = {
   contact: env.LEGAL_CONTACT_EMAIL || (env.SIGNUP_DOMAIN ? `support@${env.SIGNUP_DOMAIN}` : ''),
   abuse: env.ABUSE_EMAIL || (env.SIGNUP_DOMAIN ? `abuse@${env.SIGNUP_DOMAIN}` : ''),
   security: env.SECURITY_CONTACT_EMAIL || (env.SIGNUP_DOMAIN ? `security@${env.SIGNUP_DOMAIN}` : ''),
-  termsVersion: env.TERMS_VERSION || '2026-11-07',
+  termsVersion: env.TERMS_VERSION || '2026-11-07.2',
+  address: env.LEGAL_ADDRESS || '',                // postal address for legal notices (required before launch)
+  privacy: env.PRIVACY_EMAIL || '',                // privacy requests (defaults to the contact address)
+  dmca: env.DMCA_AGENT_EMAIL || '',                // designated copyright agent (register with the US Copyright Office)
+  euRep: env.EU_REPRESENTATIVE || '',              // GDPR Art. 27 representative, if you serve EU users
   retentionDays: Number(env.LOG_RETENTION_DAYS || 180),
 };
 // ---------- calendar & contacts (mailcow SOGo CalDAV/CardDAV) ----------
