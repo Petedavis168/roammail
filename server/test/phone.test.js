@@ -25,7 +25,8 @@ test('free sign-up needs a verified mobile number; one free account per number',
   assert.equal((await post('/api/signup/phone/check', { phone, code: '000000' })).status, 400);
   const ok = await post('/api/signup/phone/check', { phone, code: '123456' });
   assert.equal(ok.status, 200); assert.ok(ok.data.token);
-  const s = await post('/api/signup', { name: 'P', username: `ph${run}`, password: PW, acceptTerms: true, birthday: '1990-01-15', recoveryEmail: 'recovery@example.org', phone: '+15555550123', phoneToken: ok.data.token });
+  assert.equal((await post('/api/signup', { name: 'P', username: `ph${run}`, password: PW, acceptTerms: true, birthday: '1990-01-15', recoveryEmail: 'recovery@example.org', phone: '+15555550123', phoneToken: ok.data.token })).status, 400, 'number must match the verified one');
+  const s = await post('/api/signup', { name: 'P', username: `ph${run}`, password: PW, acceptTerms: true, birthday: '1990-01-15', recoveryEmail: 'recovery@example.org', phone, phoneToken: ok.data.token });
   assert.equal(s.status, 200, JSON.stringify(s.data));
   // the same number can't start another free account
   assert.equal((await post('/api/signup/phone/start', { phone })).status, 409);

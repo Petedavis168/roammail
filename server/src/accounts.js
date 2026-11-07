@@ -22,7 +22,7 @@ import { resetTwoFactor } from './recovery.js';
 import { syncOrgGroups } from './groups.js';
 import { tempPassword, TEMP_PASSWORD_RE } from './temppass.js';
 import { isBareFirstName, FIRST_NAME_HINT } from './names.js';
-import { phoneRequired, requireVerifiedPhone, normalizePhone, checkBirthday } from './phone.js';
+import { phoneRequired, requireVerifiedPhone, normalizePhone, checkBirthday, phoneHash as hashPhone } from './phone.js';
 import { sendSystemMail } from './recovery.js';
 import { needsPaymentToActivate, seatCheck, shrinkSeats, onPaid, startBillingChecks, orgBilling, setSeats } from './billing.js';
 
@@ -164,6 +164,8 @@ publicAccounts.post('/signup', rateLimit({ windowMs: 60 * 60_000, limit: 10 }), 
     if (!looksLikeEmail(recovery)) throw fail(400, 'Enter a recovery email address (a different account you can get into)');
     if (recovery === `${local}@${config.signup.domain}`) throw fail(400, 'Use a different address than the new one for recovery');
     details = { birthday, phone: normalizePhone(req.body.phone) };
+    // with SMS verification on, the number we keep must be the one they just confirmed
+    if (phoneHash && hashPhone(details.phone) !== phoneHash) throw fail(400, 'Use the mobile number you verified by text message');
   }
   // Business sign-up: their own domain and the address they want there (created once the domain is connected)
   let biz = null;
