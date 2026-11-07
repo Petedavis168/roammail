@@ -140,6 +140,18 @@ test('hosts: www/app redirect to the root, sign-in host keeps to sign-in, health
   assert.deepEqual([anon.status, anon.location], [302, 'https://login.roammail.test/']);
 });
 
+test('polish: favicon.ico, robots.txt, real 404s for made-up paths, share image', async () => {
+  const fav = await fetch(`${BASE}/favicon.ico`);
+  assert.equal(fav.status, 200); assert.equal(fav.headers.get('content-type'), 'image/x-icon');
+  assert.deepEqual([...new Uint8Array(await fav.arrayBuffer()).slice(0, 4)], [0, 0, 1, 0], 'an ICO file');
+  const robots = await fetch(`${BASE}/robots.txt`);
+  assert.match(robots.headers.get('content-type'), /text\/plain/); assert.match(await robots.text(), /User-agent: \*/);
+  for (const p of ['/wp-login.php', '/nope', '/.env', '/admin.php']) assert.equal((await fetch(BASE + p)).status, 404, p);
+  for (const p of ['/login', '/signup']) assert.equal((await fetch(BASE + p)).status, 200, p);
+  const og = await fetch(`${BASE}/assets/og-image.png`);
+  assert.equal(og.status, 200); assert.equal(og.headers.get('content-type'), 'image/png');
+});
+
 test('public website: home page and pages from the site, sign-up links, assets', async () => {
   const b = new Browser();
   const home = await b.req('GET', '/');

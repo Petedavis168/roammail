@@ -20,6 +20,7 @@ import { mailcow } from './mailcow.js';
 import { makeClient } from './imap.js';
 import { assertPublicHost } from './abuse.js';
 import { rateLimit } from './shared.js';
+import { ipKeyGenerator } from 'express-rate-limit';
 import { parseCsv, requireDomainAdmin } from './accounts.js';
 
 const wrap = (fn) => (req, res, next) => Promise.resolve(fn(req, res, next)).catch(next);
@@ -98,7 +99,7 @@ async function createSyncImport(email, { provider, host, port, user, password, b
 
 export const importsApi = express.Router();
 importsApi.use(['/imports', '/admin/imports'], requireAuth);
-const probeLimiter = rateLimit({ windowMs: 60 * 60 * 1000, limit: 20, keyGenerator: (req) => `imp:${req.user?.email || req.ip}` });
+const probeLimiter = rateLimit({ windowMs: 60 * 60 * 1000, limit: 20, keyGenerator: (req) => (req.user?.email ? `imp:${req.user.email}` : ipKeyGenerator(req.ip)) });
 
 importsApi.get('/imports', wrap(async (req, res) => {
   const jobs = await mailcow.listSyncJobs(req.user.email).catch(() => []);

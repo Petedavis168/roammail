@@ -15,7 +15,7 @@ import { importsApi, importsPublic, startImports, setImportNotifier } from './im
 import { phoneApi } from './phone.js';
 import { sendSystemMail } from './recovery.js';
 import { help } from './help.js';
-import { hosts, siteRouter } from './hosts.js';
+import { hosts, siteRouter, ID_PATH, notFound } from './hosts.js';
 import { requireAuth } from './session.js';
 import { setupApi, requireSetupApi } from './setup.js';
 import { abuseDesk, outboundAdmin, startOutboundChecks } from './outbound.js';
@@ -127,9 +127,34 @@ const site = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../s
 if (fs.existsSync(site)) app.use(siteRouter(site));
 
 const dist = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../client/dist');
+// Polish: a real favicon.ico (the PNG inside an ICO wrapper) and robots.txt on every host
+let favicon = null;
+app.get('/favicon.ico', (req, res) => {
+  if (!favicon) {
+    const png = fs.readFileSync(path.join(dist, 'favicon.png'));
+    const head = Buffer.alloc(22);
+    head.writeUInt16LE(0, 0); head.writeUInt16LE(1, 2); head.writeUInt16LE(1, 4); // ICO, 1 image
+    const w = png.readUInt32BE(16); const h = png.readUInt32BE(20);
+    head.writeUInt8(w >= 256 ? 0 : w, 6); head.writeUInt8(h >= 256 ? 0 : h, 7);
+    head.writeUInt16LE(1, 10); head.writeUInt16LE(32, 12); head.writeUInt32LE(png.length, 14); head.writeUInt32LE(22, 18);
+    favicon = Buffer.concat([head, png]);
+  }
+  res.type('image/x-icon').set('Cache-Control', 'public, max-age=86400').send(favicon);
+});
+app.get('/robots.txt', (req, res) => {
+  const host = String(req.hostname || '').toLowerCase();
+  const body = config.loginHost && host === config.loginHost
+    ? 'User-agent: *\nAllow: /$\nAllow: /signup\nDisallow: /\n' // sign-in host: only the sign-in and sign-up pages
+    : 'User-agent: *\nDisallow: /api/\nDisallow: /app\nDisallow: /help/contact\n'; // the website; mailbox pages need a sign-in anyway
+  res.type('text/plain').set('Cache-Control', 'public, max-age=86400').send(body);
+});
 if (fs.existsSync(dist)) {
   app.use(express.static(dist, { index: false, maxAge: '1h' }));
-  app.get(/^\/(?!api\/).*/, (req, res) => res.sendFile(path.join(dist, 'index.html')));
+  // Only real app pages get the app; anything else is a real 404 (no soft-404s for scanners and search engines)
+  app.get(/^\/(?!api\/).*/, (req, res) => {
+    if (/^\/(login|signup)?\/?$/.test(req.path) || ID_PATH.test(req.path)) return res.sendFile(path.join(dist, 'index.html'));
+    return notFound(res);
+  });
 }
 
 startOutboundChecks();

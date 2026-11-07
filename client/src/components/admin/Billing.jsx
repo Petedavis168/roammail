@@ -70,7 +70,9 @@ export default function Billing({ org }) {
         <div className="banner">You're paying for {b.paidSeats - b.billable} more {b.paidSeats - b.billable === 1 ? 'user' : 'users'} than you have. Add people to use {b.paidSeats - b.billable === 1 ? 'it' : 'them'}, or lower the number of users in Manage billing.</div>
       )}
       <div className="card">
-        <h3>Plan {statusPill} {b.friendly && <span className="pill ok">Friendly Web Services customer</span>}</h3>
+        <h3>Plan {statusPill} {b.friendly && <span className="pill ok">Friendly Web Services customer</span>}
+          {b.comp && <span className="pill ok">Complimentary{b.comp.forever ? '' : ` until ${new Date(b.comp.until).toLocaleDateString()}`}</span>}</h3>
+        {b.comp && <p className="muted small">Every mailbox is free{b.comp.forever ? '.' : ` until ${new Date(b.comp.until).toLocaleDateString()}. We'll email you a week before it ends.`}</p>}
         <p className="muted small">{b.friendly ? 'Your first mailbox is free.' : ''} Each {b.friendly ? 'additional ' : ''}user is {new Intl.NumberFormat([], { style: 'currency', currency: b.currency }).format(b.perUser)} per {b.interval || 'month'}. Groups and aliases are always free and unlimited.</p>
         <p className="muted small">Business plans include our <a href="/legal/dpa" target="_blank" rel="noreferrer">Data Processing Addendum</a> (GDPR/CCPA) and <a href="/legal/subprocessors" target="_blank" rel="noreferrer">subprocessor list</a>. Plans renew automatically; cancel any time in Manage billing.</p>
         {b.status === 'past_due' && <div className="banner warn">Your last payment didn't go through. Update your card in Manage billing to avoid interruption.</div>}

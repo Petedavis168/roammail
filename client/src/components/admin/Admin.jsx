@@ -38,6 +38,31 @@ const sizeOptions = (q, current) => [...new Set([1024, 2048, 5120, 10240, 20480,
 function useQuota() { const [q, setQ] = useState({ business: 10240, businessMax: 10240 }); useEffect(() => { loadQuota().then(setQ); }, []); return q; }
 
 // Item 6: copy many people's old mailboxes at once (one row per person; app passwords from their old provider)
+// Item 2: complimentary plan (fee waiver) for a business: forever, until a date, or N months. Super-admins only.
+function CompControl({ o, onChange }) {
+  const COMP_FOREVER = 32503680000000;
+  const until = Number(o.comp_until || 0);
+  const active = until > Date.now();
+  const set = async (mode) => {
+    let body = { mode };
+    if (mode === 'until') { const d = prompt('Complimentary until (YYYY-MM-DD)'); if (!d) return; body.until = d; }
+    if (mode === 'months') { const n = prompt('How many months?', '12'); if (!n) return; body.months = Number(n); }
+    if (mode !== 'off') { const note = prompt('Note for the audit log (why is this complimentary?)', o.comp_note || ''); if (!note) return; body.note = note; }
+    else if (!confirm(`End the complimentary plan for ${o.name}? Admins get the normal 7-day grace before unpaid mailboxes pause.`)) return;
+    try { await api.put(`/api/super/orgs/${o.id}/comp`, body); onChange(); } catch (e) { alert(e.message); }
+  };
+  return (
+    <span className="comp">
+      {active && <span className="pill ok" title={o.comp_note || ''}>Complimentary {until >= COMP_FOREVER ? '(forever)' : `until ${new Date(until).toLocaleDateString()}`}</span>}
+      <select value="" onChange={(e) => e.target.value && set(e.target.value)} aria-label="Complimentary plan">
+        <option value="">{active ? 'Change comp…' : 'Comp…'}</option>
+        <option value="forever">Forever</option><option value="months">For N months</option><option value="until">Until a date</option>
+        {active && <option value="off">End comp</option>}
+      </select>
+    </span>
+  );
+}
+
 function ImportMailBulk({ domain, onClose }) {
   const toast = useToast();
   const [results, setResults] = useState(null);
@@ -520,7 +545,8 @@ function Platform() {
             <span><input type="number" min="1" defaultValue={o.max_mailboxes} className="num" onBlur={(e) => Number(e.target.value) !== o.max_mailboxes && patchOrg(o, { maxMailboxes: Number(e.target.value) })} /></span>
             <span>{o.suspended ? <span className="pill bad">Suspended</span> : <span className="pill ok">Active</span>}
               <label className="check small"><input type="checkbox" checked={o.plan === 'friendly'} onChange={async (e) => { await api.patch(`/api/super/orgs/${o.id}/plan`, { plan: e.target.checked ? 'friendly' : 'standard' }); load(); }} /> Friendly</label>
-              <small className="muted">{o.billing_status !== 'none' ? `billing: ${o.billing_status}` : ''}</small></span>
+              <small className="muted">{o.billing_status !== 'none' ? `billing: ${o.billing_status}` : ''}</small>
+              <CompControl o={o} onChange={load} /></span>
             <span className="actions"><button className="btn sm" onClick={() => confirm(`${o.suspended ? 'Reactivate' : 'Suspend'} ${o.name}?`) && patchOrg(o, { suspended: !o.suspended })}>{o.suspended ? 'Reactivate' : 'Suspend'}</button></span>
           </div>
         ))}
