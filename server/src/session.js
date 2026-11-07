@@ -41,22 +41,24 @@ function unsealWith(key, token) {
 const baseOpts = () => ({ httpOnly: true, secure: config.cookieSecure, sameSite: 'lax', path: '/', ...(config.cookieDomain ? { domain: config.cookieDomain } : {}) });
 const cookieOpts = (expires) => ({ ...baseOpts(), ...(expires ? { expires: new Date(expires) } : {}) });
 
-// One cookie can hold up to 5 signed-in mailboxes ("tokenA.tokenB"); the URL's mailbox ID picks which one is used.
-export const MAX_ACCOUNTS = 5;
+// One cookie can hold up to 10 signed-in mailboxes ("tokenA.tokenB"); the URL's mailbox ID picks which one is used.
+export const MAX_ACCOUNTS = 10;
 const tokensOf = (req) => String(req.cookies?.[COOKIE] || '').split('.').filter((t) => /^[A-Za-z0-9_-]{43}$/.test(t)).slice(0, MAX_ACCOUNTS);
-function writeTokens(res, tokens) {
-  if (tokens.length) res.cookie(COOKIE, tokens.join('.'), cookieOpts(Date.now() + config.sessionHours * 3600 * 1000));
+function writeTokens(res, tokens, remember = false) {
+  if (tokens.length) res.cookie(COOKIE, tokens.join('.'), cookieOpts(Date.now() + (remember ? REMEMBER_MS : config.sessionHours * 3600 * 1000)));
   else res.clearCookie(COOKIE, baseOpts());
 }
 
 /** Create a session for a signed-in user and set the cookie. Returns the session id. */
-export async function setSession(res, { email, password, name }, req) {
+export const REMEMBER_MS = 30 * 864e5; // "Keep me signed in": 30 days, extended each time the mailbox is used
+const idleLimit = (s) => (s.remember ? REMEMBER_MS : config.sessionIdleHours * 3600 * 1000);
+export async function setSession(res, { email, password, name, remember = false }, req) {
   const token = crypto.randomBytes(32).toString('base64url');
   const id = sha(token);
   const now = Date.now();
-  const expires = now + config.sessionHours * 3600 * 1000;
-  await q.run('INSERT INTO sessions(id, email, creds, name, ip, ua, created, last_seen, expires, user_id) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
-    id, email.toLowerCase(), seal({ password }), name || '', req?.ip || null, String(req?.get?.('user-agent') || '').slice(0, 300), now, now, expires, await userIdFor(email));
+  const expires = now + (remember ? REMEMBER_MS : config.sessionHours * 3600 * 1000);
+  await q.run('INSERT INTO sessions(id, email, creds, name, ip, ua, created, last_seen, expires, user_id, remember) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+    id, email.toLowerCase(), seal({ password }), name || '', req?.ip || null, String(req?.get?.('user-agent') || '').slice(0, 300), now, now, expires, await userIdFor(email), remember ? 1 : 0);
   // Signing in again to the same mailbox replaces its old session; the newest account becomes the default
   const keep = [];
   for (const t of tokensOf(req)) {
@@ -64,8 +66,13 @@ export async function setSession(res, { email, password, name }, req) {
     if (old && old.email === email.toLowerCase()) await q.run('DELETE FROM sessions WHERE id = ?', sha(t));
     else if (old) keep.push(t);
   }
-  writeTokens(res, [token, ...keep].slice(0, MAX_ACCOUNTS));
+  writeTokens(res, [token, ...keep].slice(0, MAX_ACCOUNTS), remember || (await anyRemembered(keep)));
   return id;
+}
+
+async function anyRemembered(tokens) {
+  for (const t of tokens) if ((await q.get('SELECT remember FROM sessions WHERE id = ?', sha(t)))?.remember) return true;
+  return false;
 }
 
 /** Sign out the current mailbox only (or every mailbox in this browser with all=true). */
@@ -77,7 +84,7 @@ export async function clearSession(req, res, { all = false } = {}) {
     if (all || !current || sha(t) === current) await q.run('DELETE FROM sessions WHERE id = ?', sha(t));
     else keep.push(t);
   }
-  writeTokens(res, keep);
+  writeTokens(res, keep, await anyRemembered(keep));
 }
 
 /** Sign a user out everywhere (optionally keeping one session). */
@@ -105,8 +112,8 @@ onStoredCredentialsRejected(async (user) => {
 export async function browserMailboxes(req) {
   const now = Date.now(); const out = [];
   for (const t of tokensOf(req)) {
-    const s = await q.get('SELECT email, expires, last_seen FROM sessions WHERE id = ?', sha(t));
-    if (s && s.expires > now && s.last_seen > now - config.sessionIdleHours * 3600 * 1000) out.push(s.email);
+    const s = await q.get('SELECT email, expires, last_seen, remember FROM sessions WHERE id = ?', sha(t));
+    if (s && s.expires > now && s.last_seen > now - idleLimit(s)) out.push(s.email);
   }
   return out;
 }
@@ -118,15 +125,16 @@ export async function requireAuth(req, res, next) {
   const now = Date.now();
   if (now - lastSweep > 10 * 60 * 1000) {
     lastSweep = now;
-    await q.run('DELETE FROM sessions WHERE expires < ? OR last_seen < ?', now, now - config.sessionIdleHours * 3600 * 1000);
+    await q.run('DELETE FROM sessions WHERE expires < ? OR (last_seen < ? AND remember = 0) OR last_seen < ?', now, now - config.sessionIdleHours * 3600 * 1000, now - REMEMBER_MS);
   }
   const live = [];
   for (const t of tokens) {
     const s = await q.get('SELECT * FROM sessions WHERE id = ?', sha(t));
-    if (!s || s.expires < now || s.last_seen < now - config.sessionIdleHours * 3600 * 1000) { if (s) await q.run('DELETE FROM sessions WHERE id = ?', s.id); continue; }
+    if (!s || s.expires < now || s.last_seen < now - idleLimit(s)) { if (s) await q.run('DELETE FROM sessions WHERE id = ?', s.id); continue; }
     live.push({ t, s });
   }
-  if (live.length !== tokens.length) writeTokens(res, live.map((x) => x.t));
+  const remembered = live.some((x) => x.s.remember);
+  if (live.length !== tokens.length) writeTokens(res, live.map((x) => x.t), remembered);
   if (!live.length) return res.status(401).json({ error: 'Your session ended. Please sign in again.' });
 
   // Which mailbox? The public ID from the URL (X-Mailbox-Id header, or ?mid= for live updates). It is only a name:
@@ -152,10 +160,15 @@ export async function requireAuth(req, res, next) {
   const s = pick.s; const id = s.id;
   const creds = unseal(s.creds);
   if (!creds) return res.status(401).json({ error: 'Please sign in again.' });
-  if (now - s.last_seen > 60 * 1000) await q.run('UPDATE sessions SET last_seen = ?, ip = ? WHERE id = ?', now, req.ip, id);
+  if (now - s.last_seen > 60 * 1000) {
+    await q.run('UPDATE sessions SET last_seen = ?, ip = ?, expires = CASE WHEN remember = 1 THEN ? ELSE expires END WHERE id = ?', now, req.ip, now + REMEMBER_MS, id);
+    if (s.remember && now - s.last_seen > 3600 * 1000) writeTokens(res, live.map((x) => x.t), true); // rolling: keep the cookie alive too
+  }
   // sid doubles as the IMAP connection-pool key
   req.user = { email: s.email, password: creds.password, name: s.name, sid: id, userId: s.user_id || null };
   req.accounts = live.map((x) => ({ email: x.s.email, name: x.s.name }));
+  // Every signed-in mailbox on this browser (All inboxes, unread badges); passwords are unsealed only when used
+  req.liveSessions = live.map((x) => x.s);
 
   // First sign-in setup: temporary password replaced + 2-step verification (see setup.js)
   if (!(await setupGate(req, res))) return;
