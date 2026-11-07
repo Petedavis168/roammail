@@ -21,6 +21,7 @@ import { assertNotBreached, topSenders } from './abuse.js';
 import { resetTwoFactor } from './recovery.js';
 import { syncOrgGroups } from './groups.js';
 import { tempPassword } from './temppass.js';
+import { isBareFirstName, FIRST_NAME_HINT } from './names.js';
 import { phoneRequired, requireVerifiedPhone } from './phone.js';
 import { sendSystemMail } from './recovery.js';
 import { needsPaymentToActivate, seatCheck, shrinkSeats, onPaid, startBillingChecks, orgBilling, setSeats } from './billing.js';
@@ -66,8 +67,9 @@ async function checkCaptcha(token, ip) {
 }
 
 /** Is local@SIGNUP_DOMAIN free? Checks mailboxes, aliases/groups, and addresses of deleted accounts (never reused). */
-async function addressAvailable(local) {
+async function addressAvailable(local, { staff = false } = {}) {
   if (!LOCAL_RE.test(local) || RESERVED.has(local) || local.length < 3) return false;
+  if (!staff && isBareFirstName(local)) return false;
   const email = `${local}@${config.signup.domain}`;
   if (await q.get('SELECT 1 FROM signups WHERE email = ?', email)) return false;
   if (await q.get('SELECT 1 FROM groups WHERE address = ?', email)) return false;
@@ -82,25 +84,48 @@ async function aliasesCached() {
   }
   return aliasCache.set;
 }
-const usernameHint = (local) => (local.length < 3 ? 'Use at least 3 characters' : !LOCAL_RE.test(local) ? 'Use only letters, numbers, dots, dashes and underscores' : RESERVED.has(local) ? 'That name is reserved' : null);
+const usernameHint = (local) => (local.length < 3 ? 'Use at least 3 characters' : !LOCAL_RE.test(local) ? 'Use only letters, numbers, dots, dashes and underscores' : RESERVED.has(local) ? 'That name is reserved' : isBareFirstName(local) ? FIRST_NAME_HINT : null);
+
+// Address ideas from the person's name (and what they typed). Never a bare first name, a reserved word or a taken
+// address: addressAvailable() checks each one. If the obvious ones are gone, a number is added so there are always some.
+const normName = (s) => String(s || '').normalize('NFKD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/[^a-z0-9]/g, '').slice(0, 20);
+async function addressIdeas({ first, last, want, count = 3, shuffle = false }) {
+  const f = normName(first); const l = normName(last); const w = String(want || '').slice(0, 64).toLowerCase().replace(/[^a-z0-9._-]/g, '').replace(/^[._-]+/, '').replace(/[._-]+$/, '').slice(0, 30);
+  const yy = new Date().getFullYear() % 100;
+  const n2 = () => crypto.randomInt(10, 100); const n3 = () => crypto.randomInt(100, 1000);
+  let ideas = [
+    w && l && !w.includes(l) && `${w}.${l}`, w && l && !w.includes(l) && `${w}${l}`, w && l && !w.includes(l) && `${w}.${l[0]}`,
+    f && l && `${f}.${l}`, f && l && `${f}${l}`, f && l && `${f[0]}${l}`, f && l && `${f}.${l[0]}`, f && l && `${l}.${f}`, f && l && `${f}${l}${yy}`,
+    w && `${w}${n2()}`, w && `${w}.${n3()}`,
+    f && `${f}${l ? `.${l}` : ''}${n2()}`, f && `${f}${yy}`, f && l && `${f[0]}${l}${n2()}`, f && `${f}.${n3()}`,
+  ].filter((x) => x && x.length >= 3 && x.length <= 40);
+  ideas = [...new Set(ideas)];
+  if (shuffle) ideas.sort(() => crypto.randomInt(3) - 1);
+  const out = [];
+  for (const i of ideas) { if (out.length >= count) break; if (await addressAvailable(i)) out.push(i); }
+  // still short (very common name): keep adding numbers to the best base
+  const base = (l && f ? `${f}.${l}` : f || w || 'mail').slice(0, 30);
+  for (let tries = 0; out.length < count && tries < 12; tries++) {
+    const c = `${base}${tries < 6 ? n2() : n3()}`;
+    if (!out.includes(c) && await addressAvailable(c)) out.push(c);
+  }
+  return out;
+}
 
 publicAccounts.get('/signup/check', rateLimit({ windowMs: 60_000, limit: 60 }), wrap(async (req, res) => {
   const local = String(req.query.username || '').toLowerCase().trim();
   const hint = usernameHint(local);
-  if (hint) return res.json({ available: false, reason: hint });
-  res.json({ available: await addressAvailable(local) });
+  const available = !hint && await addressAvailable(local);
+  if (available) return res.json({ available: true });
+  // Not allowed or taken: offer alternatives built from their name and what they typed
+  const alternatives = await addressIdeas({ first: req.query.first, last: req.query.last, want: local });
+  res.json({ available: false, ...(hint ? { reason: hint } : {}), alternatives });
 }));
 
-// Gmail-style suggestions from the person's name
+// Gmail-style suggestions from the person's name; ?shuffle=1 for "Generate one for me"
 publicAccounts.get('/signup/suggest', rateLimit({ windowMs: 60_000, limit: 30 }), wrap(async (req, res) => {
-  const norm = (s) => String(s || '').normalize('NFKD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/[^a-z0-9]/g, '').slice(0, 20);
-  const f = norm(req.query.first); const l = norm(req.query.last);
-  const year = new Date().getFullYear();
-  const ideas = [...new Set([f && l && `${f}.${l}`, f && l && `${f}${l}`, f && l && `${f[0]}${l}`, f && l && `${f}.${l[0]}`, f && l && `${f}${l}${year % 100}`,
-    f && `${f}${l ? `.${l}` : ''}${Math.floor(10 + Math.random() * 89)}`, f && l && `${l}.${f}`, f && `${f}${year}`].filter(Boolean))];
-  const out = [];
-  for (const i of ideas) { if (out.length >= 3) break; if (await addressAvailable(i)) out.push(i); }
-  res.json({ domain: config.signup.domain, suggestions: out });
+  const suggestions = await addressIdeas({ first: req.query.first, last: req.query.last, count: Math.min(5, Number(req.query.count) || 3), shuffle: req.query.shuffle === '1' });
+  res.json({ domain: config.signup.domain, suggestions });
 }));
 
 publicAccounts.post('/signup', rateLimit({ windowMs: 60 * 60_000, limit: 10 }), wrap(async (req, res) => {
@@ -110,6 +135,7 @@ publicAccounts.post('/signup', rateLimit({ windowMs: 60 * 60_000, limit: 10 }), 
   const password = String(req.body.password || '');
   checkLocal(local);
   if (RESERVED.has(local)) throw fail(400, 'That username is reserved');
+  if (isBareFirstName(local)) throw fail(400, FIRST_NAME_HINT);
   if (local.length < 3) throw fail(400, 'Use at least 3 characters for your address');
   if (!name) throw fail(400, 'Please enter your name');
   checkPassword(password);
@@ -429,7 +455,7 @@ accounts.post('/admin/users', wrap(async (req, res) => {
 /** Minimal RFC 4180 CSV parser (quotes, commas and line breaks inside quotes). */
 export function parseCsv(text) {
   const rows = []; let row = []; let field = ''; let quoted = false;
-  const s = String(text || '').replace(/^\uFEFF/, '');
+  const s = String(text || '').slice(0, 2_000_000).replace(/^\uFEFF/, ''); // bounded (requests are capped at 2 MB anyway)
   for (let i = 0; i < s.length; i++) {
     const c = s[i];
     if (quoted) {
@@ -627,6 +653,27 @@ accounts.patch('/super/settings', requireSuper, wrap(async (req, res) => {
   if (req.body.signupEnabled !== undefined) await setSetting('signupEnabled', !!req.body.signupEnabled);
   await audit(req.user.email, null, 'settings.update', req.body);
   res.json({ ok: true });
+}));
+
+// Staff addresses (anti-impersonation rule): only Roammail staff get a bare-first-name address on the free domain.
+// Created by a super-admin with a temporary password the person must replace at first sign-in.
+accounts.post('/super/staff-mailboxes', requireSuper, rateLimit({ windowMs: 3600e3, limit: 30 }), wrap(async (req, res) => {
+  if (!config.signup.domain) throw fail(400, 'No free domain is set up');
+  const local = String(req.body.localPart || '').trim().toLowerCase();
+  const name = String(req.body.name || '').trim().slice(0, 100);
+  checkLocal(local);
+  if (RESERVED.has(local)) throw fail(400, 'That name is reserved for system addresses');
+  if (!name) throw fail(400, "Enter the staff member's name");
+  if (!(await addressAvailable(local, { staff: true }))) throw fail(409, 'That address is taken (or belonged to someone before)');
+  const email = `${local}@${config.signup.domain}`;
+  const password = tempPassword();
+  await mailcow.addMailbox({ localPart: local, domain: config.signup.domain, name, password, quotaMb: config.business.defaultQuotaMb });
+  await markTemporary(email, 'staff');
+  await applyRate(email, BUSINESS_RATE).catch(() => {});
+  await q.run('INSERT INTO signups(email, ip, recovery_email, terms_version) VALUES(?, ?, ?, ?) ON CONFLICT(email) DO NOTHING', email, 'staff', null, config.legal.termsVersion);
+  await saveProfile(email, { name });
+  await audit(req.user.email, null, 'staff.mailbox_created', { email });
+  res.json({ ok: true, email, password });
 }));
 
 accounts.patch('/super/orgs/:id', requireSuper, wrap(async (req, res) => {

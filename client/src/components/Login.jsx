@@ -58,7 +58,7 @@ export default function Login({ onLogin, mode = 'signin' }) {
   useEffect(() => {
     if (step !== 'address' || !f.custom || !f.username) { setAvail(null); return; }
     clearTimeout(timer.current);
-    timer.current = setTimeout(() => api.get('/api/signup/check', { username: f.username.toLowerCase() }).then(setAvail).catch(() => setAvail(null)), 350);
+    timer.current = setTimeout(() => api.get('/api/signup/check', { username: f.username.toLowerCase(), first: f.first, last: f.last }).then(setAvail).catch(() => setAvail(null)), 350);
   }, [f.username, f.custom, step]);
   useEffect(() => {
     if (step !== 'review' || !cfg.turnstileSiteKey) return;
@@ -186,6 +186,17 @@ export default function Login({ onLogin, mode = 'signin' }) {
             <span className="g-domain">@{cfg.domain}</span>
           </div>
         )}
+        {f.custom && avail && !avail.available && avail.alternatives?.length > 0 && (
+          <div className="g-alts" aria-live="polite">
+            <small>Try one of these instead:</small>
+            {avail.alternatives.map((a) => <button type="button" key={a} className="g-chip" onClick={() => setF((x) => ({ ...x, username: a }))}>{a}@{cfg.domain}</button>)}
+          </div>
+        )}
+        <button type="button" className="g-link left" disabled={busy} onClick={() => run(async () => {
+          const r = await api.get('/api/signup/suggest', { first: f.first, last: f.last, shuffle: 1, count: 3 });
+          if (!r.suggestions.length) throw new Error("Couldn't think of one. Try typing your own.");
+          setSugg(r.suggestions); setF((x) => ({ ...x, custom: false, username: r.suggestions[0] }));
+        })}>Generate one for me</button>
       </Card>
     </Shell>
   );

@@ -10,6 +10,7 @@ import express from 'express';
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import os from 'node:os';
+import path from 'node:path';
 import readline from 'node:readline';
 import multer from 'multer';
 import { ImapFlow } from 'imapflow';
@@ -175,13 +176,16 @@ export async function readMbox(path, onMessage) {
 }
 importsApi.post('/imports/upload', rateLimit({ windowMs: 60 * 60 * 1000, limit: 10 }), requireAuth, mboxUpload.single('file'), wrap(async (req, res) => {
   if (!req.file) throw fail(400, 'Choose an .mbox file');
+  // only ever read multer's own random temp file (never a name the browser sent)
+  const tmp = path.join(os.tmpdir(), path.basename(String(req.file.filename || '')));
+  if (!/^[0-9a-f]{32}$/.test(path.basename(tmp))) throw fail(400, 'Upload failed, please try again');
   const folderName = `Imported/${String(req.body.folder || req.file.originalname.replace(/\.[^.]+$/, '') || 'Mail').replace(/[^\w .@-]/g, '').trim().slice(0, 60) || 'Mail'}`;
   const now = Date.now();
   const id = await q.insert(`INSERT INTO import_records(email, kind, provider, remote_user, status, messages_found, messages_copied, created_at, stop_at, created_by)
     VALUES(?, 'upload', 'file', ?, 'active', 0, 0, ?, ?, ?)`, req.user.email, req.file.originalname.slice(0, 200), now, now, req.user.email);
   // Copy in the background over a dedicated connection; the page shows progress
   const user = { email: req.user.email, password: req.user.password };
-  const file = req.file.path;
+  const file = tmp;
   res.json({ ok: true, id, folder: folderName });
   (async () => {
     const c = makeClient(user);

@@ -144,6 +144,30 @@ test('sensitive changes need the password', async () => {
   assert.equal((await a.req('PUT', '/api/security/recovery-email', { email: 'me@elsewhere.test', password: PW })).status, 200);
 });
 
+test('first-name rule: customers cannot take a bare first name; staff can be given one', async () => {
+  const c = new Client();
+  for (const u of ['john', 'j.o.h.n', 'Sarah']) {
+    const chk = (await c.get(`/api/signup/check?username=${encodeURIComponent(u)}`)).data;
+    assert.equal(chk.available, false, u); assert.match(chk.reason, /Roammail staff/);
+  }
+  const s = await c.post('/api/signup', { name: 'John Q', username: 'john', password: PW, acceptTerms: true });
+  assert.equal(s.status, 400); assert.match(s.data.error, /first name/);
+  const sug = (await c.get('/api/signup/suggest?first=John&last=Quill')).data.suggestions;
+  assert.ok(sug.length && !sug.includes('john'), JSON.stringify(sug));
+  assert.equal((await c.get(`/api/signup/check?username=john.q${run}`)).data.available, true);
+  // refused or taken: alternatives built from their name, never a bare first name
+  const alt = (await c.get(`/api/signup/check?username=john&first=John&last=Quill${run}`)).data;
+  assert.ok(alt.alternatives.length >= 3, JSON.stringify(alt)); assert.ok(alt.alternatives.every((a) => a.replace(/[._-]/g, '') !== 'john' && a.startsWith('john')), JSON.stringify(alt.alternatives));
+  // only a first name, and a very common one: still gets suggestions (numbers added)
+  const only = (await c.get('/api/signup/suggest?first=John&count=3')).data.suggestions;
+  assert.equal(only.length, 3); assert.ok(!only.includes('john'));
+  const gen = (await c.get(`/api/signup/suggest?first=Ann&last=Lee${run}&shuffle=1`)).data.suggestions;
+  assert.equal(gen.length, 3);
+  // only super-admins create staff addresses
+  const a = new Client(); await signup(a, `nosuper${run}`);
+  assert.equal((await a.post('/api/super/staff-mailboxes', { localPart: 'john', name: 'John' })).status, 403);
+});
+
 test('admins must use 2FA; companies can require it; external forwarding off by default', async (t) => {
   // Needs a fresh database where SUPERADMIN_EMAILS includes owner@free.test (as in dev/test.env and CI)
   const owner = new Client();
@@ -188,6 +212,17 @@ test('admins must use 2FA; companies can require it; external forwarding off by 
   assert.equal((await emp.get('/api/me')).status, 200);
   // other orgs can't be touched
   assert.equal((await emp.get(`/api/admin/users?domain=${domain}`)).status, 403);
+  // super-admin gives a staff member a first-name address (temporary password, must be changed)
+  const names = (await import('node:fs')).readFileSync(new URL('../src/first-names.txt', import.meta.url), 'utf8').split('\n').filter((x) => /^[a-z]{5,}$/.test(x));
+  const staffName = names[Math.floor(Math.random() * names.length)];
+  const st = await owner.post('/api/super/staff-mailboxes', { localPart: staffName, name: 'Staff Person' });
+  assert.equal(st.status, 200, JSON.stringify(st.data)); assert.equal(st.data.email, `${staffName}@${D}`);
+  assert.match(st.data.password, /^[A-Z][a-z]+[A-Z][a-z]+[2-9]{4}$/);
+  await sleep(1200);
+  const staff = new Client(); staff.autoSetup = false;
+  const sl = await staff.post('/api/login', { email: st.data.email, password: st.data.password });
+  assert.equal(sl.status, 200); assert.ok(sl.data.setupRequired.includes('password'));
+  assert.equal((await owner.post('/api/super/staff-mailboxes', { localPart: staffName, name: 'Again' })).status, 409);
   // 4a: with a recovery address on file the temporary password is emailed there (from no-reply), not shown to the admin
   const personal = new Client(); const personalEmail = await signup(personal, `rc${run}`); // stands in for their personal mailbox
   assert.equal((await emp.req('PUT', '/api/security/recovery-email', { email: personalEmail, password: emp.password })).status, 200);

@@ -23,11 +23,17 @@ async function mailer() {
   mailerPromise ||= import('./security.js').then((m) => m.systemMailer);
   return (await mailerPromise)();
 }
+/** Plain-text part of a system email: strip tags until none are left, then drop any stray angle brackets. */
+function toPlainText(html) {
+  let s = String(html); let prev;
+  do { prev = s; s = s.replace(/<[^<>]*>/g, ''); } while (s !== prev);
+  return s.replace(/[<>]/g, '');
+}
 /** Send an email from the system no-reply mailbox. Returns false if system mail isn't configured. */
 export async function sendSystemMail(to, subject, html, text) {
   const m = await mailer();
   if (!m) return false;
-  await m.sendMail({ from: { name: config.appName, address: config.systemMail.from }, to, subject, html, text: text || html.replace(/<[^>]+>/g, '') });
+  await m.sendMail({ from: { name: config.appName, address: config.systemMail.from }, to, subject, html, text: text || toPlainText(html) });
   return true;
 }
 const frame = (title, body) => `<div style="font-family:Segoe UI,Arial,sans-serif;font-size:14px;color:#242424;max-width:560px"><h2 style="color:#244960;margin:0 0 10px">${esc(title)}</h2>${body}<p style="color:#888;font-size:12px;margin-top:24px">${esc(config.appName)} will never ask for your password by email.</p></div>`;

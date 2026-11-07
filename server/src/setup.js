@@ -88,7 +88,8 @@ setupApi.post('/setup/password', wrap(async (req, res) => {
   const pw = String(req.body.password || '');
   if (pw.length < 10 || !/[A-Za-z]/.test(pw) || !/\d/.test(pw)) throw fail(400, 'Use at least 10 characters with letters and numbers');
   if (pw === req.user.password) throw fail(400, 'Choose a new password, not the temporary one');
-  if (pw.toLowerCase().includes(req.user.email.split('@')[0].toLowerCase())) throw fail(400, 'Your password must not contain your email name');
+  const local = req.user.email.split('@')[0].toLowerCase();
+  if (local.length >= 4 && pw.toLowerCase().includes(local)) throw fail(400, 'Your password must not contain your email name'); // short names (al, emp) are inside ordinary words
   await assertNotBreached(pw, req.user.email);
   await mailcow.editMailbox(req.user.email, { password: pw, password2: pw });
   await updateSessionPassword(req.user.sid, pw);

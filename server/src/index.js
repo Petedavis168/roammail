@@ -129,7 +129,8 @@ if (fs.existsSync(site)) app.use(siteRouter(site));
 const dist = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../client/dist');
 // Polish: a real favicon.ico (the PNG inside an ICO wrapper) and robots.txt on every host
 let favicon = null;
-app.get('/favicon.ico', (req, res) => {
+const staticLimiter = rateLimit({ windowMs: 60 * 1000, limit: 300, standardHeaders: true, legacyHeaders: false });
+app.get('/favicon.ico', staticLimiter, (req, res) => {
   if (!favicon) {
     const png = fs.readFileSync(path.join(dist, 'favicon.png'));
     const head = Buffer.alloc(22);
@@ -141,7 +142,7 @@ app.get('/favicon.ico', (req, res) => {
   }
   res.type('image/x-icon').set('Cache-Control', 'public, max-age=86400').send(favicon);
 });
-app.get('/robots.txt', (req, res) => {
+app.get('/robots.txt', staticLimiter, (req, res) => {
   const host = String(req.hostname || '').toLowerCase();
   const body = config.loginHost && host === config.loginHost
     ? 'User-agent: *\nAllow: /$\nAllow: /signup\nDisallow: /\n' // sign-in host: only the sign-in and sign-up pages
@@ -151,7 +152,7 @@ app.get('/robots.txt', (req, res) => {
 if (fs.existsSync(dist)) {
   app.use(express.static(dist, { index: false, maxAge: '1h' }));
   // Only real app pages get the app; anything else is a real 404 (no soft-404s for scanners and search engines)
-  app.get(/^\/(?!api\/).*/, (req, res) => {
+  app.get(/^\/(?!api\/).*/, staticLimiter, (req, res) => {
     if (/^\/(login|signup)?\/?$/.test(req.path) || ID_PATH.test(req.path)) return res.sendFile(path.join(dist, 'index.html'));
     return notFound(res);
   });

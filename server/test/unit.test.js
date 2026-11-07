@@ -218,3 +218,9 @@ test('relay records (5i): three CNAMEs, required only when the domain sends thro
   assert.ok(requiredRecords('acme.test', null, { relay: true }).filter((r) => r.relay).every((r) => !r.optional));
   delete process.env.RELAY_CNAMES;
 });
+
+test('first-name rule: bare first names are staff-only on the free domain', async () => {
+  const { isBareFirstName } = await import('../src/names.js');
+  for (const n of ['john', 'Maria', 'pete', 'j.o.h.n', 'sarah_', 'michael']) assert.ok(isBareFirstName(n), n);
+  for (const n of ['john.smith', 'johns', 'jsmith', 'john1', 'mariagarcia', 'roamfan']) assert.ok(!isBareFirstName(n), n);
+});
