@@ -1,7 +1,7 @@
 # Running Roammail on the roammail-prod ECS stack (us-east-2)
 
-Image: `515579969872.dkr.ecr.us-east-2.amazonaws.com/roammail-app:c997098` (also tagged `latest`).
-Digest `sha256:b6140c07fdd97fde8e1b37470de4cc7136be42159620ef4e7fb3428e321b2c9b`.
+Image: `515579969872.dkr.ecr.us-east-2.amazonaws.com/roammail-app:3d236c2` (also tagged `latest`), linux/amd64.
+Digest `sha256:8671736cc1af390e7682751b7e212931a928e6740c8ccc04f44e49f304f179ac`.
 Pricing: US$4/mailbox/month, US$44/year (live Stripe prices built in). All mail, calendar and contacts: mailcow at `MAILCOW_HOST` (mail.fwdapps.cloud).
 
 ## Answers to the infra questions
