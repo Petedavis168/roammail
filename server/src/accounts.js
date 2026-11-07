@@ -20,6 +20,8 @@ import { applyDomainSpamDefaults } from './spam.js';
 import { assertNotBreached, topSenders } from './abuse.js';
 import { resetTwoFactor } from './recovery.js';
 import { syncOrgGroups } from './groups.js';
+import { tempPassword } from './temppass.js';
+import { sendSystemMail } from './recovery.js';
 import { needsPaymentToActivate, seatCheck, shrinkSeats, onPaid, startBillingChecks, orgBilling, setSeats } from './billing.js';
 
 const wrap = (fn) => (req, res, next) => Promise.resolve(fn(req, res, next)).catch(next);
@@ -436,7 +438,7 @@ export function parseCsv(text) {
 }
 const COLS = { name: ['name', 'full name', 'display name'], email: ['email', 'email address', 'username', 'user', 'address'], title: ['title', 'job title'],
   department: ['department', 'dept', 'team'], invite: ['personal email', 'invite email', 'invite', 'private email'], phone: ['phone', 'work phone'], mobile: ['mobile', 'cell', 'mobile phone'], admin: ['admin', 'is admin', 'role'], password: ['password'] };
-const genPassword = () => `${crypto.randomBytes(9).toString('base64url')}-${crypto.randomInt(10, 99)}`;
+const genPassword = tempPassword; // shown to the admin; the person must change it at first sign-in
 
 accounts.post('/admin/users/import', rateLimit({ windowMs: 3600e3, limit: 20 }), wrap(async (req, res) => {
   const d = await requireDomainAdmin(req, req.body.domain);
@@ -519,6 +521,36 @@ accounts.patch('/admin/users', wrap(async (req, res) => {
   }
   await audit(req.user.email, d.org_id, 'user.update', { email, fields: Object.keys(req.body).filter((k) => k !== 'password' && k !== 'email'), passwordReset: !!req.body.password });
   res.json({ ok: true });
+}));
+
+// "Send temporary password" (4a): a new easy-to-type temporary password, emailed from no-reply to the person's own
+// recovery address. They must replace it at the next sign-in; every device using the old password is signed out.
+const maskEmail = (e) => e.replace(/^(.)(.*)(@.*)$/, (m, a, b, c) => `${a}${'•'.repeat(Math.min(6, b.length))}${c}`);
+accounts.post('/admin/users/temp-password', rateLimit({ windowMs: 3600e3, limit: 30 }), wrap(async (req, res) => {
+  const email = String(req.body.email || '').toLowerCase();
+  const d = await requireDomainAdmin(req, email.split('@')[1]);
+  if (email === req.user.email) throw fail(400, 'Change your own password in Settings → Security');
+  const sec = await q.get('SELECT recovery_email, recovery_verified FROM user_security WHERE email = ?', email);
+  const invite = await q.get("SELECT invite_to FROM password_resets WHERE email = ? AND kind = 'invite' AND invite_to IS NOT NULL ORDER BY expires DESC LIMIT 1", email);
+  // Only an address the person confirmed themselves, or the one their admin invited them at
+  const to = (sec?.recovery_verified && sec.recovery_email) || invite?.invite_to || null;
+  const password = tempPassword();
+  await mailcow.editMailbox(email, { password, password2: password });
+  await markTemporary(email, 'admin-reset');
+  await revokeSessions(email);
+  let sent = false;
+  if (to) {
+    const esc = (x) => String(x).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]);
+    sent = await sendSystemMail(to, `Your temporary ${config.appName} password`,
+      `<div style="font-family:Segoe UI,Arial,sans-serif;font-size:14px;color:#242424;max-width:560px"><h2 style="color:#173D56">Your temporary password</h2>
+      <p>An administrator of ${esc(d.org_name || d.domain)} set a temporary password for <b>${esc(email)}</b>:</p>
+      <p style="font:600 22px/1.4 ui-monospace,Menlo,Consolas,monospace;letter-spacing:1px;background:#F2F5F8;padding:12px 16px;border-radius:8px;display:inline-block">${esc(password)}</p>
+      <p>Sign in at <a href="${esc(config.publicUrl || '')}/app">${esc(config.appName)}</a>. You'll be asked to choose your own password straight away.</p>
+      <p style="color:#888;font-size:12px">If you didn't expect this, contact your administrator.</p></div>`).catch(() => false);
+  }
+  await audit(req.user.email, d.org_id, 'user.temp_password', { email, emailed: sent });
+  // Only when it couldn't be emailed is it shown to the admin (once) to hand over in person
+  res.json(sent ? { ok: true, sent: true, to: maskEmail(to) } : { ok: true, sent: false, password });
 }));
 
 accounts.delete('/admin/users', wrap(async (req, res) => {
