@@ -87,7 +87,7 @@ function looksCommon(pw) {
 export async function assertNotBreached(password, email) {
   const lower = String(password).toLowerCase();
   const local = String(email || '').split('@')[0].toLowerCase();
-  if (local.length >= 3 && lower.includes(local)) throw fail(400, 'Your password must not contain your email name');
+  if (local.length >= 4 && lower.includes(local)) throw fail(400, 'Your password must not contain your email name');
   if (/^(.)\1+$/.test(password) || looksCommon(password)) throw fail(400, 'That password is too common and easy to guess. Try three or four random words.');
   if (!config.limits.checkBreachedPasswords) return;
   const hash = crypto.createHash('sha1').update(String(password)).digest('hex').toUpperCase();
