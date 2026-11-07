@@ -2,6 +2,7 @@
 // so each signed-in session keeps one connection that is closed after idling.
 import { ImapFlow } from 'imapflow';
 import { config } from './config.js';
+import { beforeAuth, authFailed, isAuthError } from './authguard.js';
 
 const pool = new Map(); // sid -> { client, timer, connecting }
 const IDLE_CLOSE_MS = 5 * 60 * 1000;
@@ -26,6 +27,21 @@ function touch(sid, entry) {
   }, IDLE_CLOSE_MS);
 }
 
+/** Check a typed password with ONE login attempt, guarded so mailcow never bans the app's IP. */
+export async function checkPassword(email, password) {
+  if (!(await beforeAuth(email, password))) return false;
+  const c = makeClient({ email, password });
+  try { await c.connect(); await c.logout().catch(() => {}); return true; } catch (err) {
+    if (isAuthError(err)) { await authFailed(email, password); return false; }
+    throw Object.assign(new Error(`Could not reach mail server (${err.code || err.message})`), { status: 502 });
+  }
+}
+
+// A saved session password that mailcow rejects (changed elsewhere) ends that session at once, so it can't keep
+// failing in the background and get the app's IP banned.
+let onRejected = () => {};
+export const onStoredCredentialsRejected = (fn) => { onRejected = fn; };
+
 export async function getClient(user) {
   let entry = pool.get(user.sid);
   if (entry && entry.client.usable) {
@@ -49,6 +65,11 @@ export async function getClient(user) {
     await entry.connecting;
   } catch (err) {
     pool.delete(user.sid);
+    if (isAuthError(err)) {
+      await authFailed(user.email, user.password);
+      await Promise.resolve(onRejected(user)).catch(() => {});
+      throw Object.assign(new Error('Your password was changed. Please sign in again.'), { status: 401 });
+    }
     throw err;
   }
   touch(user.sid, entry);
@@ -96,4 +117,24 @@ export async function specialFolder(user, use, { create = false } = {}) {
   const name = FALLBACK_NAMES[use][0];
   await client.mailboxCreate(name);
   return name;
+}
+
+/** SMTP transport with the person's own password; a rejected password is handled like an IMAP one (counted, session ended, never retried). */
+export function userTransport(nodemailer, user) {
+  const t = nodemailer.createTransport({
+    host: config.smtp.host, port: config.smtp.port, secure: config.smtp.secure,
+    auth: { user: user.email, pass: user.password }, tls: { rejectUnauthorized: config.tlsRejectUnauthorized },
+  });
+  const send = t.sendMail.bind(t);
+  t.sendMail = async (mail) => {
+    try { return await send(mail); } catch (err) {
+      if (isAuthError(err)) {
+        await authFailed(user.email, user.password);
+        await Promise.resolve(onRejected(user)).catch(() => {});
+        throw Object.assign(new Error('Your password was changed. Please sign in again.'), { status: 401 });
+      }
+      throw err;
+    }
+  };
+  return t;
 }

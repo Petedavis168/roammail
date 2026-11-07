@@ -7,7 +7,7 @@ import { config } from './config.js';
 import { q, security, audit, rolesFor, twoFactorPolicy } from './db.js';
 import { requireAuth, unseal, revokeSessions } from './session.js';
 import { mailcow } from './mailcow.js';
-import { makeClient } from './imap.js';
+import { checkPassword } from './imap.js';
 
 const wrap = (fn) => (req, res, next) => Promise.resolve(fn(req, res, next)).catch(next);
 const fail = (status, message) => Object.assign(new Error(message), { status });
@@ -124,10 +124,7 @@ publicRecovery.get('/recovery/2fa/cancel', lim(20), wrap(async (req, res) => {
 export const recovery = express.Router();
 recovery.use(['/security/recovery-email', '/security/recovery-email/verify', '/security/recovery-email/resend', '/super/support'], requireAuth);
 
-async function passwordOk(email, password) {
-  const c = makeClient({ email, password });
-  try { await c.connect(); await c.logout(); return true; } catch { return false; }
-}
+const passwordOk = (email, password) => checkPassword(email, password).catch(() => false);
 
 recovery.put('/security/recovery-email', wrap(async (req, res) => {
   if (!(await passwordOk(req.user.email, String(req.body.password || '')))) throw fail(401, 'Enter your current password to change the recovery email');

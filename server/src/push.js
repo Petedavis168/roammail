@@ -9,6 +9,7 @@ import { config } from './config.js';
 import { q, setting, setSetting, audit } from './db.js';
 import { requireAuth, seal, unseal, onRevoke } from './session.js';
 import { makeClient } from './imap.js';
+import { authFailed, isAuthError } from './authguard.js';
 
 const wrap = (fn) => (req, res, next) => Promise.resolve(fn(req, res, next)).catch(next);
 const fail = (status, message) => Object.assign(new Error(message), { status });
@@ -98,7 +99,7 @@ async function watch(email, user) {
     client.idle().catch(() => {});
   } catch (e) {
     watchers.delete(email);
-    if (e.authenticationFailed) await q.run('DELETE FROM push_subs WHERE email = ?', email); // password changed
+    if (isAuthError(e)) { await authFailed(user.email, user.password); await q.run('DELETE FROM push_subs WHERE email = ?', email); } // password changed: stop, never retry
   }
 }
 

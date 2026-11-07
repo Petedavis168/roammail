@@ -9,7 +9,7 @@ import { rateLimit } from './shared.js';
 import { config } from './config.js';
 import { q, security, audit } from './db.js';
 import { seal, unseal, sealedWithOldKey, setSession, requireAuth, revokeSessions, updateSessionPassword, sessionPublicId } from './session.js';
-import { makeClient, closeClient } from './imap.js';
+import { makeClient, closeClient, checkPassword as checkMailPassword } from './imap.js';
 import { mailcow } from './mailcow.js';
 import { loginBlocked, loginFailed, loginSucceeded, assertNotBreached } from './abuse.js';
 
@@ -60,13 +60,8 @@ function checkPassword(pw) {
   if (typeof pw !== 'string' || pw.length < 10) throw fail(400, 'Password must be at least 10 characters');
   if (!/[a-z]/i.test(pw) || !/[0-9]/.test(pw)) throw fail(400, 'Password must contain letters and numbers');
 }
-async function imapLogin(email, password) {
-  const c = makeClient({ email, password });
-  try { await c.connect(); await c.logout(); return true; } catch (err) {
-    if (err.authenticationFailed || /auth/i.test(err.responseText || err.message)) return false;
-    throw fail(502, `Could not reach mail server (${err.code || err.message})`);
-  }
-}
+// One guarded attempt (see authguard.js): never retries, never lets failures pile up against the mail server
+const imapLogin = (email, password) => checkMailPassword(email, password);
 export function systemMailer() {
   if (!config.systemMail.user) return null;
   return nodemailer.createTransport({

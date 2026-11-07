@@ -7,7 +7,7 @@ import { simpleParser } from 'mailparser';
 import { config } from './config.js';
 import { requireAuth } from './session.js';
 import { audit } from './db.js';
-import { withMailbox } from './imap.js';
+import { withMailbox, userTransport } from './imap.js';
 import { checkSendQuota } from './abuse.js';
 import { discover, listCollections, createCalendar, report, putResource, deleteResource, getResource, assertOwnHref, xmlEscape } from './dav.js';
 
@@ -127,8 +127,7 @@ export function expand(data, from, to) {
 
 // ---------------------------------------------------------------- invitations (iMIP)
 function transport(user) {
-  return nodemailer.createTransport({ host: config.smtp.host, port: config.smtp.port, secure: config.smtp.secure,
-    auth: { user: user.email, pass: user.password }, tls: { rejectUnauthorized: config.tlsRejectUnauthorized } });
+  return userTransport(nodemailer, user);
 }
 async function sendInvites(user, f, method, recipients) {
   if (config.calendarInvites !== 'app' || !recipients.length) return;

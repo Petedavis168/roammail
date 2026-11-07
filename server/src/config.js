@@ -46,6 +46,8 @@ config.cookieDomain = env.COOKIE_DOMAIN || (config.rootDomain ? `.${config.rootD
 // web = serve people only, worker = background work only (scheduled sends, billing, clean-up), all = both (one server)
 config.role = ['web', 'worker', 'all'].includes(env.ROLE) ? env.ROLE : 'all';
 config.runsBackground = config.role !== 'web';       // redis://host:6379  (empty = in-memory, one server only)
+// mailcow admin actions go through the provisioner (signed requests) in production; see provisioner.js
+config.provisioner = { url: (env.PROVISIONER_URL || '').replace(/\/$/, ''), secret: env.PROVISIONER_SECRET || '' };
 config.mailcow = {
   // Base URL of the mailcow admin UI, e.g. https://mail.example.com
   url: (env.MAILCOW_API_URL || `https://${config.imap.host}`).replace(/\/$/, ''),

@@ -1,3 +1,4 @@
+import { authFailed, isAuthError } from './authguard.js';
 // Background jobs: scheduled sending and snooze.
 // Credentials are sealed (AES-256-GCM) inside the job and deleted with it.
 import nodemailer from 'nodemailer';
@@ -74,7 +75,8 @@ export async function tick() {
         if (job.type === 'snooze') await runSnooze(job, user, p);
         await q.run('DELETE FROM jobs WHERE id = ?', job.id);
       } catch (e) {
-        const auth = e.authenticationFailed || /auth/i.test(e.message);
+        const auth = isAuthError(e);
+        if (auth) await authFailed(user?.email || job.email, user?.password); // counted; the job is never retried
         await q.run("UPDATE jobs SET status = 'failed', error = ? WHERE id = ?",
           auth ? 'Your password changed since this was scheduled. Open it and schedule again.' : String(e.message).slice(0, 300), job.id);
       }

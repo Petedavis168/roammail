@@ -10,7 +10,7 @@ import { createCache } from './cache.js';
 import { sharedMailboxContext } from './sharedboxes.js';
 import { ensureMailboxId } from './mailboxids.js';
 import { count, gauge } from './ops.js';
-import { getClient, closeClient, withMailbox, specialFolder, makeClient } from './imap.js';
+import { getClient, closeClient, withMailbox, specialFolder, makeClient, userTransport } from './imap.js';
 import { parseQuery } from './search.js';
 import { rolesFor, q, twoFactorPolicy } from './db.js';
 import { applyEnforcedSignature } from './signatures.js';
@@ -97,13 +97,7 @@ function uidList(uids) {
 }
 
 function transport(user) {
-  return nodemailer.createTransport({
-    host: config.smtp.host,
-    port: config.smtp.port,
-    secure: config.smtp.secure,
-    auth: { user: user.email, pass: user.password },
-    tls: { rejectUnauthorized: config.tlsRejectUnauthorized },
-  });
+  return userTransport(nodemailer, user);
 }
 
 // ---------- auth (login lives in security.js) ----------

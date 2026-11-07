@@ -170,3 +170,31 @@ test('CSV parser: quotes, commas, line breaks, BOM', async () => {
   const { parseCsv } = await import('../src/accounts.js');
   assert.deepEqual(parseCsv('﻿a,b\r\n"x, y","say ""hi"""\n\n"multi\nline",z'), [['a', 'b'], ['x, y', 'say "hi"'], ['multi\nline', 'z']]);
 });
+
+test('provisioner: HMAC signing, timestamp window, allowlist', async () => {
+  const { sign, verify, allowedCall } = await import('../src/provisioner.js');
+  const ts = String(Math.floor(Date.now() / 1000));
+  const body = '{"method":"GET","path":"get/mailbox/all/example.com"}';
+  const sig = sign('s3cret', ts, '/mailcow/api', body);
+  assert.match(sig, /^[0-9a-f]{64}$/);
+  assert.ok(verify('s3cret', { ts, signature: sig, path: '/mailcow/api', body }));
+  assert.ok(!verify('other', { ts, signature: sig, path: '/mailcow/api', body }), 'wrong secret');
+  assert.ok(!verify('s3cret', { ts, signature: sig, path: '/mailcow/api', body: body.replace('example', 'evil') }), 'tampered body');
+  assert.ok(!verify('s3cret', { ts: String(Number(ts) - 3600), signature: sign('s3cret', String(Number(ts) - 3600), '/mailcow/api', body), path: '/mailcow/api', body }), 'old timestamp');
+  assert.ok(allowedCall('POST', 'add/mailbox') && allowedCall('GET', 'get/logs/rspamd-history/2000'));
+  for (const [m, p] of [['POST', 'edit/fail2ban'], ['GET', 'get/logs/api/10'], ['POST', 'delete/domain-admin'], ['GET', 'get/mailbox/all/../x/y'], ['POST', 'get/mailbox/all/a.b']]) assert.ok(!allowedCall(m, p), `${m} ${p}`);
+});
+
+test('mail-server sign-in guard: bad input never reaches the server, repeats are refused, shared budget', async () => {
+  const g = await import('../src/authguard.js');
+  assert.equal(await g.beforeAuth('not-an-address', 'x'), false);
+  assert.equal(await g.beforeAuth('a@b.cd', ''), false);
+  assert.equal(await g.beforeAuth('a@b.cd', 'right-or-wrong'), true);
+  await g.authFailed('a@b.cd', 'wrong-1');
+  assert.equal(await g.beforeAuth('a@b.cd', 'wrong-1'), false, 'the same wrong password is refused locally');
+  assert.equal(await g.beforeAuth('A@B.CD', 'wrong-1'), false, 'address case does not matter');
+  assert.equal(await g.beforeAuth('a@b.cd', 'another'), true);
+  for (let i = 1; i < g.FAIL_BUDGET; i++) await g.authFailed(`u${i}@b.cd`, `p${i}`);
+  await assert.rejects(g.beforeAuth('fresh@b.cd', 'anything'), (e) => e.status === 429, 'budget used: nobody hits the mail server');
+  assert.ok(g.isAuthError({ authenticationFailed: true }) && g.isAuthError({ code: 'EAUTH' }) && !g.isAuthError({ code: 'ECONNREFUSED' }));
+});

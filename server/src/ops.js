@@ -7,6 +7,7 @@ import crypto from 'node:crypto';
 import { config } from './config.js';
 import { q, rolesFor, audit, setting, setSetting } from './db.js';
 import { requireAuth } from './session.js';
+import { mailcow } from './mailcow.js';
 
 const started = Date.now();
 const counters = { requests: 0, s2: 0, s3: 0, s4: 0, s5: 0, logins_ok: 0, logins_failed: 0, mail_sent: 0 };
@@ -81,8 +82,8 @@ function tcpCheck(host, port, secure, timeout = 4000) {
 async function mailcowCheck() {
   const t0 = Date.now();
   try {
-    const r = await fetch(`${config.mailcow.url}/api/v1/get/status/version`, { headers: { 'X-API-Key': config.mailcow.apiKey }, signal: AbortSignal.timeout(5000) });
-    return { ok: r.ok, ms: Date.now() - t0 };
+    await Promise.race([mailcow.status(), new Promise((_, rej) => setTimeout(() => rej(new Error('timeout')), 5000))]);
+    return { ok: true, ms: Date.now() - t0 };
   } catch { return { ok: false, ms: Date.now() - t0 }; }
 }
 let statusCache = { at: 0, value: null };

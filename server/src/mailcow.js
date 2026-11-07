@@ -1,16 +1,27 @@
 // Thin client for the mailcow REST API (https://mailcow.docs.apiary.io).
 import { config } from './config.js';
+import { provisionerCall } from './provisioner.js';
 
 class MailcowError extends Error {}
 
-async function call(method, path, body) {
-  if (!config.mailcow.apiKey) throw new MailcowError('MAILCOW_API_KEY is not configured on the server');
+/** Raw mailcow API call: through the provisioner in production, or direct with an API key (development). */
+async function transport(method, path, body) {
+  if (config.provisioner.url) {
+    if (!config.provisioner.secret) throw new MailcowError('PROVISIONER_SECRET is not configured on the server');
+    return provisionerCall(config.provisioner, method, path, body);
+  }
+  if (!config.mailcow.apiKey) throw new MailcowError('Set PROVISIONER_URL + PROVISIONER_SECRET (or MAILCOW_API_KEY for a direct connection)');
   const res = await fetch(`${config.mailcow.url}/api/v1/${path}`, {
     method,
     headers: { 'X-API-Key': config.mailcow.apiKey, 'Content-Type': 'application/json', Accept: 'application/json' },
     body: body ? JSON.stringify(body) : undefined,
   });
-  const text = await res.text();
+  return { ok: res.ok, status: res.status, text: await res.text() };
+}
+
+async function call(method, path, body) {
+  const res = await transport(method, path, body);
+  const text = res.text;
   let data;
   try { data = JSON.parse(text); } catch { throw new MailcowError(`mailcow API returned ${res.status}: ${text.slice(0, 200)}`); }
   if (!res.ok) throw new MailcowError(data?.msg || `mailcow API error ${res.status}`);
@@ -29,6 +40,7 @@ const list = (d) => (Array.isArray(d) ? d : d && typeof d === 'object' && Object
 const MB = 1024 * 1024;
 
 export const mailcow = {
+  status: () => call('GET', 'get/status/version'),
   getDomain: async (domain) => list(await call('GET', `get/domain/${encodeURIComponent(domain)}`))[0] || null,
   addDomain: (domain, { description, mailboxes, defquota, maxquota, quota }) => call('POST', 'add/domain', {
     domain, description, aliases: 400, mailboxes, defquota, maxquota, quota,

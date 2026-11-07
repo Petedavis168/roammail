@@ -1,5 +1,6 @@
 import { broadcast, onBroadcast, counter } from './shared.js';
 import { resolveMailboxId } from './mailboxids.js';
+import { onStoredCredentialsRejected } from './imap.js';
 // Server-side sessions. The browser cookie is an opaque random token; the mailbox password
 // is stored only on the server, encrypted (AES-256-GCM) with a key derived from SESSION_SECRET.
 import crypto from 'node:crypto';
@@ -92,6 +93,12 @@ export async function updateSessionPassword(id, password) {
 }
 
 export const sessionPublicId = (id) => id.slice(0, 16);
+
+// A session whose saved password the mail server rejects is ended (the person signs in again once).
+onStoredCredentialsRejected(async (user) => {
+  if (user.sharedBy) return; // shared mailbox: its own password is managed by the app, nothing to end
+  await q.run('DELETE FROM sessions WHERE id = ?', String(user.sid).split('|')[0]);
+});
 
 /** Emails of the mailboxes signed in on this browser (read-only; for page routing). */
 export async function browserMailboxes(req) {
