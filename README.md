@@ -116,16 +116,73 @@ and later updates go out with the same command (with automatic rollback).
 - For a "Verified" iPhone profile set `PROFILE_SIGN_CERT`/`PROFILE_SIGN_KEY` (any publicly trusted certificate,
   e.g. the mail server's Let's Encrypt cert).
 
-## Local development
+## Repository layout
+
+| Path | What |
+|---|---|
+| `server/` | Node 22 API + background worker (`server/src`), dev stand-ins for mailcow, Stripe and the provisioner (`server/dev`), tests (`server/test`) |
+| `client/` | React web app (Vite) served by the server from `client/dist` |
+| `site/` | Public website for roammail.net (static, served by the same app) |
+| `Dockerfile` | One image for web and worker (`ROLE=web` / `ROLE=worker`) |
+| `deploy/aws/` | CloudFormation templates and `deploy.sh` (single-server and scale layouts) |
+| `deploy/mailcow/` | mailcow backup-to-S3 script and backup bucket template |
+| `docs/` | `DEPLOY_ECS.md` (production on ECS), `OPERATIONS.md`, `DELIVERABILITY.md`, legal and incident docs |
+| `loadtest/` | Load test runner |
+
+## Build and test
+
+Requirements: Node 22, Docker (for the GreenMail test mail server), Python 3 with `radicale` (calendar/contacts tests).
 
 ```bash
-docker run -d --name gm -p 3025:3025 -p 3143:3143 greenmail/standalone:2.1.2   # fake mail server
-cd server && npm install && node dev/mock-mailcow.js &                            # fake mailcow API
-node --env-file=dev/test.env --disable-warning=ExperimentalWarning src/index.js &
-node dev/seed.js                                                                  # demo messages
-cd ../client && npm install && npm run dev                                        # http://localhost:5173
+docker run -d --name gm -p 3025:3025 -p 3143:3143 -p 8080:8080 \
+  -e GREENMAIL_OPTS='-Dgreenmail.setup.test.all -Dgreenmail.hostname=0.0.0.0 -Dgreenmail.users.login=email' greenmail/standalone:2.1.2
+(cd client && npm ci && npm run build)
+(cd server && npm ci)
+cd server
+npm test                               # unit tests (no services needed)
+dev/start-stack.sh <radicale-config>   # mock mailcow, mock provisioner, mock Stripe, Radicale, app on :3000 (fresh data each run)
+npm run test:api && npm run test:billing && npm run test:workspace && npm run test:outbound \
+  && npm run test:push && npm run test:routing && npm run test:e2e
 ```
-Sign up as `owner` (it's the super-admin in `dev/test.env`).
+Optional: `PG_ADMIN_URL=postgres://postgres@127.0.0.1:5433 REDIS_URL=redis://127.0.0.1:6380 dev/start-stack.sh …` runs the same
+suites on PostgreSQL + Redis. GitHub Actions (`.github/workflows/ci.yml`) runs all of this on every push.
+
+Local development UI: after `dev/start-stack.sh`, open http://localhost:3000/login (or `npm run dev` in `client/` for hot reload on :5173).
+Sign up as `owner` (a super-admin in `server/dev/test.env`).
+
+## Deploy to production (ECR + ECS, stack `roammail-prod`, us-east-2)
+
+Read `docs/DEPLOY_ECS.md` first: task definitions, secrets and some networking were changed outside CloudFormation, so
+**never run a CloudFormation update on `roammail-prod` without diffing the template against the live stack first.**
+
+1. Push the change to GitHub (`main`) and make sure CI is green.
+2. Build for linux/amd64 and push to ECR:
+   ```bash
+   TAG=$(git rev-parse --short HEAD)
+   REPO=515579969872.dkr.ecr.us-east-2.amazonaws.com/roammail-app
+   docker build --platform linux/amd64 -t $REPO:$TAG .
+   aws ecr get-login-password --region us-east-2 | docker login --username AWS --password-stdin ${REPO%%/*}
+   docker push $REPO:$TAG
+   ```
+3. Roll the services onto the new image without touching anything else: copy the current task definitions, change
+   only the container `image`, register the new revisions, and update the services:
+   ```bash
+   for SVC in web worker; do
+     aws ecs describe-task-definition --region us-east-2 --task-definition roammail-$SVC \
+       --query taskDefinition > td.json
+     jq --arg img "$REPO:$TAG" '.containerDefinitions[0].image=$img
+       | del(.taskDefinitionArn,.revision,.status,.requiresAttributes,.compatibilities,.registeredAt,.registeredBy)' td.json > td-new.json
+     REV=$(aws ecs register-task-definition --region us-east-2 --cli-input-json file://td-new.json \
+       --query taskDefinition.taskDefinitionArn --output text)
+     aws ecs update-service --region us-east-2 --cluster roammail --service roammail-$SVC --task-definition "$REV"
+   done
+   aws ecs wait services-stable --region us-east-2 --cluster roammail --services roammail-web roammail-worker
+   ```
+4. Verify: `https://roammail.net/healthz` → 200, load balancer targets healthy, no 5xx alarm, unsigned
+   `POST /api/billing/webhook` → 400, `/api/signup/config` shows Turnstile on.
+
+Container: port **3000**, health check **`/healthz`**, worker = same image with `ROLE=worker`. All environment variables and
+secrets are listed in `docs/DEPLOY_ECS.md`.
 
 ## Architecture
 
