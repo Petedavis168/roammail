@@ -39,7 +39,7 @@ export default function Login({ onLogin, mode = 'signin' }) {
   const signupType = params.get('type') === 'domain' ? 'domain' : 'free';
   const billing = ['monthly', 'yearly'].includes(params.get('billing')) ? params.get('billing') : '';
   const [step, setStep] = useState(resetToken ? 'reset' : mode === 'signup' || params.get('signup') ? 'name' : 'email');
-  const [f, setF] = useState({ email: '', password: '', code: '', first: '', last: '', purpose: signupType === 'domain' ? 'business' : 'personal', username: '', custom: false, pw: '', pw2: '', recovery: '', terms: false, phone: '', code: '', phoneToken: null, codeSent: false, remember: localStorage.getItem('remember') === '1' });
+  const [f, setF] = useState({ email: '', password: '', code: '', first: '', last: '', purpose: signupType === 'domain' ? 'business' : 'personal', username: '', custom: false, pw: '', pw2: '', recovery: '', terms: false, phone: '', code: '', phoneToken: null, bizDomain: '', bizLocal: '', bizName: '', codeSent: false, remember: localStorage.getItem('remember') === '1' });
   const [show, setShow] = useState(false);
   const [error, setError] = useState('');
   const [info, setInfo] = useState('');
@@ -154,7 +154,9 @@ export default function Login({ onLogin, mode = 'signin' }) {
   if (step === 'name') return (
     <Shell>
       <Card title="Create a Roammail account" subtitle="Enter your name" onSubmit={(e) => { e.preventDefault(); if (!f.first.trim()) return setError('Enter your first name');
-        run(async () => { const r = await api.get('/api/signup/suggest', { first: f.first, last: f.last }); setSugg(r.suggestions); setF((x) => ({ ...x, username: r.suggestions[0] || '', custom: !r.suggestions.length })); go('address'); }); }}
+        run(async () => { const r = await api.get('/api/signup/suggest', { first: f.first, last: f.last }); setSugg(r.suggestions); setF((x) => ({ ...x, username: r.suggestions[0] || '', custom: !r.suggestions.length, bizLocal: x.bizLocal || (x.first || '').toLowerCase().replace(/[^a-z0-9]/g, '') }));
+          // Business: their own domain first; the @roammail.net sign-in is picked for them
+          go(f.purpose === 'business' && r.suggestions.length ? 'bizdomain' : 'address'); }); }}
         footer={<><button type="button" className="g-link" onClick={() => go('email')}>Sign in instead</button><button className="g-btn" disabled={busy}>Next</button></>}>
         {!cfg.enabled && <div className="g-info warn">New sign-ups are closed right now.</div>}
         <Field label="First name" autoComplete="given-name" autoFocus value={f.first} onChange={set('first')} error={error} />
@@ -164,6 +166,28 @@ export default function Login({ onLogin, mode = 'signin' }) {
             <label key={v} className={f.purpose === v ? 'on' : ''}><input type="radio" checked={f.purpose === v} onChange={() => setF({ ...f, purpose: v })} /><b>{l}</b><small>{d}</small></label>
           ))}
         </div>
+      </Card>
+    </Shell>
+  );
+  // Business sign-up: their own domain and the address they want on it
+  if (step === 'bizdomain') return (
+    <Shell>
+      <Card title="Your business email" subtitle="Enter the domain you own. We'll connect it in the next steps."
+        onSubmit={(e) => { e.preventDefault(); run(async () => {
+          if (!f.bizLocal.trim()) throw new Error('Choose your address at your domain');
+          const r = await api.get('/api/signup/domain-check', { domain: f.bizDomain });
+          if (!r.ok) throw new Error(r.reason);
+          setF((x) => ({ ...x, bizDomain: r.domain })); go('password-new');
+        }); }}
+        footer={<><button type="button" className="g-link" onClick={() => go('name')}>Back</button><button className="g-btn" disabled={busy}>Next</button></>}>
+        <Field label="Business name" autoComplete="organization" autoFocus value={f.bizName} onChange={set('bizName')} />
+        <Field label="Your domain" inputMode="url" autoCapitalize="off" spellCheck="false" value={f.bizDomain} onChange={set('bizDomain')} error={error} hint="Like marleymusic.com (without www)" />
+        <div className="g-addr">
+          <Field label="Your address" autoCapitalize="off" spellCheck="false" value={f.bizLocal} onChange={set('bizLocal')} />
+          <span className="g-domain">@{(f.bizDomain || 'yourdomain.com').trim().toLowerCase().replace(/^https?:\/\//, '').replace(/^www\./, '').replace(/\/.*$/, '')}</span>
+        </div>
+        <p className="g-note">Until your domain is connected you'll sign in as <b>{username}@{cfg.domain}</b>. As soon as it's live we create <b>{f.bizLocal || 'you'}@{f.bizDomain || 'yourdomain.com'}</b> with the same password.</p>
+        <button type="button" className="g-link left" onClick={() => setF({ ...f, purpose: 'personal' }) || go('address')}>I don't have a domain yet</button>
       </Card>
     </Shell>
   );
@@ -206,8 +230,8 @@ export default function Login({ onLogin, mode = 'signin' }) {
       <Shell>
         <Card title="Create a strong password" subtitle="Use 10 or more characters. A few random words work great."
           onSubmit={(e) => { e.preventDefault(); if (f.pw.length < 10) return setError('Use 10 characters or more'); if (f.pw !== f.pw2) return setError('Those passwords didn\'t match'); go('recovery'); }}
-          footer={<><button type="button" className="g-link" onClick={() => go('address')}>Back</button><button className="g-btn">Next</button></>}>
-          <button type="button" className="g-chip" onClick={() => go('address')}><Icon name="mail" size={14} /> {username}@{cfg.domain}</button>
+          footer={<><button type="button" className="g-link" onClick={() => go(f.purpose === 'business' && f.bizDomain ? 'bizdomain' : 'address')}>Back</button><button className="g-btn">Next</button></>}>
+          <button type="button" className="g-chip" onClick={() => go(f.purpose === 'business' && f.bizDomain ? 'bizdomain' : 'address')}><Icon name="mail" size={14} /> {f.purpose === 'business' && f.bizDomain ? `${f.bizLocal}@${f.bizDomain}` : `${username}@${cfg.domain}`}</button>
           <Field label="Password" type={show ? 'text' : 'password'} autoComplete="new-password" autoFocus value={f.pw} onChange={set('pw')} />
           {f.pw && <div className={`g-meter s${st}`}><div /><small>{STRENGTH[st]}</small></div>}
           <Field label="Confirm" type={show ? 'text' : 'password'} autoComplete="new-password" value={f.pw2} onChange={set('pw2')} error={error} />
@@ -245,7 +269,8 @@ export default function Login({ onLogin, mode = 'signin' }) {
     <Shell>
       <Card title="Privacy and Terms" subtitle={`Almost done, ${f.first}.`}
         onSubmit={(e) => { e.preventDefault(); if (!f.terms) return setError('Please agree to continue'); run(async () => {
-          const r = await api.signup({ name: `${f.first} ${f.last}`.trim(), username, password: f.pw, recoveryEmail: f.recovery, captcha, acceptTerms: true, phoneToken: f.phoneToken });
+          const r = await api.signup({ name: `${f.first} ${f.last}`.trim(), username, password: f.pw, recoveryEmail: f.recovery, captcha, acceptTerms: true, phoneToken: f.phoneToken,
+            ...(f.purpose === 'business' && f.bizDomain ? { business: { domain: f.bizDomain, local: f.bizLocal, orgName: f.bizName } } : {}) });
           // Own-domain sign-ups go straight on to connecting the domain (and choosing monthly/yearly)
           if (f.purpose === 'business') localStorage.setItem('startBusiness', '1');
           onLogin({ ...r, redirect: f.purpose === 'business' ? `${r.redirect}?setup=domain${billing ? `&billing=${billing}` : ''}` : r.redirect });

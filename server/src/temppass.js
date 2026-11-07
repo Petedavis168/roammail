@@ -5,7 +5,13 @@ import crypto from 'node:crypto';
 
 export const WORDS = 'Amber Aspen Badger Banana Barn Basket Beach Berry Breaker Breeze Bucket Buffet Butter Cactus Camera Candy Canvas Carpet Cascade Cashew Cedar Charter Cherry Chess Crane Crater Cypress Dance Desert Dune Ember Farm Feather Fern Ferry Garage Garden Garnet Grape Gust Hammer Hamper Harvest Hunter Jacket Jasper Kayak Magnet Market Matter Nectar Nugget Number Panda Paper Parade Pasture Peach Pepper Quartz Radar Ranch Ranger Raven Reef Remedy Rescue Sand Saturn Scarab Sketch Spark Spruce Squash Star Stream Summer Sunset Swan Tavern Tempest Thread Thrush Thunder Tundra Verse Wander Water Weaver Wren Yacht Zebra Zephyr'.split(' ');
 const DIGITS = '23456789';
-export function tempPassword() {
+/** @param avoid the person's address name: the password never contains it (it would trip the "no email name" rule) */
+export function tempPassword(avoid = '') {
+  const a = String(avoid || '').toLowerCase();
+  for (let i = 0; i < 50; i++) { const p = makeOne(); if (a.length < 3 || !p.toLowerCase().includes(a)) return p; }
+  return makeOne();
+}
+function makeOne() {
   const w1 = WORDS[crypto.randomInt(WORDS.length)];
   let w2 = WORDS[crypto.randomInt(WORDS.length)];
   while (w2 === w1) w2 = WORDS[crypto.randomInt(WORDS.length)];

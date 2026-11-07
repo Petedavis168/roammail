@@ -224,3 +224,8 @@ test('first-name rule: bare first names are staff-only on the free domain', asyn
   for (const n of ['john', 'Maria', 'pete', 'j.o.h.n', 'sarah_', 'michael']) assert.ok(isBareFirstName(n), n);
   for (const n of ['john.smith', 'johns', 'jsmith', 'john1', 'mariagarcia', 'roamfan']) assert.ok(!isBareFirstName(n), n);
 });
+
+test('temporary passwords never contain the address name they are for', async () => {
+  const { tempPassword, TEMP_PASSWORD_RE } = await import('../src/temppass.js');
+  for (let i = 0; i < 2000; i++) { const p = tempPassword('cara'); assert.ok(TEMP_PASSWORD_RE.test(p)); assert.ok(!p.toLowerCase().includes('cara'), p); }
+});

@@ -20,7 +20,7 @@ import { applyDomainSpamDefaults } from './spam.js';
 import { assertNotBreached, topSenders } from './abuse.js';
 import { resetTwoFactor } from './recovery.js';
 import { syncOrgGroups } from './groups.js';
-import { tempPassword } from './temppass.js';
+import { tempPassword, TEMP_PASSWORD_RE } from './temppass.js';
 import { isBareFirstName, FIRST_NAME_HINT } from './names.js';
 import { phoneRequired, requireVerifiedPhone } from './phone.js';
 import { sendSystemMail } from './recovery.js';
@@ -147,6 +147,15 @@ publicAccounts.post('/signup', rateLimit({ windowMs: 60 * 60_000, limit: 10 }), 
   await assertNotBreached(password, `${local}@x`);
   await checkCaptcha(req.body.captcha, req.ip);
   const phoneHash = await requireVerifiedPhone(req.body.phoneToken);
+  // Business sign-up: their own domain and the address they want there (created once the domain is connected)
+  let biz = null;
+  if (req.body.business) {
+    const bdomain = await checkNewDomain(req.body.business.domain);
+    if (await mailcow.getDomain(bdomain)) throw fail(409, 'That domain already exists on this mail server');
+    const blocal = String(req.body.business.local || '').trim().toLowerCase();
+    if (!LOCAL_RE.test(blocal) || /\.\.|^[._-]|[._-]$/.test(blocal)) throw fail(400, 'Your address at your domain can use letters, numbers, dots and dashes');
+    biz = { domain: bdomain, local: blocal, orgName: String(req.body.business.orgName || '').trim() };
+  }
 
   const email = `${local}@${config.signup.domain}`;
   if (!(await addressAvailable(local))) throw fail(409, 'That address is taken. Try one of the suggestions.');
@@ -156,6 +165,7 @@ publicAccounts.post('/signup', rateLimit({ windowMs: 60 * 60_000, limit: 10 }), 
   if (config.signup.rateLimit) await applyRate(email, RAMP[0]).catch((e) => console.warn('rate limit not set:', e.message));
   await q.run('INSERT INTO signups(email, ip, recovery_email, terms_version, phone_hash) VALUES(?, ?, ?, ?, ?) ON CONFLICT(email) DO UPDATE SET ip = excluded.ip, recovery_email = excluded.recovery_email, terms_version = excluded.terms_version, created_at = excluded.created_at, phone_hash = excluded.phone_hash', email, req.ip, String(req.body.recoveryEmail || '').slice(0, 200) || null, config.legal.termsVersion, phoneHash);
   await audit(email, null, 'signup', { ip: req.ip, phoneVerified: !!phoneHash });
+  if (biz) await createOrgWithDomain(email, biz.domain, biz.orgName, biz.local);
   await saveProfile(email, { name });
   await setRecoveryEmail(email, String(req.body.recoveryEmail || '').trim());
   deliverWelcome({ email, password, name }).catch(() => {});
@@ -247,13 +257,35 @@ accounts.get('/domains', wrap(async (req, res) => {
 }));
 
 // Step 1: claim a domain (creates the organization if needed)
-accounts.post('/domains', rateLimit({ windowMs: 60 * 60_000, limit: 20 }), wrap(async (req, res) => {
-  const domain = String(req.body.domain || '').trim().toLowerCase().replace(/^https?:\/\//, '').replace(/^www\./, '').replace(/\/.*$/, '');
+/** Is this a domain a business can bring? Returns the cleaned domain or throws with a plain-English reason. */
+async function checkNewDomain(input) {
+  const domain = String(input || '').trim().toLowerCase().replace(/^https?:\/\//, '').replace(/^www\./, '').replace(/\/.*$/, '').replace(/^.*@/, '');
   if (!DOMAIN_RE.test(domain)) throw fail(400, 'That doesn\'t look like a domain name (e.g. mybusiness.com)');
   if (BLOCKED_DOMAINS.test(domain) || domain === config.signup.domain || domain.endsWith(`.${config.mailHostname}`) || domain === config.mailHostname) {
     throw fail(400, 'That domain can\'t be added');
   }
-  if (await q.get('SELECT 1 FROM domains WHERE domain = ?', domain)) throw fail(409, 'That domain is already registered here');
+  if (await q.get('SELECT 1 FROM domains WHERE domain = ?', domain)) throw fail(409, 'That domain is already registered here. If it\'s yours, sign in or contact support.');
+  return domain;
+}
+/** Create the business and its (pending) domain for an owner. */
+async function createOrgWithDomain(owner, domain, orgName, ownerLocal = null) {
+  const name = String(orgName || domain).trim().slice(0, 120) || domain;
+  const orgId = await q.insert('INSERT INTO orgs(name, owner_email, max_mailboxes) VALUES(?, ?, ?)', name, owner, config.business.maxMailboxes);
+  await q.run("INSERT INTO members(email, org_id, role) VALUES(?, ?, 'admin')", owner, orgId);
+  await audit(owner, orgId, 'org.create', { name });
+  const token = crypto.randomBytes(12).toString('hex');
+  await q.run('INSERT INTO domains(domain, org_id, verify_token, owner_local) VALUES(?, ?, ?, ?)', domain, orgId, token, ownerLocal);
+  await audit(owner, orgId, 'domain.add', { domain });
+  return { orgId, token };
+}
+
+// Sign-up page, business path: is the domain they typed one we can take?
+publicAccounts.get('/signup/domain-check', rateLimit({ windowMs: 60_000, limit: 30 }), wrap(async (req, res) => {
+  try { res.json({ ok: true, domain: await checkNewDomain(req.query.domain) }); } catch (e) { res.json({ ok: false, reason: e.message }); }
+}));
+
+accounts.post('/domains', rateLimit({ windowMs: 60 * 60_000, limit: 20 }), wrap(async (req, res) => {
+  const domain = await checkNewDomain(req.body.domain);
   const pending = (await q.get("SELECT COUNT(*) AS n FROM domains d JOIN orgs o ON o.id = d.org_id WHERE o.owner_email = ? AND d.status = 'pending'", req.user.email)).n;
   if (pending >= 5 && !(await rolesFor(req.user.email)).superAdmin) throw fail(429, 'Finish verifying your other domains first (5 pending at most)');
   const superAdmin = (await rolesFor(req.user.email)).superAdmin;
@@ -275,7 +307,9 @@ accounts.post('/domains', rateLimit({ windowMs: 60 * 60_000, limit: 20 }), wrap(
 accounts.get('/domains/:domain', wrap(async (req, res) => {
   const d = await requireDomainAdmin(req, req.params.domain);
   const superAdmin = (await rolesFor(req.user.email)).superAdmin;
-  const base = { domain: d.domain, orgId: d.org_id, orgName: d.org_name, status: d.status, mailHostname: config.mailHostname };
+  const base = { domain: d.domain, orgId: d.org_id, orgName: d.org_name, status: d.status, mailHostname: config.mailHostname,
+    // the address the owner asked for at sign-up (made for them once the domain is connected)
+    ownerMailbox: d.owner_local ? { address: `${d.owner_local}@${d.domain}`, created: !!d.owner_mailbox, mine: (await q.get('SELECT owner_email FROM orgs WHERE id = ?', d.org_id))?.owner_email === req.user.email } : null };
   const route53 = superAdmin && !!(await findZone(d.domain));
   if (d.status === 'verified') {
     const b = await orgBilling(d.org_id);
@@ -289,6 +323,29 @@ accounts.get('/domains/:domain', wrap(async (req, res) => {
   const relay = !!(mc && Number(mc.relayhost || 0) > 0);
   const records = await checkRecords(d.domain, dkimOf(d), { relay });
   res.json({ ...base, route53, records, sending: relay ? 'relay' : 'direct', ready: records.filter((r) => !r.optional).every((r) => r.ok) });
+}));
+
+// Once the domain is live: create the owner's own address (bob@theirdomain.com) with the password they already use,
+// add it to this browser's signed-in accounts, and remember it so it's only done once.
+accounts.post('/domains/:domain/owner-mailbox', rateLimit({ windowMs: 60 * 60_000, limit: 10 }), wrap(async (req, res) => {
+  const d = await requireDomainAdmin(req, req.params.domain);
+  if (d.status !== 'active') throw fail(400, 'Your domain isn\'t connected yet');
+  if (!d.owner_local) throw fail(400, 'No address was requested at sign-up');
+  const owner = (await q.get('SELECT owner_email FROM orgs WHERE id = ?', d.org_id))?.owner_email;
+  if (owner !== req.user.email) throw fail(403, 'Only the person who signed up can do this');
+  const email = `${d.owner_local}@${d.domain}`;
+  if (!d.owner_mailbox) {
+    if (!(await mailcow.getMailbox(email))) {
+      const seat = await seatCheck(d.org_id);
+      if (!seat.ok) throw Object.assign(fail(402, 'Add a paid seat first'), { code: 'seat_required' });
+      await createUser(req, d, { localPart: d.owner_local, name: req.user.name || (await getProfile(req.user.email))?.name || d.owner_local, password: req.user.password, admin: true, welcome: false });
+    }
+    await markChosen(email); // same password they chose at sign-up: not a temporary one
+    await q.run('UPDATE domains SET owner_mailbox = ? WHERE domain = ?', email, d.domain);
+    await audit(req.user.email, d.org_id, 'domain.owner_mailbox', { email });
+  }
+  await setSession(res, { email, password: req.user.password, name: req.user.name || '' }, req);
+  res.json({ ok: true, email, mailboxId: await ensureMailboxId(email) });
 }));
 
 // Step 2: verify ownership -> domain is created in mailcow with a DKIM key
@@ -382,7 +439,8 @@ async function createUser(req, d, body) {
   const local = String(body.localPart || '').trim().toLowerCase();
   checkLocal(local);
   checkPassword(body.password);
-  await assertNotBreached(body.password, `${local}@x`);
+  // Temporary password (always replaced at first sign-in): the "contains your email name" rule applies to the one they choose
+  await assertNotBreached(body.password, TEMP_PASSWORD_RE.test(body.password) ? '' : `${local}@x`);
   const quotaMb = Math.max(256, Math.min(Number(body.quotaMb) || config.business.defaultQuotaMb, config.business.maxQuotaMb));
   const email = `${local}@${d.domain}`;
   await mailcow.addMailbox({ localPart: local, domain: d.domain, name: String(body.name || '').slice(0, 100), password: body.password, quotaMb });
@@ -494,7 +552,7 @@ accounts.post('/admin/users/import', rateLimit({ windowMs: 3600e3, limit: 20 }),
     if (!error && existing.has(email)) error = 'Already exists';
     if (!error && seen.has(email)) error = 'Listed twice';
     seen.add(email);
-    const password = get('password') || genPassword();
+    const password = get('password') || genPassword(local);
     if (!error && get('password')) { try { checkPassword(password); } catch (e) { error = e.message; } }
     return { row: i + 2, email, localPart: local, name: get('name').slice(0, 100), title: get('title'), department: get('department'), phone: get('phone'), mobile: get('mobile'),
       admin: /^(yes|y|true|1|admin)$/i.test(get('admin')), password, generated: !get('password'), inviteEmail: get('invite').toLowerCase(), error };
@@ -567,7 +625,7 @@ accounts.post('/admin/users/temp-password', rateLimit({ windowMs: 3600e3, limit:
   const invite = await q.get("SELECT invite_to FROM password_resets WHERE email = ? AND kind = 'invite' AND invite_to IS NOT NULL ORDER BY expires DESC LIMIT 1", email);
   // Only an address the person confirmed themselves, or the one their admin invited them at
   const to = (sec?.recovery_verified && sec.recovery_email) || invite?.invite_to || null;
-  const password = tempPassword();
+  const password = tempPassword(email.split('@')[0]);
   await mailcow.editMailbox(email, { password, password2: password });
   await markTemporary(email, 'admin-reset');
   await revokeSessions(email);
@@ -666,7 +724,7 @@ accounts.post('/super/staff-mailboxes', requireSuper, rateLimit({ windowMs: 3600
   if (!name) throw fail(400, "Enter the staff member's name");
   if (!(await addressAvailable(local, { staff: true }))) throw fail(409, 'That address is taken (or belonged to someone before)');
   const email = `${local}@${config.signup.domain}`;
-  const password = tempPassword();
+  const password = tempPassword(local);
   await mailcow.addMailbox({ localPart: local, domain: config.signup.domain, name, password, quotaMb: config.business.defaultQuotaMb });
   await markTemporary(email, 'staff');
   await applyRate(email, BUSINESS_RATE).catch(() => {});

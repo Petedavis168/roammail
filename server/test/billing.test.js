@@ -104,6 +104,42 @@ test('standard business: pays at the end, seats follow users, webhooks are verif
   assert.equal((await a.get(`/api/billing/${orgId}`)).data.status, 'canceled');
 });
 
+test('business sign-up: their own domain is taken at sign-up; their address there is made once it is live', async () => {
+  const c = new Client();
+  const domain = `marley${run}.test`;
+  assert.equal((await c.get(`/api/signup/domain-check?domain=${D}`)).data.ok, false, 'not our free domain');
+  assert.equal((await c.get(`/api/signup/domain-check?domain=https://www.${domain}/`)).data.domain, domain, 'cleaned up');
+  const s = await c.post('/api/signup', { name: 'Bob Marley', username: `bm${run}`, password: PW, acceptTerms: true, business: { domain, local: 'bob', orgName: 'Marley Music' } });
+  assert.equal(s.status, 200, JSON.stringify(s.data));
+  await sleep(1200);
+  const { secret } = (await c.post('/api/security/2fa/setup')).data; // business owners are admins: 2-step verification
+  assert.equal((await c.post('/api/security/2fa/enable', { code: totp(secret) })).status, 200);
+  const orgs = (await c.get('/api/admin/orgs')).data;
+  const org = orgs.find((o) => o.domains.some((x) => x.domain === domain));
+  assert.ok(org, 'the business and its domain exist right after sign-up'); assert.equal(org.name, 'Marley Music');
+  let st = (await c.get(`/api/domains/${domain}`)).data;
+  assert.equal(st.status, 'pending'); assert.deepEqual(st.ownerMailbox, { address: `bob@${domain}`, created: false, mine: true });
+  assert.equal((await c.post(`/api/domains/${domain}/owner-mailbox`)).status, 400, 'not before the domain is live');
+  // someone else can't take the same domain
+  const other = await new Client().post('/api/signup', { name: 'X', username: `bx${run}`, password: PW, acceptTerms: true, business: { domain, local: 'x' } });
+  assert.equal(other.status, 409);
+  // connect + pay, then the owner's own address is created with the same password
+  assert.equal((await c.post(`/api/domains/${domain}/verify`)).data.status, 'verified');
+  const { url } = (await c.post(`/api/billing/${org.id}/checkout`, { interval: 'month', seats: 1 })).data;
+  const paid = await fetch(url, { method: 'POST', redirect: 'manual' });
+  await sleep(500);
+  await c.post('/api/billing/confirm', { sessionId: new URL(paid.headers.get('location')).searchParams.get('session_id') });
+  assert.equal((await c.get(`/api/domains/${domain}`)).data.status, 'active');
+  const ob = await c.post(`/api/domains/${domain}/owner-mailbox`);
+  assert.equal(ob.status, 200, JSON.stringify(ob.data)); assert.equal(ob.data.email, `bob@${domain}`);
+  await sleep(1200);
+  const bob = new Client(); bob.autoSetup = false;
+  const login = await bob.post('/api/login', { email: `bob@${domain}`, password: PW });
+  assert.equal(login.status, 200, 'same password works'); assert.ok(!login.data.setupRequired.includes('password'), 'not treated as a temporary password');
+  // the sign-up account sees it as done (fresh sign-in to that account)
+  const again = new Client(); await again.post('/api/login', { email: s.data.email, password: PW });
+});
+
 test('Friendly Web Services customer: code makes the first mailbox free, codes are single use', async (t) => {
   const owner = await newAdmin('billingsuper');
   if (!owner) return t.skip('billingsuper@free.test already has 2FA from an earlier run; restart with a fresh data folder');

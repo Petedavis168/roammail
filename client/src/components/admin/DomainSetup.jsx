@@ -49,6 +49,16 @@ export function DomainStatus({ domain, onActivated, onDone }) {
 
   const load = () => api.get(`/api/domains/${encodeURIComponent(domain)}`).then(setS).catch((e) => setMsg(e.message));
   useEffect(() => { load(); const t = setInterval(load, 20000); return () => clearInterval(t); }, [domain]);
+  // The address they asked for at sign-up (bob@theirdomain.com): made as soon as the domain is live, same password
+  const [ownerBox, setOwnerBox] = useState(null);
+  useEffect(() => {
+    if (s?.status !== 'active' || !s.ownerMailbox?.mine || ownerBox) return;
+    setOwnerBox({ busy: true });
+    api.post(`/api/domains/${encodeURIComponent(domain)}/owner-mailbox`).then((r) => {
+      setOwnerBox(r);
+      if (!s.ownerMailbox.created) toast(`${r.email} is ready`);
+    }).catch((e) => setOwnerBox({ error: e.message }));
+  }, [s?.status, s?.ownerMailbox?.created]);
 
   const verify = async (skip) => {
     setBusy('verify'); setMsg('');
@@ -118,6 +128,11 @@ export function DomainStatus({ domain, onActivated, onDone }) {
         <div className="callout good"><Icon name="check" /> <div><b>This domain is in your AWS account.</b></div>
           <button className="btn primary" disabled={!!busy} onClick={autoDns}>{busy === 'r53' ? 'Setting up…' : 'Add records automatically'}</button></div>
       )}
+      {ownerBox?.email && (
+        <div className="callout good"><Icon name="check" /> <div><b>{ownerBox.email} is ready.</b> It uses the same password you chose at sign-up.</div>
+          <button className="btn primary" onClick={() => location.assign(`/${ownerBox.mailboxId}/inbox`)}>Open {ownerBox.email}</button></div>
+      )}
+      {ownerBox?.error && <div className="form-error">Couldn't create {s.ownerMailbox.address} yet: {ownerBox.error}</div>}
       <RecordTable records={s.records} />
       <p className="muted small">If you already use another email provider on this domain, changing the MX record moves email delivery here. Only one provider can receive mail at a time.</p>
       {msg && <div className="form-error">{msg}</div>}
