@@ -4,6 +4,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import crypto from 'node:crypto';
 import { createRequire } from 'node:module';
+const D = process.env.TEST_DOMAIN || 'free.test'; // the sign-up domain of the server under test
 
 const require = createRequire(import.meta.url);
 const { chromium } = require('playwright');
@@ -30,7 +31,7 @@ test('malicious email content cannot run code or overlay the app (reading, reply
   assert.ok(cookie, 'signed up');
   await new Promise((r) => setTimeout(r, 1500));
   for (const [subject, html] of Object.entries(PAYLOADS)) {
-    const fd = new FormData(); fd.append('to', `${user}@free.test`); fd.append('subject', subject); fd.append('html', html);
+    const fd = new FormData(); fd.append('to', `${user}@${D}`); fd.append('subject', subject); fd.append('html', html);
     await api('/api/send', null, cookie, fd);
   }
   await new Promise((r) => setTimeout(r, 1500));
@@ -42,7 +43,7 @@ test('malicious email content cannot run code or overlay the app (reading, reply
     page.on('request', (r) => { if (/tracker\.test|evil\.test/.test(r.url())) remote.push(r.url()); });
     await page.goto(BASE);
     // Gmail-style sign-in: email, Next, password, Next
-    await page.fill('input[autocomplete=username]', `${user}@free.test`);
+    await page.fill('input[autocomplete=username]', `${user}@${D}`);
     await page.click('.g-btn');
     await page.fill('input[autocomplete=current-password]', PW);
     await page.click('.g-btn');

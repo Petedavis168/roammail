@@ -26,6 +26,11 @@ Parameters:
     Type: String
     Default: ''
     Description: Optional email address for alerts (server down, high CPU). You'll get a confirmation email.
+  AlertPhone:
+    Type: String
+    Default: ''
+    AllowedPattern: '^(\+[1-9][0-9]{6,14})?$'
+    Description: Optional mobile number for text-message alerts, in international format (e.g. +15551234567)
   EnableRoute53Dns:
     Type: String
     Default: 'false'
@@ -52,6 +57,8 @@ Parameters:
 Conditions:
   HasZone: !Not [!Equals [!Ref HostedZoneId, '']]
   HasAlertEmail: !Not [!Equals [!Ref AlertEmail, '']]
+  HasAlertPhone: !Not [!Equals [!Ref AlertPhone, '']]
+  HasAlerts: !Or [!Condition HasAlertEmail, !Condition HasAlertPhone]
   Route53Feature: !Equals [!Ref EnableRoute53Dns, 'true']
 
 Resources:
@@ -291,9 +298,17 @@ Resources:
   # ---------------------------------------------------------------- monitoring
   AlertTopic:
     Type: AWS::SNS::Topic
-    Condition: HasAlertEmail
+    Condition: HasAlerts
     Properties:
-      Subscription: [{ Protocol: email, Endpoint: !Ref AlertEmail }]
+      TopicName: !Sub '${AWS::StackName}-alerts'   # not KMS-encrypted: CloudWatch alarms can't publish to topics using the AWS-managed SNS key
+  AlertEmailSub:
+    Type: AWS::SNS::Subscription
+    Condition: HasAlertEmail
+    Properties: { TopicArn: !Ref AlertTopic, Protocol: email, Endpoint: !Ref AlertEmail }
+  AlertPhoneSub:
+    Type: AWS::SNS::Subscription
+    Condition: HasAlertPhone
+    Properties: { TopicArn: !Ref AlertTopic, Protocol: sms, Endpoint: !Ref AlertPhone }
 
   RecoverAlarm:
     Type: AWS::CloudWatch::Alarm
@@ -309,7 +324,7 @@ Resources:
       ComparisonOperator: GreaterThanThreshold
       AlarmActions:
         - !Sub 'arn:aws:automate:${AWS::Region}:ec2:recover'
-        - !If [HasAlertEmail, !Ref AlertTopic, !Ref AWS::NoValue]
+        - !If [HasAlerts, !Ref AlertTopic, !Ref AWS::NoValue]
 
   RebootAlarm:
     Type: AWS::CloudWatch::Alarm
@@ -325,11 +340,11 @@ Resources:
       ComparisonOperator: GreaterThanThreshold
       AlarmActions:
         - !Sub 'arn:aws:automate:${AWS::Region}:ec2:reboot'
-        - !If [HasAlertEmail, !Ref AlertTopic, !Ref AWS::NoValue]
+        - !If [HasAlerts, !Ref AlertTopic, !Ref AWS::NoValue]
 
   CpuAlarm:
     Type: AWS::CloudWatch::Alarm
-    Condition: HasAlertEmail
+    Condition: HasAlerts
     Properties:
       AlarmDescription: CPU above 80% for 15 minutes - consider a bigger InstanceType
       Namespace: AWS/EC2
@@ -357,7 +372,7 @@ Resources:
       MetricTransformations: [{ MetricNamespace: !Sub '${AWS::StackName}', MetricName: LoginLockouts, MetricValue: '1', DefaultValue: 0 }]
   ErrorAlarm:
     Type: AWS::CloudWatch::Alarm
-    Condition: HasAlertEmail
+    Condition: HasAlerts
     DependsOn: ErrorMetric
     Properties:
       AlarmDescription: The app logged 5+ unexpected errors in 5 minutes
@@ -372,7 +387,7 @@ Resources:
       AlarmActions: [!Ref AlertTopic]
   LockoutAlarm:
     Type: AWS::CloudWatch::Alarm
-    Condition: HasAlertEmail
+    Condition: HasAlerts
     DependsOn: LockoutMetric
     Properties:
       AlarmDescription: Possible password-guessing attack - 10+ sign-in lockouts in 15 minutes
@@ -386,7 +401,68 @@ Resources:
       TreatMissingData: notBreaching
       AlarmActions: [!Ref AlertTopic]
 
+  # App metrics come from CloudWatch embedded-metric log lines the app writes every minute (namespace = stack name)
+  SlowAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Condition: HasAlerts
+    Properties:
+      AlarmDescription: The app is slow - 95% of requests took longer than 2 seconds for 10 minutes
+      Namespace: !Sub '${AWS::StackName}'
+      MetricName: LatencyP95
+      Statistic: Maximum
+      Period: 300
+      EvaluationPeriods: 2
+      Threshold: 2000
+      ComparisonOperator: GreaterThanThreshold
+      TreatMissingData: notBreaching
+      AlarmActions: [!Ref AlertTopic]
+  ServerErrorAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Condition: HasAlerts
+    Properties:
+      AlarmDescription: 20+ failed requests (5xx) in 5 minutes
+      Namespace: !Sub '${AWS::StackName}'
+      MetricName: ServerErrors
+      Statistic: Sum
+      Period: 300
+      EvaluationPeriods: 1
+      Threshold: 20
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      TreatMissingData: notBreaching
+      AlarmActions: [!Ref AlertTopic]
+  SilentAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Condition: HasAlerts
+    Properties:
+      AlarmDescription: The app stopped reporting (crashed or hung) for 10 minutes
+      Namespace: !Sub '${AWS::StackName}'
+      MetricName: MemoryMB
+      Statistic: SampleCount
+      Period: 300
+      EvaluationPeriods: 2
+      Threshold: 1
+      ComparisonOperator: LessThanThreshold
+      TreatMissingData: breaching
+      AlarmActions: [!Ref AlertTopic]
+  Dashboard:
+    Type: AWS::CloudWatch::Dashboard
+    Properties:
+      DashboardName: !Sub '${AWS::StackName}'
+      DashboardBody: !Sub |
+        {"widgets":[
+          {"type":"metric","x":0,"y":0,"width":12,"height":6,"properties":{"title":"Requests per minute","region":"${AWS::Region}","stat":"Sum","period":60,"metrics":[["${AWS::StackName}","Requests"],[".","ServerErrors"]]}},
+          {"type":"metric","x":12,"y":0,"width":12,"height":6,"properties":{"title":"Response time (ms)","region":"${AWS::Region}","stat":"Maximum","period":60,"metrics":[["${AWS::StackName}","LatencyP50"],[".","LatencyP95"],[".","LatencyP99"]]}},
+          {"type":"metric","x":0,"y":6,"width":8,"height":6,"properties":{"title":"People online / signed in","region":"${AWS::Region}","stat":"Maximum","period":60,"metrics":[["${AWS::StackName}","live_users"],[".","sessions_active"]]}},
+          {"type":"metric","x":8,"y":6,"width":8,"height":6,"properties":{"title":"Server CPU %","region":"${AWS::Region}","stat":"Average","period":300,"metrics":[["AWS/EC2","CPUUtilization","InstanceId","${Server}"]]}},
+          {"type":"metric","x":16,"y":6,"width":8,"height":6,"properties":{"title":"App memory (MB) / queued jobs","region":"${AWS::Region}","stat":"Maximum","period":60,"metrics":[["${AWS::StackName}","MemoryMB"],[".","jobs_pending"]]}},
+          {"type":"metric","x":0,"y":12,"width":12,"height":6,"properties":{"title":"Errors and sign-in lockouts","region":"${AWS::Region}","stat":"Sum","period":300,"metrics":[["${AWS::StackName}","AppErrors"],[".","LoginLockouts"]]}}
+        ]}
+
 Outputs:
+  DashboardUrl:
+    Value: !Sub 'https://${AWS::Region}.console.aws.amazon.com/cloudwatch/home?region=${AWS::Region}#dashboards:name=${AWS::StackName}'
+  StatusPage:
+    Value: !Sub 'https://${AppDomain}/status'
   AppUrl:
     Value: !Sub 'https://${AppDomain}'
   PublicIp:

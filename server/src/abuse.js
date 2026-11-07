@@ -1,3 +1,4 @@
+import { count } from './ops.js';
 // Abuse protection helpers: send quotas, SSRF-safe hosts, breached-password check, login throttling.
 import crypto from 'node:crypto';
 import dns from 'node:dns/promises';
@@ -119,13 +120,14 @@ export function loginBlocked(email, ip) {
   return until > now ? Math.ceil((until - now) / 60000) : 0;
 }
 export function loginFailed(email, ip) {
+  count('logins_failed');
   const pair = bucket(`${email}|${ip}`); const acct = bucket(email);
   pair.n++; acct.n++;
   if (pair.n === 10) { pair.lockedUntil = Date.now() + WINDOW; console.warn(`SECURITY_LOCKOUT ip=${ip} account=${email}`); }
   if (acct.n === 50) { acct.lockedUntil = Date.now() + WINDOW; console.warn(`SECURITY_LOCKOUT account=${email} distributed`); }
   if (pair.n > 10) pair.lockedUntil = Date.now() + WINDOW;
 }
-export function loginSucceeded(email, ip) { fails.delete(`${email}|${ip}`); }
+export function loginSucceeded(email, ip) { count('logins_ok'); fails.delete(`${email}|${ip}`); }
 
 /** Display names can't contain addresses or brackets (stops "CEO <boss@bank.com>"-style spoofing). */
 export function cleanDisplayName(n) {

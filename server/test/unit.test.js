@@ -144,3 +144,14 @@ test('cache: single-flight, TTL, bound, failures not cached', async () => {
   for (const k of ['a', 'b', 'c', 'd']) c.set(k, k);
   assert.ok(c.size <= 3);
 });
+
+test('database backup: consistent copy, keeps the last 7', async () => {
+  const fs = await import('node:fs'); const os = await import('node:os'); const path = await import('node:path');
+  const { backupDatabase } = await import('../src/ops.js');
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'dbb-'));
+  for (let i = 1; i <= 9; i++) fs.writeFileSync(path.join(dir, `app-2020-01-0${i}.db`), '');
+  const f = backupDatabase(dir, 7);
+  assert.ok(fs.statSync(f).size > 0);
+  const left = fs.readdirSync(dir).sort();
+  assert.equal(left.length, 7); assert.ok(left.includes(path.basename(f))); assert.ok(!left.includes('app-2020-01-01.db'));
+});

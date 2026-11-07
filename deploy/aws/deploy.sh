@@ -101,8 +101,9 @@ ENVFILE="$(mktemp)"; trap 'rm -f "$ENVFILE" "${TARBALL:-}"' EXIT
   echo "SESSION_SECRET=$SESSION_SECRET"
   echo "COOKIE_SECURE=true"
   echo "DATA_DIR=/data"
+  echo "METRICS_NAMESPACE=$STACK"
   for k in "${!CFG[@]}"; do
-    case "$k" in STACK_NAME|AWS_REGION|INSTANCE_TYPE|HOSTED_ZONE_ID|ALERT_EMAIL|SMTP_HOST|MAILCOW_API_URL|SESSION_SECRET|PUBLIC_URL) continue ;; esac
+    case "$k" in STACK_NAME|AWS_REGION|INSTANCE_TYPE|HOSTED_ZONE_ID|ALERT_EMAIL|ALERT_PHONE|SMTP_HOST|MAILCOW_API_URL|SESSION_SECRET|PUBLIC_URL) continue ;; esac
     echo "$k=${CFG[$k]}"
   done
 } > "$ENVFILE"
@@ -135,6 +136,7 @@ PARAMS=(
   "HostedZoneId=$(get HOSTED_ZONE_ID)"
   "InstanceType=$(get INSTANCE_TYPE t3.small)"
   "AlertEmail=$(get ALERT_EMAIL)"
+  "AlertPhone=$(get ALERT_PHONE)"
   "EnableRoute53Dns=$(get ROUTE53_ENABLED false)"
   "ArtifactBucket=$BUCKET"
   "EnvParameterName=$PARAM"

@@ -339,6 +339,25 @@ function FriendlyCodes() {
   );
 }
 
+function StatusNotice() {
+  const toast = useToast();
+  const [n, setN] = useState({ title: '', body: '' });
+  const [live, setLive] = useState(null);
+  useEffect(() => { fetch('/api/status').then((r) => r.json()).then((s) => { setLive(s); if (s.notice) setN({ title: s.notice.title, body: s.notice.body }); }).catch(() => {}); }, []);
+  const save = async (v) => { try { await api.put('/api/super/status-notice', v); toast(v.title ? 'Notice posted on the status page' : 'Notice removed'); setN(v); } catch (e) { toast(e.message, { error: true }); } };
+  return (
+    <div className="card">
+      <h3>Status page <a className="small" href="/status" target="_blank" rel="noreferrer">open</a></h3>
+      {live && <p className="small">{live.components.map((c) => <span key={c.name} style={{ marginRight: 14 }}>{c.ok ? '🟢' : '🔴'} {c.name}</span>)}</p>}
+      <div className="form">
+        <input placeholder="Notice title (e.g. Planned maintenance Sunday 02:00 UTC)" value={n.title} onChange={(e) => setN({ ...n, title: e.target.value })} />
+        <textarea rows={2} placeholder="Details customers will see" value={n.body} onChange={(e) => setN({ ...n, body: e.target.value })} />
+        <div className="actions"><button className="btn primary" onClick={() => save(n)} disabled={!n.title}>Post notice</button><button className="btn" onClick={() => save({ title: '', body: '' })}>Clear</button></div>
+      </div>
+    </div>
+  );
+}
+
 function Platform() {
   const toast = useToast();
   const [d, setD] = useState(null);
@@ -354,6 +373,7 @@ function Platform() {
           <div className="stat" key={l}><b>{n}</b><span>{l}</span></div>
         ))}
       </div>
+      <StatusNotice />
       <div className="card">
         <h3>Platform settings</h3>
         <label className="check"><input type="checkbox" checked={d.settings.signupEnabled} onChange={async (e) => { await api.patch('/api/super/settings', { signupEnabled: e.target.checked }); load(); }} />

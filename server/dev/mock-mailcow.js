@@ -42,6 +42,7 @@ http.createServer(async (req, res) => {
   const [verb, what, ...rest] = p.split('/');
   const arg = rest.join('/');
   if (verb === 'get') {
+    if (what === 'status' && arg === 'version') return send(200, { version: '2026-mock' });
     if (what === 'domain') return send(200, arg === 'all' ? [...domains.values()] : domains.get(arg) || {});
     if (what === 'mailbox') {
       if (arg.startsWith('all/')) return send(200, [...mailboxes.values()].filter((m) => m.domain === arg.slice(4)));

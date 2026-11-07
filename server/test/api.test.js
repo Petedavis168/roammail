@@ -3,6 +3,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import crypto from 'node:crypto';
+const D = process.env.TEST_DOMAIN || 'free.test'; // the sign-up domain of the server under test
 
 const BASE = process.env.BASE_URL || 'http://localhost:3000';
 const run = crypto.randomBytes(3).toString('hex');
@@ -144,7 +145,7 @@ test('sensitive changes need the password', async () => {
 test('admins must use 2FA; companies can require it; external forwarding off by default', async (t) => {
   // Needs a fresh database where SUPERADMIN_EMAILS includes owner@free.test (as in dev/test.env and CI)
   const owner = new Client();
-  const r = await owner.post('/api/login', { email: 'owner@free.test', password: PW });
+  const r = await owner.post('/api/login', { email: `owner@${D}`, password: PW });
   if (r.status === 401) await signup(owner, 'owner');
   else if (r.data?.twoFactor) return t.skip('owner@free.test already has 2FA from an earlier run; use a fresh DATA_DIR');
   const me = (await owner.get('/api/me')).data;
@@ -256,6 +257,16 @@ test('recovery: verified recovery email, forgot password, forgot address, lost-p
 
 test('support tools are super-admin only', async () => {
   const a = new Client(); await signup(a, `su${run}`);
-  assert.equal((await a.get('/api/super/support/lookup?email=owner@free.test')).status, 403);
-  assert.equal((await a.post('/api/super/support/action', { email: 'owner@free.test', action: 'reset2fa', reason: 'testing it' })).status, 403);
+  assert.equal((await a.get(`/api/super/support/lookup?email=owner@${D}`)).status, 403);
+  assert.equal((await a.post('/api/super/support/action', { email: `owner@${D}`, action: 'reset2fa', reason: 'testing it' })).status, 403);
+});
+
+test('ops: public status page, metrics hidden from the internet, notices are super-admin only', async () => {
+  const anon = new Client();
+  const s = await anon.get('/api/status');
+  assert.equal(s.status, 200); assert.equal(s.data.ok, true); assert.ok(s.data.components.length >= 4);
+  assert.match((await anon.get('/status')).data, /All systems are working normally/);
+  assert.equal((await anon.req('GET', '/metrics', undefined, { csrf: false })).status, 404);
+  const a = new Client(); await signup(a, `op${run}`);
+  assert.equal((await a.req('PUT', '/api/super/status-notice', { title: 'hacked' })).status, 403);
 });

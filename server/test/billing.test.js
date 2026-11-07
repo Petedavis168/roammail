@@ -2,6 +2,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import crypto from 'node:crypto';
+const D = process.env.TEST_DOMAIN || 'free.test'; // the sign-up domain of the server under test
 
 const BASE = process.env.BASE_URL || 'http://localhost:3000';
 const STRIPE = process.env.MOCK_STRIPE || 'http://127.0.0.1:12111';
@@ -33,7 +34,7 @@ function totp(secret) {
 async function newAdmin(username) {
   const c = new Client();
   let r = await c.post('/api/signup', { name: username, username, password: PW, acceptTerms: true });
-  if (r.status === 409) { r = await c.post('/api/login', { email: `${username}@free.test`, password: PW }); if (r.data?.twoFactor) return null; }
+  if (r.status === 409) { r = await c.post('/api/login', { email: `${username}@${D}`, password: PW }); if (r.data?.twoFactor) return null; }
   assert.ok(r.status === 200, JSON.stringify(r.data));
   await sleep(1200);
   const me = (await c.get('/api/me')).data;
@@ -133,6 +134,6 @@ test('groups: department lists stay in sync, send-as is limited to members', asy
   const send = (c, from) => { const fd = new FormData(); fd.append('to', `ben@${domain}`); fd.append('subject', 'x'); fd.append('text', 'x'); fd.append('fromAddress', from); return fetch(`${BASE}/api/send`, { method: 'POST', headers: { Cookie: c.cookie, 'X-Requested-With': 'mailcow-client', 'X-Forwarded-For': c.ip }, body: fd }); };
   assert.equal((await send(ann, `sales@${domain}`)).status, 200, 'member can send as the group');
   assert.equal((await send(cat, `sales@${domain}`)).status, 403, 'non-member cannot');
-  assert.equal((await send(ann, 'owner@free.test')).status, 403, 'nobody can send as an unrelated address');
+  assert.equal((await send(ann, `owner@${D}`)).status, 403, 'nobody can send as an unrelated address');
   assert.equal((await ann.get(`/api/admin/orgs/${orgId}/groups`)).status, 403, 'employees cannot manage groups');
 });

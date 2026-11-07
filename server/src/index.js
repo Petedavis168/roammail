@@ -7,6 +7,8 @@ import fs from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { config } from './config.js';
 import { api } from './routes.js';
+import { ops, metricsMiddleware, startMetricsLog, gauge, startDbBackups } from './ops.js';
+import { q } from './db.js';
 import { publicAccounts, accounts } from './accounts.js';
 import { publicSecurity, securityApi } from './security.js';
 import { signatures, publicAssets } from './signatures.js';
@@ -38,6 +40,7 @@ app.use(helmet({
   },
   crossOriginEmbedderPolicy: false,
 }));
+app.use(metricsMiddleware);
 app.use(billingWebhook); // Stripe → raw body, verified by signature
 app.use(cookieParser());
 app.use(express.json({ limit: '2mb' }));
@@ -58,6 +61,11 @@ app.use('/api', (req, res, next) => {
   next();
 });
 app.get('/healthz', (req, res) => res.json({ ok: true }));
+app.use(ops);
+gauge('sessions_active', () => q.get('SELECT COUNT(*) AS n FROM sessions').n);
+gauge('jobs_pending', () => q.get("SELECT COUNT(*) AS n FROM jobs WHERE status = 'pending'").n);
+startMetricsLog();
+startDbBackups();
 app.use(publicAssets);
 app.use(deviceSetup);
 app.use(legalPages);

@@ -2,6 +2,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import crypto from 'node:crypto';
+const D = process.env.TEST_DOMAIN || 'free.test';
 
 const BASE = process.env.BASE_URL || 'http://localhost:3000';
 const PW = 'Tq9-vLm2-Zx81';
@@ -32,7 +33,7 @@ test('calendar: recurring event with invite, RSVP updates both sides', async () 
   const cal = (await org.get('/api/calendars')).data[0].href;
   const start = new Date(Date.now() + 864e5); start.setUTCMinutes(0, 0, 0);
   const r = await org.post('/api/calendar/events', { calendar: cal, title: 'Weekly sync', start: start.toISOString(), end: new Date(start.getTime() + 3600e3).toISOString(),
-    repeat: 'weekly', reminder: 15, attendees: [{ email: `gst${run}@free.test` }] });
+    repeat: 'weekly', reminder: 15, attendees: [{ email: `gst${run}@${D}` }] });
   assert.equal(r.status, 200, JSON.stringify(r.data));
   const q = new URLSearchParams(range());
   const evs = (await org.get(`/api/calendar/events?${q}`)).data;

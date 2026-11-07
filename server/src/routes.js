@@ -7,6 +7,7 @@ import { simpleParser } from 'mailparser';
 import { config } from './config.js';
 import { clearSession, requireAuth, onRevoke } from './session.js';
 import { createCache } from './cache.js';
+import { count, gauge } from './ops.js';
 import { getClient, closeClient, withMailbox, specialFolder, makeClient } from './imap.js';
 import { parseQuery } from './search.js';
 import { rolesFor, q, twoFactorPolicy } from './db.js';
@@ -447,6 +448,7 @@ api.post('/send', upload.array('attachments'), wrap(async (req, res) => {
     return res.json({ ok: true, scheduled: true, id, sendAt });
   }
   const info = await transport(req.user).sendMail(mail);
+  count('mail_sent');
 
   // mailcow (Postfix) does not store sent mail itself; append a copy to Sent.
   try {
@@ -536,6 +538,8 @@ api.get('/contacts', wrap(async (req, res) => {
 // ---------- live updates (Server-Sent Events + IMAP IDLE) ----------
 // One IDLE connection per person, shared by all their open tabs and devices (was one per tab).
 const hubs = new Map(); // email -> { subs: Set<fn>, client, ready: Promise }
+gauge('live_users', () => hubs.size);
+gauge('preview_cache_entries', () => previewCache.size);
 export const liveStats = () => ({ users: hubs.size, streams: [...hubs.values()].reduce((n, h) => n + h.subs.size, 0) });
 
 function openHub(user) {

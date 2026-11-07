@@ -1,0 +1,32 @@
+name: Staging (real mailcow)
+# Runs the API, billing and browser test suites against the STAGING deployment, which talks to a real
+# staging mailcow server. Start it by hand (Actions > Staging > Run workflow) before every release.
+# Needs repository secrets: STAGING_URL (e.g. https://staging.roammail.net) and STAGING_DOMAIN (its sign-up domain).
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '41 7 * * *'   # daily, so mailcow updates that break something are caught early
+
+permissions:
+  contents: read
+
+jobs:
+  staging:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    environment: staging
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22 }
+      - run: npm ci
+        working-directory: server
+      - name: Status page says everything is up
+        run: curl -fsS "${{ secrets.STAGING_URL }}/api/status" | tee /dev/stderr | grep -q '"ok":true'
+      - name: API tests against real mailcow
+        working-directory: server
+        env: { BASE_URL: '${{ secrets.STAGING_URL }}', TEST_DOMAIN: '${{ secrets.STAGING_DOMAIN }}' }
+        run: npm run test:api
+      - name: Short load test (50 people, 2 minutes)
+        env: { STAGING_URL: '${{ secrets.STAGING_URL }}' }
+        run: node loadtest/run.mjs --url "$STAGING_URL" --users 50 --minutes 2
