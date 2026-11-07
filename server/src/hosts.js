@@ -49,6 +49,13 @@ hosts.get(['/', '/login'], async (req, res, next) => {
   if (!emails.length) return next();
   return res.redirect(302, appUrl(`/${await ensureMailboxId(emails[0])}/inbox`));
 });
+// Installed app (PWA start_url): the first signed-in mailbox, or sign-in
+hosts.get('/app', async (req, res) => {
+  const emails = await browserMailboxes(req);
+  if (!emails.length) return res.redirect(302, loginUrl('/'));
+  const section = ['calendar', 'contacts'].includes(req.query.view) ? req.query.view : 'inbox';
+  return res.redirect(302, appUrl(`/${await ensureMailboxId(emails[0])}/${section}${req.query.compose === '1' ? '?compose=1' : ''}`));
+});
 // Sign-up lives on the sign-in host: roammail.net/signup -> login.roammail.net/signup (query kept)
 hosts.get('/signup', (req, res, next) => {
   if (config.loginHost && String(req.hostname || '').toLowerCase() !== config.loginHost) {

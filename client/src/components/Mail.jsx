@@ -45,7 +45,25 @@ export default function Mail({ me, route, refreshMe, theme, setTheme, onLogout }
   const [composers, setComposers] = useState([]);
   const [showSettings, setShowSettings] = useState(false);
   const [showHelp, setShowHelp] = useState(false);
-  const [sidebarOpen, setSidebarOpen] = useState(window.innerWidth > 900);
+  // Sidebar (item 11): 240 px by default, drag to 200-320 px, collapses to a 64 px rail ( [ key ),
+  // collapses automatically under 1280 px and becomes a slide-in drawer under 900 px.
+  const [vw, setVw] = useState(window.innerWidth);
+  useEffect(() => { const on = () => setVw(window.innerWidth); window.addEventListener('resize', on); return () => window.removeEventListener('resize', on); }, []);
+  const [navCollapsed, setNavCollapsed] = useState(() => localStorage.getItem('navCollapsed') === '1');
+  const [navWidth, setNavWidth] = useState(() => Math.min(320, Math.max(200, Number(localStorage.getItem('navWidth')) || 240)));
+  const [navPeek, setNavPeek] = useState(false); // expanded over the content on medium screens / drawer open on small ones
+  const navMode = vw < 900 ? 'drawer' : (vw < 1280 || navCollapsed) && !navPeek ? 'rail' : 'full';
+  const toggleNav = () => {
+    if (vw < 1280) setNavPeek((p) => !p);
+    else setNavCollapsed((c) => { localStorage.setItem('navCollapsed', c ? '0' : '1'); return !c; });
+  };
+  const startResize = (e) => {
+    e.preventDefault();
+    const x0 = e.clientX; const w0 = navWidth;
+    const move = (ev) => setNavWidth(Math.min(320, Math.max(200, w0 + ev.clientX - x0)));
+    const up = (ev) => { window.removeEventListener('pointermove', move); window.removeEventListener('pointerup', up); localStorage.setItem('navWidth', String(Math.min(320, Math.max(200, w0 + ev.clientX - x0)))); };
+    window.addEventListener('pointermove', move); window.addEventListener('pointerup', up);
+  };
   const [userMenu, setUserMenu] = useState(false);
   const [opsHelp, setOpsHelp] = useState(false);
   const searchRef = useRef();
@@ -271,6 +289,8 @@ export default function Mail({ me, route, refreshMe, theme, setTheme, onLogout }
     if (c.length >= 3) { toast('Close a draft before opening another'); return c; }
     return [...c, { id: Date.now() + Math.random(), initial }];
   });
+  // Home-screen shortcut "New mail" (/app?compose=1)
+  useEffect(() => { if (new URLSearchParams(location.search).get('compose') === '1') { compose(); history.replaceState(null, '', location.pathname); } }, []);
   const reply = (msg, mode) => compose(replyDraft({ folder: listFolder, ...msg }, mode, me.email));
 
   const openMessage = (m) => {
@@ -322,7 +342,7 @@ export default function Mail({ me, route, refreshMe, theme, setTheme, onLogout }
         s: () => act.flag(), b: () => act.snooze(), u: () => setActive(null), Escape: () => { setActive(null); setSelected(new Set()); },
         I: () => act.read(true), U: () => act.read(false), q: () => act.read(true),
         x: () => active && setSelected((s) => { const n = new Set(s); n.has(active) ? n.delete(active) : n.add(active); return n; }),
-        '/': () => searchRef.current?.focus(), '?': () => setShowHelp(true),
+        '/': () => searchRef.current?.focus(), '?': () => setShowHelp(true), '[': () => toggleNav(),
       };
       if (map[k]) { e.preventDefault(); map[k](); }
     };
@@ -335,7 +355,7 @@ export default function Mail({ me, route, refreshMe, theme, setTheme, onLogout }
   return (
     <div className={`app density-${prefs.density}`}>
       <header className="topbar">
-        <button className="icon-btn on-dark" onClick={() => setSidebarOpen((o) => !o)} aria-label="Toggle navigation"><Icon name="menu" /></button>
+        <button className="icon-btn on-dark" onClick={toggleNav} aria-label="Toggle navigation" title="Collapse or expand navigation ([)" aria-expanded={navMode === 'full' || (navMode === 'drawer' && navPeek)}><Icon name="menu" /></button>
         <div className="brand" onClick={() => { setView('mail'); setFolder('INBOX'); clearSearch(); }}><img src="/roammail-mark-white.png" alt="" /> <span>Roammail</span></div>
         {view === 'mail' ? (
           <form className="search" onSubmit={(e) => { e.preventDefault(); runSearch(searchInput); }}>
@@ -397,10 +417,11 @@ export default function Mail({ me, route, refreshMe, theme, setTheme, onLogout }
         <Suspense fallback={<div className="spinner" />}><Contacts me={me} onEmail={(c) => { compose({ to: [{ name: c.name, address: c.email }] }); setView('mail'); }} /></Suspense>
       ) : (
         <div className="body">
-          {sidebarOpen && (
-            <Sidebar folders={folders} current={search ? null : folder} onCompose={() => compose()} reload={loadFolders}
+          {navPeek && vw < 1280 && <div className={`nav-backdrop ${navMode === 'drawer' ? '' : 'clear'}`} onClick={() => setNavPeek(false)} />}
+          {(navMode !== 'drawer' || navPeek) && (
+            <Sidebar mode={navMode} width={navWidth} onResizeStart={startResize} overlay={navPeek && vw < 1280} folders={folders} current={search ? null : folder} onCompose={() => compose()} reload={loadFolders}
               me={me} mailboxes={sharedBoxes} mailbox={mailbox} onMailbox={switchMailbox}
-              onSelect={(p) => { setFolder(p); clearSearch(); setFilter(''); if (window.innerWidth <= 900) setSidebarOpen(false); }}
+              onSelect={(p) => { setFolder(p); clearSearch(); setFilter(''); if (vw < 1280) setNavPeek(false); }}
               onDropMessages={(dest, uids) => act.move(dest, uids)} onScheduled={() => { setFolder('@scheduled'); clearSearch(); }} onQuarantine={() => { setFolder('@quarantine'); clearSearch(); }} qCount={qCount}
               categories={prefs.categories} onCategory={(c) => runSearch(`label:${catKeyword(c.name).slice(4)}`)} />
           )}

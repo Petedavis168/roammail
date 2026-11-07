@@ -4,7 +4,7 @@ import { Icon } from '../icons.jsx';
 import { folderIcon, folderLabel, SPECIAL_ORDER } from '../util.js';
 import { useToast } from './Toast.jsx';
 
-export default function Sidebar({ folders, current, onSelect, onCompose, reload, onDropMessages, categories, onCategory, onScheduled, onQuarantine, qCount, me, mailboxes = [], mailbox = '', onMailbox }) {
+export default function Sidebar({ folders, current, onSelect, onCompose, reload, onDropMessages, categories, onCategory, onScheduled, onQuarantine, qCount, me, mailboxes = [], mailbox = '', onMailbox, mode = 'full', width = 240, onResizeStart, overlay }) {
   const toast = useToast();
   const [collapsed, setCollapsed] = useState(() => JSON.parse(localStorage.getItem('collapsed') || '{}'));
   const [dragOver, setDragOver] = useState(null);
@@ -60,7 +60,7 @@ export default function Sidebar({ folders, current, onSelect, onCompose, reload,
     return (
       <>
         <div className={`folder ${current === f.path ? 'on' : ''} ${dragOver === f.path ? 'drop' : ''}`} style={{ paddingLeft: 10 + depth * 14 }}
-          onClick={() => !f.flags.includes('\\Noselect') && onSelect(f.path)} {...dropProps(f)}
+          onClick={() => !f.flags.includes('\\Noselect') && onSelect(f.path)} {...dropProps(f)} title={folderLabel(f)}
           onContextMenu={(e) => { e.preventDefault(); setMenu({ f, x: e.clientX, y: e.clientY }); }}
           role="button" tabIndex={0} onKeyDown={(e) => e.key === 'Enter' && onSelect(f.path)}>
           {kids.length ? (
@@ -76,8 +76,8 @@ export default function Sidebar({ folders, current, onSelect, onCompose, reload,
   };
 
   return (
-    <nav className="sidebar" onClick={() => setMenu(null)}>
-      <button className="compose-btn" onClick={onCompose}><Icon name="pen" /> New mail</button>
+    <nav className={`sidebar ${mode} ${overlay ? 'overlay' : ''}`} style={mode === 'rail' ? undefined : { width }} onClick={() => setMenu(null)} aria-label="Folders">
+      <button className="compose-btn" onClick={onCompose} title="New mail (c)"><Icon name="pen" /> <span>New mail</span></button>
       {(mailboxes.length > 0 || (me?.accounts || []).length > 1) && (
         <label className="mailbox-pick" title="Switch between your accounts and shared mailboxes">
           <Icon name="users" size={14} />
@@ -89,7 +89,7 @@ export default function Sidebar({ folders, current, onSelect, onCompose, reload,
       )}
       <div className="nav-section">
         {specials.map((f) => <Row key={f.path} f={f} />)}
-        <div className={`folder ${current === '@scheduled' ? 'on' : ''}`} style={{ paddingLeft: 10 }} onClick={onScheduled} role="button" tabIndex={0}>
+        <div className={`folder ${current === '@scheduled' ? 'on' : ''}`} style={{ paddingLeft: 10 }} onClick={onScheduled} role="button" tabIndex={0} title="Scheduled">
           <span className="twisty" /><Icon name="clock" /><span className="fname">Scheduled</span>
         </div>
         {snoozedFolder && <Row f={snoozedFolder} />}
@@ -102,7 +102,7 @@ export default function Sidebar({ folders, current, onSelect, onCompose, reload,
       {(tree.get('') || []).length > 0 && <div className="nav-title">Folders</div>}
       <div className="nav-section">
         {(tree.get('') || []).map((f) => <Row key={f.path} f={f} />)}
-        <div className="folder add-row" style={{ paddingLeft: 10 }} onClick={() => createFolder(null)} role="button" tabIndex={0}>
+        <div className="folder add-row" title="New folder" style={{ paddingLeft: 10 }} onClick={() => createFolder(null)} role="button" tabIndex={0}>
           <span className="twisty" /><Icon name="plus" /><span className="fname">New folder</span>
         </div>
       </div>
@@ -118,6 +118,7 @@ export default function Sidebar({ folders, current, onSelect, onCompose, reload,
           ))}
         </div>
       )}
+      {mode === 'full' && onResizeStart && <div className="nav-resize" onPointerDown={onResizeStart} role="separator" aria-orientation="vertical" aria-label="Resize navigation" />}
       {menu && (
         <div className="menu" style={{ position: 'fixed', left: menu.x, top: menu.y }}>
           <button onClick={() => createFolder(menu.f)}><Icon name="plus" /> New subfolder</button>

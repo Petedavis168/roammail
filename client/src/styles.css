@@ -387,7 +387,7 @@ kbd { font: 12px ui-monospace, monospace; background: var(--panel-2); border: 1p
   .topbar-right .icon-btn[title^="Keyboard"], .topbar-right .icon-btn[title="Toggle dark mode"], .topbar-right .icon-btn[title="Settings"] { display: none; }
   .top-btn { margin-right: 0; padding: 6px 8px; }
   .search input::placeholder { color: transparent; }
-  .sidebar { position: fixed; top: 48px; bottom: 0; left: 0; z-index: 30; box-shadow: var(--shadow); }
+  .sidebar { position: fixed; top: 56px; bottom: 0; left: 0; z-index: 30; box-shadow: var(--shadow); }
   .list { width: 100% !important; flex: 1; border-right: 0; }
   .pane-right .list:has(+ .reading:not(.empty-pane)), .pane-bottom .list:has(+ .reading:not(.empty-pane)) { display: none; }
   .reading.empty-pane { display: none; }
@@ -911,3 +911,44 @@ input, select, textarea { border-radius: 8px; }
   .tmsg-body { padding: 0 12px 12px; }
   .search input::placeholder { opacity: 1; }
 }
+
+/* =====================================================================
+   Item 11: collapsible sidebar, responsive layout, touch targets
+   ≥1280 full (user may collapse) · 900–1279 rail (expands over content) · <900 drawer
+   ===================================================================== */
+.sidebar { position: relative; flex: none; transition: width var(--t); }
+.sidebar.full { min-width: 200px; max-width: 320px; }
+.nav-resize { position: absolute; top: 0; right: -3px; width: 6px; height: 100%; cursor: col-resize; z-index: 3; }
+.nav-resize:hover, .nav-resize:active { background: color-mix(in srgb, var(--brand) 25%, transparent); }
+.sidebar.rail { width: 64px; padding: 12px 8px; overflow-x: hidden; }
+.sidebar.rail .compose-btn { width: 48px; height: 48px; padding: 0; margin: 0 0 12px; justify-content: center; border-radius: 14px; }
+.sidebar.rail .compose-btn span, .sidebar.rail .fname, .sidebar.rail .twisty, .sidebar.rail .nav-title,
+.sidebar.rail .mailbox-pick, .sidebar.rail .nav-empty { display: none; }
+.sidebar.rail .nav-title + .nav-section { display: none; }
+.sidebar.rail .folder { position: relative; width: 48px; height: 44px; padding: 0 !important; justify-content: center; gap: 0; }
+.sidebar.rail .folder .count { position: absolute; top: 4px; right: 2px; min-width: 18px; height: 18px; padding: 0 5px; border-radius: 9px; background: var(--brand); color: #fff; font-size: 11px; line-height: 18px; text-align: center; }
+[data-theme='dark'] .sidebar.rail .folder .count { color: #0F1418; }
+.sidebar.rail .folder .count.muted { background: var(--border); color: var(--muted); }
+.sidebar.overlay { position: absolute; top: 0; bottom: 0; left: 0; z-index: 31; box-shadow: var(--shadow); }
+.body { position: relative; }
+.nav-backdrop { position: fixed; inset: 56px 0 0 0; background: rgba(15,20,24,.35); z-index: 29; }
+@media (max-width: 899px) {
+  .sidebar.drawer { position: fixed; top: 56px; bottom: 0; left: 0; z-index: 30; width: min(300px, 86vw) !important; box-shadow: var(--shadow); padding-bottom: 72px; }
+  .nav-resize { display: none; }
+}
+/* Touch: 44 px targets on coarse pointers */
+@media (pointer: coarse) {
+  .icon-btn, .tb, .tmsg-actions .icon-btn { min-width: 44px; min-height: 44px; }
+  .folder { min-height: 44px; }
+  .chip { min-height: 36px; padding: 6px 14px; }
+  .btn { min-height: 44px; }
+  .menu button, .menu .menu-link { min-height: 44px; }
+  .row { min-height: 64px; }
+}
+@media (max-width: 899px) { .topbar { top: 0; } .sidebar.drawer .folder { min-height: 44px; } }
+/* PWA: respect notches / home indicator when installed */
+@supports (padding: env(safe-area-inset-bottom)) {
+  .topbar { padding-top: env(safe-area-inset-top); height: calc(56px + env(safe-area-inset-top)); }
+  @media (max-width: 899px) { .app-rail { padding-bottom: env(safe-area-inset-bottom); height: calc(58px + env(safe-area-inset-bottom)); } .reply-bar { padding-bottom: calc(12px + env(safe-area-inset-bottom)); } }
+}
+.nav-backdrop.clear { background: transparent; z-index: 30; }
