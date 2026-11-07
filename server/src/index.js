@@ -19,6 +19,7 @@ import { calendar } from './calendar.js';
 import { contacts } from './contacts.js';
 import { groups } from './groups.js';
 import { billing, billingWebhook } from './billing.js';
+import { publicRecovery, recovery, processTwoFactorResets } from './recovery.js';
 
 const app = express();
 // Number of reverse proxies in front of the app (Caddy = 1). Wrong values let clients fake their IP.
@@ -61,6 +62,7 @@ app.use(publicAssets);
 app.use(deviceSetup);
 app.use(legalPages);
 app.use('/api', publicSecurity);
+app.use('/api', publicRecovery);
 app.use('/api', publicAccounts);
 app.use('/api', api);
 app.use('/api', accounts);
@@ -74,6 +76,7 @@ app.use('/api', calendar);
 app.use('/api', contacts);
 app.use('/api', groups);
 app.use('/api', billing);
+app.use('/api', recovery);
 app.use('/api', (req, res) => res.status(404).json({ error: 'Not found' }));
 app.use('/api', (err, req, res, _next) => {
   const status = err.status || (err.code === 'LIMIT_FILE_SIZE' ? 413 : err.authenticationFailed ? 401 : 500);
@@ -91,6 +94,7 @@ if (fs.existsSync(dist)) {
 
 startJobs();
 startRetention();
+setInterval(() => processTwoFactorResets().catch((e) => console.error('2fa resets', e)), 10 * 60 * 1000).unref();
 app.listen(config.port, () => {
   console.log(`Mail client on http://localhost:${config.port}  (IMAP ${config.imap.host}:${config.imap.port}, SMTP ${config.smtp.host}:${config.smtp.port})`);
 });

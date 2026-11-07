@@ -119,6 +119,14 @@ CREATE TABLE IF NOT EXISTS friendly_codes (
 CREATE TABLE IF NOT EXISTS billing_events (
   id TEXT PRIMARY KEY, type TEXT, org_id INTEGER, at TEXT NOT NULL DEFAULT (datetime('now'))
 );
+CREATE TABLE IF NOT EXISTS twofa_resets (
+  token_hash TEXT PRIMARY KEY,
+  email TEXT NOT NULL,
+  requested_at INTEGER NOT NULL,
+  execute_after INTEGER NOT NULL,
+  ip TEXT,
+  status TEXT NOT NULL DEFAULT 'pending'    -- pending | canceled | done
+);
 CREATE TABLE IF NOT EXISTS profiles (
   email TEXT PRIMARY KEY,
   name TEXT, title TEXT, department TEXT, phone TEXT, mobile TEXT,
@@ -148,7 +156,9 @@ CREATE TABLE IF NOT EXISTS audit (
 for (const [table, col, def] of [['orgs', 'require_2fa', 'INTEGER NOT NULL DEFAULT 0'], ['orgs', 'allow_external_forward', 'INTEGER NOT NULL DEFAULT 0'], ['signups', 'terms_version', 'TEXT'],
   ['orgs', 'plan', "TEXT NOT NULL DEFAULT 'standard'"], ['orgs', 'billing_interval', 'TEXT'], ['orgs', 'stripe_customer', 'TEXT'],
   ['orgs', 'stripe_subscription', 'TEXT'], ['orgs', 'billing_status', "TEXT NOT NULL DEFAULT 'none'"], ['orgs', 'paid_seats', 'INTEGER NOT NULL DEFAULT 0'],
-  ['orgs', 'canceled_at', 'TEXT']]) {
+  ['orgs', 'canceled_at', 'TEXT'],
+  ['user_security', 'recovery_verified', 'INTEGER NOT NULL DEFAULT 0'], ['user_security', 'recovery_pending', 'TEXT'],
+  ['user_security', 'recovery_code', 'TEXT'], ['user_security', 'recovery_code_exp', 'INTEGER'], ['user_security', 'recovery_code_tries', 'INTEGER NOT NULL DEFAULT 0']]) {
   const cols = db.prepare(`PRAGMA table_info(${table})`).all().map((c) => c.name);
   if (!cols.includes(col)) db.exec(`ALTER TABLE ${table} ADD COLUMN ${col} ${def}`);
 }

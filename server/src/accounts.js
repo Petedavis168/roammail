@@ -14,6 +14,7 @@ import { deliverWelcome } from './welcome.js';
 import { createSetupLink } from './devicesetup.js';
 import { applyDomainSpamDefaults } from './spam.js';
 import { assertNotBreached, topSenders } from './abuse.js';
+import { resetTwoFactor } from './recovery.js';
 import { syncOrgGroups } from './groups.js';
 import { needsPaymentToActivate, seatCheck, shrinkSeats, onPaid, startBillingChecks, orgBilling } from './billing.js';
 
@@ -368,6 +369,10 @@ accounts.patch('/admin/users', wrap(async (req, res) => {
     attr.active = req.body.active ? 1 : 0;
   }
   if (Object.keys(attr).length) await mailcow.editMailbox(email, attr);
+  if (req.body.reset2fa === true) {
+    if (email === req.user.email) throw fail(400, 'Turn your own 2-step verification off in Settings → Security');
+    await resetTwoFactor(email, req.user.email, 'reset by organization admin');
+  }
   const prof = {};
   for (const k of ['name', 'title', 'department', 'phone', 'mobile']) if (req.body[k] !== undefined) prof[k] = req.body[k];
   if (Object.keys(prof).length) saveProfile(email, prof);

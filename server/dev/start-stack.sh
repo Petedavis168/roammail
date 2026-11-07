@@ -15,6 +15,8 @@ DATA="${TMPDIR:-/tmp}/mc-data-$(date +%s)"
 node dev/mock-mailcow.js > "${TMPDIR:-/tmp}/mock.log" 2>&1 &
 node dev/mock-stripe.js > "${TMPDIR:-/tmp}/stripe.log" 2>&1 &
 DATA_DIR="$DATA" node --env-file=dev/test.env --disable-warning=ExperimentalWarning src/index.js > "${TMPDIR:-/tmp}/app.log" 2>&1 &
+# system no-reply mailbox (password reset / verification emails)
+curl -sf -X POST -H "Content-Type: application/json" -d '{"email":"no-reply@free.test","login":"no-reply@free.test","password":"NoReply-Test-Pass-2026"}' "${GREENMAIL_API:-http://127.0.0.1:8080}/api/user" >/dev/null || true
 for _ in $(seq 1 30); do curl -sf localhost:3000/healthz >/dev/null && break; sleep 0.5; done
 echo "stack up; data in $DATA"
 grep WARNING "${TMPDIR:-/tmp}/app.log" || true

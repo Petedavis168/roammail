@@ -72,7 +72,7 @@ export default function Login({ onLogin }) {
       <Card title="Sign in" subtitle="to continue to Roammail" onSubmit={(e) => { e.preventDefault(); if (!f.email.trim()) return setError('Enter an email address'); go('password'); }}
         footer={<>{cfg.enabled && <button type="button" className="g-link" onClick={() => go('name')}>Create account</button>}<button className="g-btn">Next</button></>}>
         <Field label="Email" type="text" inputMode="email" autoComplete="username" autoFocus value={f.email} onChange={set('email')} error={error} hint={!f.email.includes('@') && f.email ? `Signing in as ${fullEmail}` : ''} />
-        <button type="button" className="g-link left" onClick={() => go('forgot')}>Forgot password?</button>
+        <button type="button" className="g-link left" onClick={() => go('forgot-address')}>Forgot email?</button>
         {info && <div className="g-info">{info}</div>}
       </Card>
     </Shell>
@@ -96,6 +96,7 @@ export default function Login({ onLogin }) {
         footer={<><button type="button" className="g-link" onClick={() => go('password')}>Back</button><button className="g-btn" disabled={busy}>Next</button></>}>
         <button type="button" className="g-chip" onClick={() => go('email')}><Icon name="shield" size={14} /> {fullEmail}</button>
         <Field label="Enter code" inputMode="numeric" autoComplete="one-time-code" autoFocus value={f.code} onChange={set('code')} error={error} />
+        <button type="button" className="g-link left" onClick={() => go('lost')}>Lost your phone and backup codes?</button>
       </Card>
     </Shell>
   );
@@ -105,6 +106,26 @@ export default function Login({ onLogin }) {
         onSubmit={(e) => { e.preventDefault(); run(async () => { const r = await api.post('/api/password/forgot', { email: fullEmail }); setInfo(r.message); go('email'); setInfo(r.message); }); }}
         footer={<><button type="button" className="g-link" onClick={() => go('email')}>Back</button><button className="g-btn" disabled={busy}>Send link</button></>}>
         <Field label="Your email" type="text" inputMode="email" autoFocus value={f.email} onChange={set('email')} error={error} />
+      </Card>
+    </Shell>
+  );
+  if (step === 'lost') return (
+    <Shell>
+      <Card title="Lost your phone?" subtitle="We can turn off 2-step verification after a 72-hour safety wait. We'll email you and your recovery address, with a link to cancel if it wasn't you."
+        onSubmit={(e) => { e.preventDefault(); run(async () => { const r = await api.post('/api/recovery/2fa', { ticket }); setInfo(r.message); }); }}
+        footer={<><button type="button" className="g-link" onClick={() => go('code')}>Back</button>{!info && <button className="g-btn" disabled={busy}>Start recovery</button>}</>}>
+        <button type="button" className="g-chip" onClick={() => go('email')}><Icon name="shield" size={14} /> {fullEmail}</button>
+        {error && <div className="g-err"><Icon name="alert" size={14} /> {error}</div>}
+        {info && <div className="g-info">{info}</div>}
+      </Card>
+    </Shell>
+  );
+  if (step === 'forgot-address') return (
+    <Shell>
+      <Card title="Find your email" subtitle="Enter your recovery email. If it's linked to any accounts, we'll send it a list of them."
+        onSubmit={(e) => { e.preventDefault(); run(async () => { const r = await api.post('/api/password/forgot-address', { recoveryEmail: f.recovery }); go('email'); setInfo(r.message); }); }}
+        footer={<><button type="button" className="g-link" onClick={() => go('email')}>Back</button><button className="g-btn" disabled={busy}>Send</button></>}>
+        <Field label="Recovery email" type="email" autoFocus value={f.recovery} onChange={set('recovery')} error={error} />
       </Card>
     </Shell>
   );

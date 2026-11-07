@@ -186,3 +186,76 @@ test('privacy: export as mbox and delete account', async () => {
   assert.equal((await a.get('/api/me')).status, 401);
   assert.equal((await new Client().post('/api/login', { email, password: PW })).status, 401);
 });
+
+// ---------------------------------------------------------------- account recovery (reads the real emails)
+async function waitFor(c, pred, tries = 15) {
+  for (let i = 0; i < tries; i++) {
+    const list = (await c.get('/api/messages?folder=INBOX')).data.messages || [];
+    const m = list.find(pred);
+    if (m) return (await c.get(`/api/message?folder=INBOX&uid=${m.uid}`)).data;
+    await sleep(700);
+  }
+  throw new Error('email never arrived');
+}
+const bodyOf = (m) => `${m.text || ''} ${m.html || ''}`;
+
+test('recovery: verified recovery email, forgot password, forgot address, lost-phone recovery', async () => {
+  const a = new Client(); const email = await signup(a, `ra${run}`);
+  const b = new Client(); const rec = await signup(b, `rb${run}`);   // acts as the outside recovery inbox
+
+  // unverified address can't be used to reset
+  assert.equal((await a.req('PUT', '/api/security/recovery-email', { email: rec, password: 'wrong' })).status, 401);
+  const put = await a.req('PUT', '/api/security/recovery-email', { email: rec, password: PW });
+  assert.equal(put.status, 200, JSON.stringify(put.data)); assert.equal(put.data.sent, true);
+  let s = (await a.get('/api/security')).data;
+  assert.equal(s.recoveryVerified, false); assert.equal(s.recoveryPending, rec);
+
+  const vmail = await waitFor(b, (m) => /verification code/.test(m.subject));
+  const code = vmail.subject.match(/^(\d{6})/)[1];
+  assert.equal((await a.post('/api/security/recovery-email/verify', { code: code === '000000' ? '111111' : '000000' })).status, 400);
+  assert.equal((await a.post('/api/security/recovery-email/verify', { code })).status, 200);
+  s = (await a.get('/api/security')).data;
+  assert.equal(s.recoveryVerified, true); assert.equal(s.recoveryEmail, rec);
+
+  // forgot password → link to the verified address → reset works and signs out other sessions
+  const anon = new Client();
+  assert.equal((await anon.post('/api/password/forgot', { email })).status, 200);
+  const rmail = await waitFor(b, (m) => /reset/i.test(m.subject));
+  const token = bodyOf(rmail).match(/reset=([A-Za-z0-9_-]+)/)[1];
+  const NEW = 'Rk7-pWq3-Yh52-n';
+  assert.equal((await anon.post('/api/password/reset', { token, password: NEW })).status, 200);
+  assert.equal((await anon.post('/api/password/reset', { token, password: NEW })).status, 400, 'token is single-use');
+  assert.equal((await a.get('/api/me')).status, 401, 'old sessions revoked');
+
+  // forgot address: same answer for unknown addresses, list arrives for the real one
+  const unknown = await anon.post('/api/password/forgot-address', { recoveryEmail: `nobody${run}@example.com` });
+  const known = await anon.post('/api/password/forgot-address', { recoveryEmail: rec });
+  assert.deepEqual(unknown.data, known.data);
+  const amail = await waitFor(b, (m) => /addresses/.test(m.subject));
+  assert.ok(bodyOf(amail).includes(email));
+
+  // lost phone: turn on 2FA, then start recovery from the sign-in ticket
+  const a2 = new Client();
+  assert.equal((await a2.post('/api/login', { email, password: NEW })).status, 200);
+  const { secret } = (await a2.post('/api/security/2fa/setup')).data;
+  assert.equal((await a2.post('/api/security/2fa/enable', { code: totpNow(secret) })).status, 200);
+  const a3 = new Client();
+  const t = (await a3.post('/api/login', { email, password: NEW })).data;
+  assert.equal(t.twoFactor, true);
+  assert.equal((await a3.post('/api/recovery/2fa', { ticket: 'forged' })).status, 401);
+  const lost = await a3.post('/api/recovery/2fa', { ticket: t.ticket });
+  assert.equal(lost.status, 200); assert.equal(lost.data.ok, true);
+  assert.ok(lost.data.executeAfter > Date.now() + 71 * 3600e3, 'waits ~72 hours');
+  const cmail = await waitFor(b, (m) => /recovery started/.test(m.subject));
+  const cancel = bodyOf(cmail).match(/\/api\/recovery\/2fa\/cancel\?token=([A-Za-z0-9_-]+)/)[1];
+  const page = await anon.req('GET', `/api/recovery/2fa/cancel?token=${cancel}`, undefined, { raw: true });
+  assert.match(await page.text(), /Recovery canceled/);
+  const a4 = new Client();
+  assert.equal((await a4.post('/api/login', { email, password: NEW })).data.twoFactor, true, '2FA still on after cancel');
+});
+
+test('support tools are super-admin only', async () => {
+  const a = new Client(); await signup(a, `su${run}`);
+  assert.equal((await a.get('/api/super/support/lookup?email=owner@free.test')).status, 403);
+  assert.equal((await a.post('/api/super/support/action', { email: 'owner@free.test', action: 'reset2fa', reason: 'testing it' })).status, 403);
+});

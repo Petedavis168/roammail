@@ -19,6 +19,7 @@ export default function Security({ me }) {
   const [codes, setCodes] = useState(null);
   const [pw, setPw] = useState({ current: '', next: '', confirm: '' });
   const [recovery, setRecovery] = useState('');
+  const [vcode, setVcode] = useState('');
   const [devices, setDevices] = useState([]);
   const load = () => {
     api.get('/api/security/sessions').then(setDevices).catch(() => {});
@@ -28,7 +29,7 @@ export default function Security({ me }) {
   if (!s) return <div className="spinner" />;
 
   const run = async (fn, ok) => { try { const r = await fn(); if (ok) toast(ok); return r; } catch (e) { toast(e.message, { error: true }); } };
-  const score = [s.twoFactor, !!s.recoveryEmail].filter(Boolean).length;
+  const score = [s.twoFactor, !!s.recoveryEmail && s.recoveryVerified].filter(Boolean).length;
 
   return (
     <div className="settings-section">
@@ -66,8 +67,17 @@ export default function Security({ me }) {
       <p className="muted small">If you forget your password, we'll send a reset link here.{!s.resetAvailable && ' (Password reset emails are not enabled on this server yet. Ask your administrator.)'}</p>
       <div className="pick-time">
         <input type="email" placeholder="you@another-provider.com" value={recovery} onChange={(e) => setRecovery(e.target.value)} />
-        <button className="btn" onClick={() => { const pw = prompt('Enter your password to change your recovery email'); if (pw) run(() => api.put('/api/security/recovery-email', { email: recovery, password: pw }), 'Recovery email saved').then(load); }}>Save</button>
+        <button className="btn" onClick={() => { const pw = prompt('Enter your password to change your recovery email'); if (pw) run(() => api.put('/api/security/recovery-email', { email: recovery, password: pw })).then((r) => { if (r) toast(r.message); load(); }); }}>Save</button>
       </div>
+      {s.recoveryEmail && !s.recoveryPending && <p className="small">{s.recoveryVerified ? <><Icon name="check" size={14} /> {s.recoveryEmail} is verified.</> : <>{s.recoveryEmail} is not verified yet, so it can't be used to recover your account. <button className="link" onClick={() => run(() => api.post('/api/security/recovery-email/resend'), 'Code sent').then(load)}>Send a code</button></>}</p>}
+      {(s.recoveryPending || (s.recoveryEmail && !s.recoveryVerified)) && (
+        <div className="pick-time">
+          <span className="small">Enter the 6-digit code we sent to {s.recoveryPending || s.recoveryEmail}:</span>
+          <input inputMode="numeric" maxLength={6} placeholder="123456" value={vcode} onChange={(e) => setVcode(e.target.value)} style={{ width: 110 }} />
+          <button className="btn primary" onClick={() => run(() => api.post('/api/security/recovery-email/verify', { code: vcode }), 'Recovery email verified').then(() => { setVcode(''); load(); })}>Verify</button>
+          <button className="link" onClick={() => run(() => api.post('/api/security/recovery-email/resend'), 'New code sent')}>Resend</button>
+        </div>
+      )}
 
       <h3>Change password</h3>
       <form className="form narrow" onSubmit={async (e) => {

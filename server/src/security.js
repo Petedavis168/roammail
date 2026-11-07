@@ -66,7 +66,7 @@ async function imapLogin(email, password) {
     throw fail(502, `Could not reach mail server (${err.code || err.message})`);
   }
 }
-function systemMailer() {
+export function systemMailer() {
   if (!config.systemMail.user) return null;
   return nodemailer.createTransport({
     host: config.smtp.host, port: config.smtp.port, secure: config.smtp.secure,
@@ -147,7 +147,7 @@ publicSecurity.post('/password/forgot', resetLimiter, wrap(async (req, res) => {
   const email = String(req.body.email || '').trim().toLowerCase();
   // Always answer the same way so nobody can probe which accounts exist
   res.json({ ok: true, message: 'If that account has a recovery email, we\'ve sent a reset link to it.' });
-  const sec = q.get('SELECT recovery_email FROM user_security WHERE email = ?', email);
+  const sec = q.get('SELECT recovery_email FROM user_security WHERE email = ? AND recovery_verified = 1', email);
   const mailer = systemMailer();
   if (!sec?.recovery_email || !mailer) return;
   const token = crypto.randomBytes(24).toString('base64url');
@@ -217,7 +217,7 @@ securityApi.get('/security', wrap(async (req, res) => {
   res.json({
     twoFactor: !!s.totp_enabled,
     backupCodesLeft: JSON.parse(s.backup_codes || '[]').length,
-    recoveryEmail: s.recovery_email || '',
+    recoveryEmail: s.recovery_email || '', recoveryVerified: !!s.recovery_verified, recoveryPending: s.recovery_pending || '',
     resetAvailable: !!config.systemMail.user,
     events: q.all('SELECT ip, ua, ok, reason, at FROM login_events WHERE email = ? ORDER BY id DESC LIMIT 25', req.user.email),
   });
@@ -297,20 +297,4 @@ securityApi.post('/security/signout-all', wrap(async (req, res) => {
   res.json({ ok: true });
 }));
 
-securityApi.put('/security/recovery-email', wrap(async (req, res) => {
-  // Re-authenticate: a stolen session must not be able to plant its own recovery address
-  if (!(await imapLogin(req.user.email, String(req.body.password || '')))) throw fail(401, 'Enter your current password to change the recovery email');
-  const v = String(req.body.email || '').trim().toLowerCase();
-  if (v && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v)) throw fail(400, 'Enter a valid email address');
-  if (v === req.user.email) throw fail(400, 'Use a different address than this account');
-  security(req.user.email);
-  q.run('UPDATE user_security SET recovery_email = ? WHERE email = ?', v || null, req.user.email);
-  audit(req.user.email, null, 'security.recovery_email', { set: !!v, ip: req.ip });
-  res.json({ ok: true });
-}));
-
-export function setRecoveryEmail(email, recovery) {
-  if (!recovery || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(recovery)) return;
-  security(email);
-  q.run('UPDATE user_security SET recovery_email = ? WHERE email = ?', recovery.toLowerCase(), email.toLowerCase());
-}
+export { setRecoveryEmail } from './recovery.js';

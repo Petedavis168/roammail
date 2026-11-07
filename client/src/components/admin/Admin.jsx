@@ -10,6 +10,7 @@ import SpamAdmin from './SpamAdmin.jsx';
 import Groups from './Groups.jsx';
 import Billing, { PlanPicker } from './Billing.jsx';
 import TwoFactorSetup from '../TwoFactorSetup.jsx';
+import Support from './Support.jsx';
 
 const genPassword = () => {
   const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnpqrstuvwxyz23456789';
@@ -82,6 +83,8 @@ function Users({ org, domains }) {
               <button className="btn sm" onClick={() => setEdit(u)}>Edit</button>
               <button className="btn sm" onClick={() => { const p = genPassword(); if (confirm(`Reset password for ${u.email}?`)) update(u.email, { password: p }, 'Password reset').then(() => setCreated({ email: u.email, password: p, reset: true })); }}>
                 <Icon name="key" size={14} /> Reset</button>
+              {u.twoFactor && <button className="btn sm" title="Turn off 2-step verification (lost phone)" onClick={() => { if (confirm(`Turn off 2-step verification for ${u.email}? They'll be signed out and asked to set it up again.`)) update(u.email, { reset2fa: true }, '2-step verification reset'); }}>
+                <Icon name="shield" size={14} /> Reset 2-step</button>}
               <button className="icon-btn" title="Delete user" onClick={() => del(u)}><Icon name="trash" size={16} /></button>
             </span>
           </div>
@@ -429,7 +432,7 @@ export default function Admin({ me, refreshMe, onExit }) {
 
   const tabs = [
     ...(org ? [['users', 'Users', 'users'], ['groups', 'Groups', 'users'], ['signature', 'Signature', 'pen'], ['spam', 'Spam filter', 'junk'], ['orgsecurity', 'Security', 'lock'], ['billing', 'Billing', 'tag'], ['aliases', 'Aliases', 'mail'], ['domains', 'Domains', 'globe'], ['activity', 'Activity', 'refresh']] : []),
-    ...(me.superAdmin ? [['platform', 'Platform (super-admin)', 'shield'], ['new', 'New business', 'plus']] : []),
+    ...(me.superAdmin ? [['platform', 'Platform (super-admin)', 'shield'], ['support', 'Support', 'users'], ['new', 'New business', 'plus']] : []),
   ];
   const current = tabs.some((t) => t[0] === tab) ? tab : tabs[0][0];
 
@@ -447,7 +450,7 @@ export default function Admin({ me, refreshMe, onExit }) {
         <button onClick={onExit}><Icon name="back" /> Back to mail</button>
       </aside>
       <section className="admin-main">
-        <h1>{current === 'platform' ? 'Platform' : current === 'new' ? 'Add a business' : org?.name} <small className="muted">{tabs.find((t) => t[0] === current)?.[1]}</small></h1>
+        <h1>{current === 'platform' ? 'Platform' : current === 'support' ? 'Support' : current === 'new' ? 'Add a business' : org?.name} <small className="muted">{tabs.find((t) => t[0] === current)?.[1]}</small></h1>
         {current === 'users' && org && <Users key={org.id} org={org} domains={org.domains} />}
         {current === 'signature' && org && <SignatureTab key={org.id} org={org} />}
         {current === 'orgsecurity' && org && <OrgSecurity key={org.id} org={org} reload={load} />}
@@ -458,6 +461,7 @@ export default function Admin({ me, refreshMe, onExit }) {
         {current === 'domains' && org && <Domains key={org.id} org={org} reload={load} refreshMe={refreshMe} goUsers={() => setTab('users')} />}
         {current === 'activity' && org && <Activity org={org} />}
         {current === 'platform' && <Platform />}
+        {current === 'support' && <Support />}
         {current === 'new' && <DomainWizard refreshMe={refreshMe} onCreated={load} onDone={() => { load(); setTab('domains'); }} />}
       </section>
     </div>
