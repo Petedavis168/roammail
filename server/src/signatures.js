@@ -149,14 +149,17 @@ const TYPES = { 'image/png': 'png', 'image/jpeg': 'jpg', 'image/gif': 'gif', 'im
 const imgUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 512 * 1024 } });
 
 export const publicAssets = express.Router();
-publicAssets.get('/sig-assets/:file', (req, res) => {
+// Logos live in the database so every app server can serve them (older ones may still be files on disk)
+publicAssets.get('/sig-assets/:file', wrap(async (req, res) => {
   const f = req.params.file;
   if (!/^[a-f0-9]{24}\.(png|jpg|gif|webp)$/.test(f)) return res.status(404).end();
   res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
   res.setHeader('X-Content-Type-Options', 'nosniff');
   res.setHeader('Cross-Origin-Resource-Policy', 'cross-origin'); // recipients' mail apps load this
+  const row = await q.get('SELECT mime, data FROM sig_assets WHERE name = ?', f);
+  if (row) return res.type(row.mime).send(Buffer.from(row.data));
   res.sendFile(path.join(path.resolve(assetDir), f), (err) => err && res.status(404).end());
-});
+}));
 
 // ---------------------------------------------------------------- API
 export const signatures = express.Router();
@@ -174,7 +177,7 @@ signatures.post('/sig-assets', imgUpload.single('image'), wrap(async (req, res) 
   const ok = (b[0] === 0x89 && b[1] === 0x50) || (b[0] === 0xff && b[1] === 0xd8) || b.subarray(0, 3).toString() === 'GIF' || b.subarray(8, 12).toString() === 'WEBP';
   if (!ok) throw fail(400, 'That file is not a valid image');
   const name = `${crypto.randomBytes(12).toString('hex')}.${TYPES[f.mimetype]}`;
-  fs.writeFileSync(path.join(assetDir, name), b);
+  await q.run('INSERT INTO sig_assets(name, mime, data) VALUES(?, ?, ?)', name, f.mimetype, b);
   await audit(req.user.email, null, 'asset.upload', { name, size: b.length });
   res.json({ url: `${baseUrl(req)}/sig-assets/${name}` });
 }));

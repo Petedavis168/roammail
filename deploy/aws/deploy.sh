@@ -31,6 +31,7 @@ done < "$CONFIG"
 get() { echo "${CFG[$1]:-${2:-}}"; }
 
 STACK="$(get STACK_NAME mail-client)"
+LAYOUT="$(get LAYOUT single)"   # single = one server (default) | scale = load balancer + auto-scaling + RDS + Redis
 REGION="$(get AWS_REGION "${AWS_REGION:-${AWS_DEFAULT_REGION:-$(aws configure get region 2>/dev/null || true)}}")"
 [ -n "$REGION" ] || die "Set AWS_REGION in config.env (e.g. us-east-1)"
 export AWS_REGION="$REGION" AWS_DEFAULT_REGION="$REGION"
@@ -60,14 +61,18 @@ case "$CMD" in
   status)
     stack_exists || die "Not deployed yet"
     ok "App:        $(output AppUrl)"
-    ok "Public IP:  $(output PublicIp)"
+    if [ "$LAYOUT" == scale ]; then ok "Outbound IP (allow in mailcow): $(output OutboundIp)"; ok "Dashboard:  $(output DashboardUrl)"
+    else ok "Public IP:  $(output PublicIp)"; fi
     url="$(output AppUrl)"
     if curl -fsS -m 10 "$url/healthz" >/dev/null 2>&1; then ok "Health:     OK"; else warn "Health:     not reachable yet (DNS or certificate may still be propagating)"; fi
     exit 0 ;;
   logs)
     aws logs tail "/${STACK}/app" --follow --since 30m ;;
   shell)
-    aws ssm start-session --target "$(output InstanceId)" ;;
+    if [ "$LAYOUT" == scale ]; then
+      id="$(aws ec2 describe-instances --filters "Name=tag:aws:cloudformation:stack-name,Values=$STACK" "Name=instance-state-name,Values=running" --query 'Reservations[0].Instances[0].InstanceId' --output text)"
+      aws ssm start-session --target "$id"
+    else aws ssm start-session --target "$(output InstanceId)"; fi ;;
   destroy)
     stack_exists || die "Nothing to delete"
     warn "This deletes the server, its IP address and alarms. A final snapshot of the data disk is kept."
@@ -103,7 +108,7 @@ ENVFILE="$(mktemp)"; trap 'rm -f "$ENVFILE" "${TARBALL:-}"' EXIT
   echo "DATA_DIR=/data"
   echo "METRICS_NAMESPACE=$STACK"
   for k in "${!CFG[@]}"; do
-    case "$k" in STACK_NAME|AWS_REGION|INSTANCE_TYPE|HOSTED_ZONE_ID|ALERT_EMAIL|ALERT_PHONE|SMTP_HOST|MAILCOW_API_URL|SESSION_SECRET|PUBLIC_URL) continue ;; esac
+    case "$k" in STACK_NAME|LAYOUT|MIN_SERVERS|MAX_SERVERS|DB_INSTANCE_CLASS|DB_MULTI_AZ|CACHE_NODE_TYPE|AWS_REGION|INSTANCE_TYPE|HOSTED_ZONE_ID|ALERT_EMAIL|ALERT_PHONE|SMTP_HOST|MAILCOW_API_URL|SESSION_SECRET|PUBLIC_URL) continue ;; esac
     echo "$k=${CFG[$k]}"
   done
 } > "$ENVFILE"
@@ -129,7 +134,34 @@ aws s3 cp "$TARBALL" "s3://$BUCKET/releases/$VERSION.tar.gz" --only-show-errors
 aws s3 cp "$TARBALL" "s3://$BUCKET/releases/latest.tar.gz" --only-show-errors
 ok "Uploaded release $VERSION ($(du -h "$TARBALL" | cut -f1))"
 
-# ---------------------------------------------------------------- infrastructure
+# ---------------------------------------------------------------- infrastructure: scale-out layout
+if [ "$LAYOUT" == scale ]; then
+  [ -n "$(get HOSTED_ZONE_ID)" ] || die "LAYOUT=scale needs HOSTED_ZONE_ID (Route 53) for the certificate and load balancer DNS"
+  EXISTED=false; stack_exists && EXISTED=true
+  say "$([ "$EXISTED" == true ] && echo "Rolling out release $VERSION one server at a time (no downtime)…" || echo "Creating load balancer, firewall, database, Redis and servers (about 25 minutes)…")"
+  aws cloudformation deploy --stack-name "$STACK" --template-file "$HERE/scale.yaml" \
+    --capabilities CAPABILITY_IAM --no-fail-on-empty-changeset --tags app=roammail --parameter-overrides \
+    "AppDomain=$APP_DOMAIN" "HostedZoneId=$(get HOSTED_ZONE_ID)" "InstanceType=$(get INSTANCE_TYPE t3.small)" \
+    "MinServers=$(get MIN_SERVERS 2)" "MaxServers=$(get MAX_SERVERS 8)" "DbInstanceClass=$(get DB_INSTANCE_CLASS db.t4g.small)" \
+    "DbMultiAz=$(get DB_MULTI_AZ true)" "CacheNodeType=$(get CACHE_NODE_TYPE cache.t4g.micro)" \
+    "AlertEmail=$(get ALERT_EMAIL)" "AlertPhone=$(get ALERT_PHONE)" "EnableRoute53Dns=$(get ROUTE53_ENABLED false)" \
+    "ArtifactBucket=$BUCKET" "EnvParameterName=$PARAM" "ReleaseKey=releases/$VERSION.tar.gz" || {
+      aws cloudformation describe-stack-events --stack-name "$STACK" --max-items 15 \
+        --query "StackEvents[?contains(ResourceStatus,'FAILED')].[LogicalResourceId,ResourceStatusReason]" --output text
+      die "AWS deployment failed (reasons above). Nothing was switched over; the previous release keeps running."
+    }
+  echo
+  ok "Done!  https://$APP_DOMAIN"
+  ok "Dashboard: $(output DashboardUrl)"
+  if [ "$EXISTED" == false ]; then
+    say "Finish setup (one time): in mailcow admin, add $(output OutboundIp) to"
+    echo "  - System → Configuration → Access → API (allowed IPs)"
+    echo "  - System → Configuration → Options → Fail2ban (whitelist)"
+  fi
+  exit 0
+fi
+
+# ---------------------------------------------------------------- infrastructure: single server
 EXISTED=false; stack_exists && EXISTED=true
 PARAMS=(
   "AppDomain=$APP_DOMAIN"

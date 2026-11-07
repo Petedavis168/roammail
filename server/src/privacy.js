@@ -3,7 +3,7 @@ import express from 'express';
 import fs from 'node:fs';
 import path from 'node:path';
 import { config } from './config.js';
-import { q, audit } from './db.js';
+import { q, audit, setting } from './db.js';
 import { requireAuth, revokeSessions, clearSession } from './session.js';
 import { makeClient, closeClient } from './imap.js';
 import { mailcow } from './mailcow.js';
@@ -85,12 +85,14 @@ function body(doc) {
   }
 }
 
-legalPages.get('/legal/:doc', (req, res) => {
+legalPages.get('/legal/:doc', async (req, res) => {
   const doc = req.params.doc;
   if (!DOCS[doc]) return res.status(404).send('Not found');
-  // Operators can replace any page with their own lawyer-reviewed HTML: DATA_DIR/legal/<doc>.html
+  // Operators can replace any page with their own lawyer-reviewed HTML: DATA_DIR/legal/<doc>.html,
+  // or (several servers) the setting legal:<doc> in the database
   const custom = path.join(config.dataDir, 'legal', `${doc}.html`);
-  const content = fs.existsSync(custom) ? fs.readFileSync(custom, 'utf8') : body(doc);
+  const stored = await setting(`legal:${doc}`, null);
+  const content = stored || (fs.existsSync(custom) ? fs.readFileSync(custom, 'utf8') : body(doc));
   res.setHeader('Cache-Control', 'public, max-age=3600');
   res.send(`<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>${esc(DOCS[doc])} · ${esc(config.appName)}</title><link rel="icon" href="/favicon.png">

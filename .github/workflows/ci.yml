@@ -96,8 +96,8 @@ jobs:
       - name: Lint CloudFormation and deploy script
         run: |
           pip install cfn-lint shellcheck-py
-          cfn-lint deploy/aws/template.yaml
-          shellcheck -S warning deploy/aws/deploy.sh deploy/aws/user-data.sh
+          cfn-lint deploy/aws/template.yaml deploy/aws/scale.yaml deploy/mailcow/backup-bucket.yaml
+          shellcheck -S warning deploy/aws/deploy.sh deploy/aws/user-data.sh deploy/mailcow/*.sh
 
   # Same app on PostgreSQL + Redis with two servers side by side (the load-balanced setup)
   scale:

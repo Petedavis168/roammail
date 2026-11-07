@@ -147,6 +147,7 @@ CREATE TABLE IF NOT EXISTS audit (
   actor TEXT, org_id INTEGER, action TEXT, detail TEXT,
   at TEXT NOT NULL DEFAULT (datetime('now'))
 );
+CREATE TABLE IF NOT EXISTS sig_assets (name TEXT PRIMARY KEY, mime TEXT NOT NULL, data BLOB NOT NULL, created_at TEXT NOT NULL DEFAULT (datetime('now')));
 CREATE TABLE IF NOT EXISTS send_counts (email TEXT NOT NULL, day TEXT NOT NULL, count INTEGER NOT NULL DEFAULT 0, PRIMARY KEY (email, day));
 `;
 
@@ -191,6 +192,7 @@ export function toPgSchema(sql) {
   return sql
     .replace(/INTEGER PRIMARY KEY AUTOINCREMENT/g, 'BIGSERIAL PRIMARY KEY')
     .replace(/\bINTEGER\b/g, 'BIGINT') // millisecond timestamps don't fit in 32 bits
+    .replace(/\bBLOB\b/g, 'BYTEA')
     .replace(/\(datetime\('now'\)\)/g, `(${PG_NOW})`);
 }
 /** Translate a SQLite-syntax query to PostgreSQL. */

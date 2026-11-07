@@ -270,3 +270,17 @@ test('ops: public status page, metrics hidden from the internet, notices are sup
   const a = new Client(); await signup(a, `op${run}`);
   assert.equal((await a.req('PUT', '/api/super/status-notice', { title: 'hacked' })).status, 403);
 });
+
+test('signature logos: real images only, served from any server', async () => {
+  const a = new Client(); await signup(a, `lg${run}`);
+  const png = Buffer.from('89504e470d0a1a0a0000000d49484452000000010000000108060000001f15c4890000000d4944415478da63f8ffff3f0005fe02fea7d6a4a50000000049454e44ae426082', 'hex');
+  const fd = new FormData(); fd.append('image', new Blob([png], { type: 'image/png' }), 'logo.png');
+  const r = await a.req('POST', '/api/sig-assets', fd);
+  assert.equal(r.status, 200, JSON.stringify(r.data));
+  const path = new URL(r.data.url).pathname;
+  const img = await new Client().req('GET', path, undefined, { raw: true, csrf: false });
+  assert.equal(img.status, 200); assert.equal(img.headers.get('content-type'), 'image/png');
+  assert.deepEqual(Buffer.from(await img.arrayBuffer()), png);
+  const bad = new FormData(); bad.append('image', new Blob([Buffer.from('<script>alert(1)</script>')], { type: 'image/png' }), 'x.png');
+  assert.equal((await a.req('POST', '/api/sig-assets', bad)).status, 400);
+});
