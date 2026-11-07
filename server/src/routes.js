@@ -5,7 +5,8 @@ import MailComposer from 'nodemailer/lib/mail-composer/index.js';
 import addressparser from 'nodemailer/lib/addressparser/index.js';
 import { simpleParser } from 'mailparser';
 import { config } from './config.js';
-import { clearSession, requireAuth } from './session.js';
+import { clearSession, requireAuth, onRevoke } from './session.js';
+import { createCache } from './cache.js';
 import { getClient, closeClient, withMailbox, specialFolder, makeClient } from './imap.js';
 import { parseQuery } from './search.js';
 import { rolesFor, q, twoFactorPolicy } from './db.js';
@@ -59,20 +60,31 @@ function summarize(msg, snippet = '') {
   };
 }
 
+// Previews never change for a given message (UID + UIDVALIDITY), so we remember them and only download
+// the first few KB of messages we haven't seen before. Keyed per person, so nothing is shared between users.
+const previewCache = createCache({ ttlMs: 6 * 3600e3, max: Number(process.env.PREVIEW_CACHE_ENTRIES || 50000) });
 async function fetchSummaries(client, range, opts = {}) {
   const out = [];
-  for await (const msg of client.fetch(range, {
-    uid: true, flags: true, envelope: true, internalDate: true, size: true, bodyStructure: true,
-    source: { start: 0, maxLength: 6000 },
-  }, opts)) {
-    let snippet = '';
-    try {
-      const parsed = await simpleParser(msg.source, { skipImageLinks: true, skipTextToHtml: true });
-      snippet = snippetFrom(parsed.text || '');
-    } catch { /* partial source may not parse */ }
-    out.push(summarize(msg, snippet));
+  const owner = client.options?.auth?.user;
+  if (!owner) throw new Error('mail connection has no owner');
+  const mbox = `${owner}|${client.mailbox?.path}|${client.mailbox?.uidValidity}`;
+  const missing = [];
+  for await (const msg of client.fetch(range, { uid: true, flags: true, envelope: true, internalDate: true, size: true, bodyStructure: true }, opts)) {
+    const snippet = previewCache.peek(`${mbox}|${msg.uid}`);
+    if (snippet === undefined) missing.push(msg.uid);
+    out.push({ msg, snippet });
   }
-  return out.sort((a, b) => b.uid - a.uid);
+  if (missing.length) {
+    for await (const msg of client.fetch(missing.join(','), { uid: true, source: { start: 0, maxLength: 6000 } }, { uid: true })) {
+      let snippet = '';
+      try {
+        const parsed = await simpleParser(msg.source, { skipImageLinks: true, skipTextToHtml: true });
+        snippet = snippetFrom(parsed.text || '');
+      } catch { /* partial source may not parse */ }
+      previewCache.set(`${mbox}|${msg.uid}`, snippet);
+    }
+  }
+  return out.map(({ msg, snippet }) => summarize(msg, snippet ?? previewCache.peek(`${mbox}|${msg.uid}`) ?? '')).sort((a, b) => b.uid - a.uid);
 }
 
 function uidList(uids) {
@@ -522,47 +534,71 @@ api.get('/contacts', wrap(async (req, res) => {
 }));
 
 // ---------- live updates (Server-Sent Events + IMAP IDLE) ----------
-const liveStreams = new Map(); // email -> open count (each holds an IMAP connection)
-api.get('/events', wrap(async (req, res) => {
-  const open = liveStreams.get(req.user.email) || 0;
-  if (open >= 5) return res.status(429).json({ error: 'Too many open tabs' });
-  liveStreams.set(req.user.email, open + 1);
-  req.on('close', () => liveStreams.set(req.user.email, Math.max(0, (liveStreams.get(req.user.email) || 1) - 1)));
-  res.writeHead(200, { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache', Connection: 'keep-alive', 'X-Accel-Buffering': 'no' });
-  const send = (event, data) => res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
-  const client = makeClient(req.user); // dedicated connection that sits in IDLE
-  let closed = false;
-  const ping = setInterval(() => res.write(': ping\n\n'), 25000);
-  const cleanup = () => {
-    if (closed) return;
-    closed = true;
-    clearInterval(ping);
-    client.logout().catch(() => {});
-  };
-  req.on('close', cleanup);
-  try {
-    await client.connect();
-    await client.mailboxOpen('INBOX', { readOnly: true });
-    client.on('exists', async (d) => {
-      if (d.count <= d.prevCount) return send('changed', { folder: 'INBOX' });
+// One IDLE connection per person, shared by all their open tabs and devices (was one per tab).
+const hubs = new Map(); // email -> { subs: Set<fn>, client, ready: Promise }
+export const liveStats = () => ({ users: hubs.size, streams: [...hubs.values()].reduce((n, h) => n + h.subs.size, 0) });
+
+function openHub(user) {
+  const hub = { subs: new Set(), client: makeClient(user), closed: false };
+  const emit = (event, data) => { for (const fn of hub.subs) fn(event, data); };
+  const c = hub.client;
+  hub.close = () => { if (hub.closed) return; hub.closed = true; hubs.delete(user.email); c.logout().catch(() => {}); };
+  hub.ready = (async () => {
+    await c.connect();
+    await c.mailboxOpen('INBOX', { readOnly: true });
+    c.on('exists', async (d) => {
+      if (d.count <= d.prevCount) return emit('changed', { folder: 'INBOX' });
       try {
         const msgs = [];
-        for await (const m of client.fetch(`${d.prevCount + 1}:${d.count}`, { envelope: true, uid: true })) {
+        for await (const m of c.fetch(`${d.prevCount + 1}:${d.count}`, { envelope: true, uid: true })) {
           msgs.push({ uid: m.uid, subject: m.envelope.subject, from: addr(m.envelope.from) });
         }
-        send('new', { folder: 'INBOX', messages: msgs });
-      } catch { send('changed', { folder: 'INBOX' }); }
+        emit('new', { folder: 'INBOX', messages: msgs });
+      } catch { emit('changed', { folder: 'INBOX' }); }
     });
-    client.on('expunge', () => send('changed', { folder: 'INBOX' }));
-    client.on('flags', () => send('changed', { folder: 'INBOX' }));
-    client.on('close', () => { if (!closed) { send('reconnect', {}); res.end(); cleanup(); } });
+    c.on('expunge', () => emit('changed', { folder: 'INBOX' }));
+    c.on('flags', () => emit('changed', { folder: 'INBOX' }));
+    c.on('close', () => { if (!hub.closed) { emit('reconnect', {}); hub.close(); } });
+    c.idle().catch(() => {}); // start listening now instead of after imapflow's 15s auto-idle delay
+  })();
+  hub.ready.catch(() => hub.close());
+  hubs.set(user.email, hub);
+  return hub;
+}
+
+api.get('/events', wrap(async (req, res) => {
+  let hub = hubs.get(req.user.email);
+  if (hub && hub.subs.size >= 10) return res.status(429).json({ error: 'Too many open tabs' });
+  if (!hub || hub.closed) hub = openHub(req.user);
+  res.writeHead(200, { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache', Connection: 'keep-alive', 'X-Accel-Buffering': 'no' });
+  const send = (event, data) => {
+    res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
+    if (event === 'reconnect') res.end();
+  };
+  hub.subs.add(send);
+  const ping = setInterval(() => res.write(': ping\n\n'), 25000);
+  req.on('close', () => {
+    clearInterval(ping);
+    hub.subs.delete(send);
+    if (!hub.subs.size) hub.close();
+  });
+  try {
+    await hub.ready;
     send('ready', {});
   } catch (e) {
     send('error', { error: e.message });
     res.end();
-    cleanup();
   }
 }));
+
+/** Close a person's live connection (e.g. after a password change or sign-out everywhere). */
+export function closeLive(email) {
+  const hub = hubs.get(email);
+  if (!hub) return;
+  for (const fn of hub.subs) fn('reconnect', {}); // remaining tabs reconnect and must authenticate again
+  hub.close();
+}
+onRevoke(closeLive);
 
 
 // ---------- scheduled send ----------

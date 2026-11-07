@@ -8,7 +8,7 @@ pkill -f dev/mock-mailcow.js || true
 pkill -f dev/mock-stripe.js || true
 pkill -f src/index.js || true
 sleep 0.5
-if [ -n "${1:-}" ] && ! pgrep -f radicale >/dev/null; then
+if [ -n "${1:-}" ] && ! pgrep -f "python3 -m radicale" >/dev/null; then
   python3 -m radicale --config "$1" >/dev/null 2>&1 &
 fi
 DATA="${TMPDIR:-/tmp}/mc-data-$(date +%s)"

@@ -135,3 +135,40 @@ export const mailcow = {
   editAlias: (id, attr) => call('POST', 'edit/alias', { items: [String(id)], attr }),
   deleteAlias: (id) => call('POST', 'delete/alias', [String(id)]),
 };
+
+// ---------------------------------------------------------------- caching for hot read paths
+// Mailbox lists and the quarantine are read on almost every admin/spam page; mailcow returns the whole
+// list each time, so we keep a short-lived shared copy and drop it whenever we change something.
+import { createCache } from './cache.js';
+export const mailcowCache = createCache({ ttlMs: Number(process.env.MAILCOW_CACHE_SECONDS || 60) * 1000, max: 2000 });
+const raw = { ...mailcow };
+const domainOf = (e) => String(e || '').split('@')[1]?.toLowerCase() || '';
+const dropBoxes = (domain) => { mailcowCache.delete(`boxes:${domain}`); };
+
+mailcow.listMailboxes = (domain) => mailcowCache.get(`boxes:${String(domain).toLowerCase()}`, () => raw.listMailboxes(domain));
+mailcow.addMailbox = async (o) => { try { return await raw.addMailbox(o); } finally { dropBoxes(String(o.domain).toLowerCase()); } };
+mailcow.editMailbox = async (email, attr) => { try { return await raw.editMailbox(email, attr); } finally { for (const e of [].concat(email)) dropBoxes(domainOf(e)); } };
+mailcow.deleteMailbox = async (email) => { try { return await raw.deleteMailbox(email); } finally { dropBoxes(domainOf(email)); } };
+
+// Quarantine: one fetch shared by everyone, indexed by recipient and by recipient domain.
+async function quarantineIndex() {
+  return mailcowCache.get('quarantine', async () => {
+    const items = (await raw.listQuarantine()).sort((a, b) => b.created - a.created);
+    const byRcpt = new Map(); const byDomain = new Map(); const byId = new Map();
+    for (const x of items) {
+      if (!byRcpt.has(x.rcpt)) byRcpt.set(x.rcpt, []);
+      byRcpt.get(x.rcpt).push(x);
+      const d = domainOf(x.rcpt);
+      if (!byDomain.has(d)) byDomain.set(d, []);
+      byDomain.get(d).push(x);
+      byId.set(String(x.id), x);
+    }
+    return { items, byRcpt, byDomain, byId };
+  }, Number(process.env.QUARANTINE_CACHE_SECONDS || 60) * 1000);
+}
+mailcow.listQuarantine = async () => (await quarantineIndex()).items;
+mailcow.quarantineFor = async (rcpt) => (await quarantineIndex()).byRcpt.get(String(rcpt).toLowerCase()) || [];
+mailcow.quarantineForDomain = async (domain) => (await quarantineIndex()).byDomain.get(String(domain).toLowerCase()) || [];
+mailcow.quarantineById = async (id) => (await quarantineIndex()).byId.get(String(id)) || null;
+mailcow.quarantineAction = async (ids, action) => { try { return await raw.quarantineAction(ids, action); } finally { mailcowCache.delete('quarantine'); } };
+mailcow.deleteQuarantine = async (ids) => { try { return await raw.deleteQuarantine(ids); } finally { mailcowCache.delete('quarantine'); } };

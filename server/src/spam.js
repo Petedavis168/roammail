@@ -83,13 +83,13 @@ spam.get('/spam', wrap(async (req, res) => {
   const [score, policy, quarantine] = await Promise.all([
     mailcow.getSpamScore(e).catch(() => null),
     mailcow.getMailboxPolicy(e).catch(() => ({ wl: [], bl: [] })),
-    mailcow.listQuarantine().catch(() => []),
+    mailcow.quarantineFor(e).catch(() => []),
   ]);
   res.json({
     preset: userSetting(e, 'spamPreset', 'standard'), presets: PRESETS, score,
     safe: splitPolicy(policy.wl, e), blocked: splitPolicy(policy.bl, e),
     notifications: userSetting(e, 'quarantineNotify', 'daily'),
-    quarantineCount: quarantine.filter((x) => x.rcpt === e).length,
+    quarantineCount: quarantine.length,
   });
 }));
 
@@ -151,14 +151,12 @@ spam.post('/block', wrap(async (req, res) => {
 
 // ---------------------------------------------------------------- quarantine
 spam.get('/quarantine', wrap(async (req, res) => {
-  const all = await mailcow.listQuarantine();
   const scope = req.query.domain ? adminDomain(req, req.query.domain).domain : null;
-  const items = all.filter((x) => (scope ? x.rcpt.endsWith(`@${scope}`) : x.rcpt === req.user.email)).sort((a, b) => b.created - a.created);
-  res.json(items);
+  res.json(scope ? await mailcow.quarantineForDomain(scope) : await mailcow.quarantineFor(req.user.email));
 }));
 
 spam.get('/quarantine/:id', wrap(async (req, res) => {
-  const item = (await mailcow.listQuarantine()).find((x) => String(x.id) === String(req.params.id));
+  const item = await mailcow.quarantineById(req.params.id);
   if (!item || !canSeeQuarantineItem(req.user, item)) throw fail(404, 'Not found');
   const d = await mailcow.quarantineItem(item.id);
   const raw = d?.msg || '';
@@ -181,8 +179,7 @@ spam.get('/quarantine/:id', wrap(async (req, res) => {
 }));
 
 spam.post('/quarantine/release', wrap(async (req, res) => {
-  const all = await mailcow.listQuarantine();
-  const items = [].concat(req.body.ids || []).map((id) => all.find((x) => String(x.id) === String(id))).filter((x) => x && canSeeQuarantineItem(req.user, x));
+  const items = (await Promise.all([].concat(req.body.ids || []).slice(0, 500).map((id) => mailcow.quarantineById(id)))).filter((x) => x && canSeeQuarantineItem(req.user, x));
   if (!items.length) throw fail(404, 'Nothing to release');
   if (items.some((x) => x.virus) && !req.body.confirmVirus) throw fail(400, 'One of these messages contains a virus. Confirm to release it anyway.');
   if (req.body.notSpam) await mailcow.quarantineAction(items.map((x) => x.id), 'learnham').catch(() => {});
@@ -197,8 +194,7 @@ spam.post('/quarantine/release', wrap(async (req, res) => {
 }));
 
 spam.post('/quarantine/delete', wrap(async (req, res) => {
-  const all = await mailcow.listQuarantine();
-  const items = [].concat(req.body.ids || []).map((id) => all.find((x) => String(x.id) === String(id))).filter((x) => x && canSeeQuarantineItem(req.user, x));
+  const items = (await Promise.all([].concat(req.body.ids || []).slice(0, 500).map((id) => mailcow.quarantineById(id)))).filter((x) => x && canSeeQuarantineItem(req.user, x));
   if (!items.length) throw fail(404, 'Nothing to delete');
   await mailcow.deleteQuarantine(items.map((x) => x.id));
   res.json({ ok: true, deleted: items.length });

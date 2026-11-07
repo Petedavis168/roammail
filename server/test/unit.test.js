@@ -129,3 +129,18 @@ test('sessions: key rotation keeps old sealed data readable', async () => {
     assert.equal(sealedWithOldKey(seal({ x: 1 })), false);
   } finally { config.sealKey = prevKey; config.sealKeyPrevious = null; }
 });
+
+test('cache: single-flight, TTL, bound, failures not cached', async () => {
+  const { createCache } = await import('../src/cache.js');
+  const c = createCache({ ttlMs: 50, max: 3 });
+  let calls = 0;
+  const load = async () => { calls++; await new Promise((r) => setTimeout(r, 10)); return calls; };
+  const [a, b] = await Promise.all([c.get('k', load), c.get('k', load)]);
+  assert.equal(a, 1); assert.equal(b, 1); assert.equal(calls, 1);
+  await new Promise((r) => setTimeout(r, 60));
+  assert.equal(await c.get('k', load), 2);
+  await assert.rejects(c.get('bad', async () => { throw new Error('x'); }));
+  assert.equal(c.peek('bad'), undefined);
+  for (const k of ['a', 'b', 'c', 'd']) c.set(k, k);
+  assert.ok(c.size <= 3);
+});

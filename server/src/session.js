@@ -54,8 +54,12 @@ export function clearSession(req, res) {
 }
 
 /** Sign a user out everywhere (optionally keeping one session). */
+const revokeHooks = [];
+/** Run fn(email) whenever someone's sessions are revoked (used to drop their live connections). */
+export function onRevoke(fn) { revokeHooks.push(fn); }
 export function revokeSessions(email, exceptId) {
   q.run('DELETE FROM sessions WHERE email = ? AND id != ?', email.toLowerCase(), exceptId || '');
+  for (const fn of revokeHooks) { try { fn(email.toLowerCase()); } catch { /* ignore */ } }
 }
 
 /** Store a new password in the current session (after a password change). */
