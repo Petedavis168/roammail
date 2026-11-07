@@ -249,9 +249,13 @@ export function toPg(sql) {
 async function pgDriver(url) {
   const { default: pg } = await import('pg');
   pg.types.setTypeParser(20, (v) => (v === null ? null : Number(v))); // BIGINT -> number (all our values < 2^53)
-  const local = /@(localhost|127\.0\.0\.1)[:/]/.test(url) || /sslmode=disable/.test(url);
+  // 'pg-env': connection details come from PGHOST/PGPORT/PGUSER/PGPASSWORD/PGDATABASE (as on ECS with RDS secrets)
+  const fromEnv = url === 'pg-env';
+  const host = fromEnv ? process.env.PGHOST : url;
+  const local = /(^|@)(localhost|127\.0\.0\.1)([:/]|$)/.test(host) || /sslmode=disable/.test(url) || (fromEnv && process.env.PGSSLMODE === 'disable');
   const pool = new pg.Pool({
-    connectionString: url, max: Number(process.env.DATABASE_POOL || 20), idleTimeoutMillis: 30000,
+    ...(fromEnv ? {} : { connectionString: url }), max: Number(process.env.DATABASE_POOL || 20), idleTimeoutMillis: 30000,
+    // Verified TLS; the image trusts Amazon RDS's certificate authority (NODE_EXTRA_CA_CERTS)
     ssl: local ? false : { rejectUnauthorized: process.env.DATABASE_SSL_INSECURE !== 'true' },
   });
   // Only one app server at a time creates or upgrades the tables

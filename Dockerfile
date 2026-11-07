@@ -9,7 +9,9 @@ RUN npm run build
 # ---- runtime ----
 FROM public.ecr.aws/docker/library/node:22-alpine
 RUN apk add --no-cache openssl
-ENV NODE_ENV=production DATA_DIR=/data PORT=3000
+# Trust Amazon RDS's certificate authority so the database connection is verified TLS
+ADD --chmod=644 https://truststore.pki.rds.amazonaws.com/global/global-bundle.pem /etc/ssl/rds-global-bundle.pem
+ENV NODE_ENV=production DATA_DIR=/data PORT=3000 NODE_EXTRA_CA_CERTS=/etc/ssl/rds-global-bundle.pem
 WORKDIR /app
 COPY server/package*.json server/
 RUN cd server && npm ci --omit=dev && npm cache clean --force

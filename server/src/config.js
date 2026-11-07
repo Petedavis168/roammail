@@ -11,12 +11,12 @@ export const config = {
   // Your mailcow server. Users only type email + password; the host is fixed here
   // so the app can't be abused to connect to arbitrary servers.
   imap: {
-    host: env.IMAP_HOST || 'mail.example.com',
+    host: env.IMAP_HOST || env.MAILCOW_HOST || 'mail.example.com',
     port: Number(env.IMAP_PORT || 993),
     secure: (env.IMAP_SECURE ?? 'true') === 'true',
   },
   smtp: {
-    host: env.SMTP_HOST || env.IMAP_HOST || 'mail.example.com',
+    host: env.SMTP_HOST || env.IMAP_HOST || env.MAILCOW_HOST || 'mail.example.com',
     port: Number(env.SMTP_PORT || 587),
     secure: (env.SMTP_SECURE ?? 'false') === 'true', // true for 465, false for 587 (STARTTLS)
   },
@@ -32,11 +32,15 @@ export const config = {
 
 // ---------- accounts / admin ----------
 config.dataDir = env.DATA_DIR || './data';
-config.databaseUrl = env.DATABASE_URL || ''; // postgres://user:pass@host:5432/db  (empty = SQLite in DATA_DIR)
+// postgres://user:pass@host:5432/db, or the standard PGHOST/PGUSER/PGPASSWORD/PGDATABASE variables (ECS/RDS secrets);
+// neither set = SQLite in DATA_DIR (one server)
+config.databaseUrl = env.DATABASE_URL || (env.PGHOST ? 'pg-env' : '');
 config.redisUrl = env.REDIS_URL || '';
 // Hosts (production): ROOT_DOMAIN=roammail.net serves the landing page, sign-up and the app (roammail.net/{id}/inbox);
 // login.<root> serves sign-in and recovery; www.<root> and app.<root> redirect to the root. Empty = one host (dev).
-config.rootDomain = (env.ROOT_DOMAIN || '').toLowerCase();
+// ROOT_DOMAIN, or derived from APP_URL=https://app.roammail.net (app. redirects to the root)
+const appUrlHost = (() => { try { return new URL(env.APP_URL || '').hostname; } catch { return ''; } })();
+config.rootDomain = (env.ROOT_DOMAIN || appUrlHost.replace(/^(app|www)\./, '')).toLowerCase();
 config.loginHost = (env.LOGIN_HOST || (config.rootDomain ? `login.${config.rootDomain}` : '')).toLowerCase();
 config.cookieDomain = env.COOKIE_DOMAIN || (config.rootDomain ? `.${config.rootDomain}` : '');
 // web = serve people only, worker = background work only (scheduled sends, billing, clean-up), all = both (one server)
@@ -54,7 +58,7 @@ config.mailHostname = env.MAIL_HOSTNAME || config.imap.host;
 // Free sign-ups get addresses on this domain (must already exist in mailcow).
 config.signup = {
   enabled: (env.SIGNUP_ENABLED ?? 'true') === 'true',
-  domain: (env.SIGNUP_DOMAIN || '').toLowerCase(),
+  domain: (env.SIGNUP_DOMAIN || config.rootDomain || '').toLowerCase(), // free addresses: @roammail.net
   quotaMb: Number(env.SIGNUP_QUOTA_MB || 2048),
   perIpPerDay: Number(env.SIGNUP_PER_IP_PER_DAY || 3),
 };
@@ -74,7 +78,7 @@ config.signup.rateLimit = env.SIGNUP_SEND_LIMIT || '100/h'; // max outgoing mail
 config.turnstile = { siteKey: env.TURNSTILE_SITE_KEY || '', secret: env.TURNSTILE_SECRET || '' };
 // System mailbox used to send password-reset emails (create e.g. no-reply@yourdomain.com in mailcow)
 config.systemMail = { user: env.SYSTEM_MAIL_USER || '', pass: env.SYSTEM_MAIL_PASS || '', from: env.SYSTEM_MAIL_FROM || env.SYSTEM_MAIL_USER || '' };
-config.publicUrl = (env.PUBLIC_URL || (env.APP_DOMAIN ? `https://${env.APP_DOMAIN}` : '')).replace(/\/$/, '');
+config.publicUrl = (env.PUBLIC_URL || (config.rootDomain ? `https://${config.rootDomain}` : env.APP_DOMAIN ? `https://${env.APP_DOMAIN}` : '')).replace(/\/$/, '');
 config.appName = env.APP_NAME || 'Roammail';
 // ---------- device setup ----------
 // Include calendar & contacts (mailcow SOGo CalDAV/CardDAV) in iPhone/Mac profiles
