@@ -58,19 +58,19 @@ export function spamInfo(headerValue) {
   return { score: Number(m[1]), threshold: Number(m[2]), reasons };
 }
 
-function canSeeQuarantineItem(user, item) {
+async function canSeeQuarantineItem(user, item) {
   if (item.rcpt === user.email) return true;
-  const r = rolesFor(user.email);
+  const r = await rolesFor(user.email);
   if (r.superAdmin) return true;
-  const org = q.get("SELECT org_id FROM domains WHERE domain = ? AND status = 'active'", item.rcpt.split('@')[1]);
+  const org = await q.get("SELECT org_id FROM domains WHERE domain = ? AND status = 'active'", item.rcpt.split('@')[1]);
   return !!org && r.orgs.some((o) => o.id === org.org_id && o.role === 'admin');
 }
-function adminDomain(req, domain) {
-  const d = q.get("SELECT d.domain, d.org_id FROM domains d WHERE d.domain = ? AND d.status = 'active'", String(domain || '').toLowerCase());
+async function adminDomain(req, domain) {
+  const d = await q.get("SELECT d.domain, d.org_id FROM domains d WHERE d.domain = ? AND d.status = 'active'", String(domain || '').toLowerCase());
   if (!d) throw fail(404, 'Domain not found');
-  const r = rolesFor(req.user.email);
+  const r = await rolesFor(req.user.email);
   if (!r.superAdmin && !r.orgs.some((o) => o.id === d.org_id && o.role === 'admin')) throw fail(403, 'You are not an admin of this domain');
-  if (config.requireAdmin2fa && !twoFactorPolicy(req.user.email).enabled) throw fail(403, 'Admins must turn on 2-step verification first (Settings → Security).');
+  if (config.requireAdmin2fa && !(await twoFactorPolicy(req.user.email)).enabled) throw fail(403, 'Admins must turn on 2-step verification first (Settings → Security).');
   return d;
 }
 
@@ -86,9 +86,9 @@ spam.get('/spam', wrap(async (req, res) => {
     mailcow.quarantineFor(e).catch(() => []),
   ]);
   res.json({
-    preset: userSetting(e, 'spamPreset', 'standard'), presets: PRESETS, score,
+    preset: await userSetting(e, 'spamPreset', 'standard'), presets: PRESETS, score,
     safe: splitPolicy(policy.wl, e), blocked: splitPolicy(policy.bl, e),
-    notifications: userSetting(e, 'quarantineNotify', 'daily'),
+    notifications: await userSetting(e, 'quarantineNotify', 'daily'),
     quarantineCount: quarantine.length,
   });
 }));
@@ -102,8 +102,8 @@ spam.put('/spam/sensitivity', wrap(async (req, res) => {
     value = `${low},${high}`; preset = 'custom';
   }
   await mailcow.setSpamScore(req.user.email, value);
-  setUserSetting(req.user.email, 'spamPreset', preset);
-  audit(req.user.email, null, 'spam.sensitivity', { preset, value });
+  await setUserSetting(req.user.email, 'spamPreset', preset);
+  await audit(req.user.email, null, 'spam.sensitivity', { preset, value });
   res.json({ ok: true, preset, score: await mailcow.getSpamScore(req.user.email).catch(() => null) });
 }));
 
@@ -117,7 +117,7 @@ spam.post('/spam/senders', wrap(async (req, res) => {
   const clash = other.find((r) => r.value === value && String(r.object).toLowerCase() === req.user.email);
   if (clash) await mailcow.deleteMailboxPolicy(clash.prefid);
   if (!(kind === 'bl' ? pol.bl : pol.wl).some((r) => r.value === value)) await mailcow.addMailboxPolicy(req.user.email, kind, value);
-  audit(req.user.email, null, kind === 'bl' ? 'spam.block' : 'spam.trust', { value });
+  await audit(req.user.email, null, kind === 'bl' ? 'spam.block' : 'spam.trust', { value });
   res.json({ ok: true, value });
 }));
 
@@ -134,7 +134,7 @@ spam.put('/spam/notifications', wrap(async (req, res) => {
   const f = ['hourly', 'daily', 'weekly', 'never'].includes(req.body.frequency) ? req.body.frequency : 'daily';
   await mailcow.setQuarantineNotification(req.user.email, f);
   await mailcow.setQuarantineCategory(req.user.email, 'reject').catch(() => {});
-  setUserSetting(req.user.email, 'quarantineNotify', f);
+  await setUserSetting(req.user.email, 'quarantineNotify', f);
   res.json({ ok: true, frequency: f });
 }));
 
@@ -145,19 +145,19 @@ spam.post('/block', wrap(async (req, res) => {
   const trusted = pol.wl.find((r) => r.value === value && String(r.object).toLowerCase() === req.user.email);
   if (trusted) await mailcow.deleteMailboxPolicy(trusted.prefid);
   if (!pol.bl.some((r) => r.value === value)) await mailcow.addMailboxPolicy(req.user.email, 'bl', value);
-  audit(req.user.email, null, 'spam.block', { value });
+  await audit(req.user.email, null, 'spam.block', { value });
   res.json({ ok: true });
 }));
 
 // ---------------------------------------------------------------- quarantine
 spam.get('/quarantine', wrap(async (req, res) => {
-  const scope = req.query.domain ? adminDomain(req, req.query.domain).domain : null;
+  const scope = req.query.domain ? (await adminDomain(req, req.query.domain)).domain : null;
   res.json(scope ? await mailcow.quarantineForDomain(scope) : await mailcow.quarantineFor(req.user.email));
 }));
 
 spam.get('/quarantine/:id', wrap(async (req, res) => {
   const item = await mailcow.quarantineById(req.params.id);
-  if (!item || !canSeeQuarantineItem(req.user, item)) throw fail(404, 'Not found');
+  if (!item || !await canSeeQuarantineItem(req.user, item)) throw fail(404, 'Not found');
   const d = await mailcow.quarantineItem(item.id);
   const raw = d?.msg || '';
   let parsed = {};
@@ -179,7 +179,9 @@ spam.get('/quarantine/:id', wrap(async (req, res) => {
 }));
 
 spam.post('/quarantine/release', wrap(async (req, res) => {
-  const items = (await Promise.all([].concat(req.body.ids || []).slice(0, 500).map((id) => mailcow.quarantineById(id)))).filter((x) => x && canSeeQuarantineItem(req.user, x));
+  const found = await Promise.all([].concat(req.body.ids || []).slice(0, 500).map((id) => mailcow.quarantineById(id)));
+  const items = [];
+  for (const x of found) if (x && await canSeeQuarantineItem(req.user, x)) items.push(x);
   if (!items.length) throw fail(404, 'Nothing to release');
   if (items.some((x) => x.virus) && !req.body.confirmVirus) throw fail(400, 'One of these messages contains a virus. Confirm to release it anyway.');
   if (req.body.notSpam) await mailcow.quarantineAction(items.map((x) => x.id), 'learnham').catch(() => {});
@@ -189,12 +191,14 @@ spam.post('/quarantine/release', wrap(async (req, res) => {
       await mailcow.addMailboxPolicy(req.user.email, 'wl', x.sender.toLowerCase()).catch(() => {});
     }
   }
-  audit(req.user.email, null, 'quarantine.release', { count: items.length, notSpam: !!req.body.notSpam });
+  await audit(req.user.email, null, 'quarantine.release', { count: items.length, notSpam: !!req.body.notSpam });
   res.json({ ok: true, released: items.length });
 }));
 
 spam.post('/quarantine/delete', wrap(async (req, res) => {
-  const items = (await Promise.all([].concat(req.body.ids || []).slice(0, 500).map((id) => mailcow.quarantineById(id)))).filter((x) => x && canSeeQuarantineItem(req.user, x));
+  const found = await Promise.all([].concat(req.body.ids || []).slice(0, 500).map((id) => mailcow.quarantineById(id)));
+  const items = [];
+  for (const x of found) if (x && await canSeeQuarantineItem(req.user, x)) items.push(x);
   if (!items.length) throw fail(404, 'Nothing to delete');
   await mailcow.deleteQuarantine(items.map((x) => x.id));
   res.json({ ok: true, deleted: items.length });
@@ -202,25 +206,25 @@ spam.post('/quarantine/delete', wrap(async (req, res) => {
 
 // ---------------------------------------------------------------- business admin: domain-wide spam policy
 spam.get('/admin/spam', wrap(async (req, res) => {
-  const d = adminDomain(req, req.query.domain);
+  const d = await adminDomain(req, req.query.domain);
   const pol = await mailcow.getDomainPolicy(d.domain);
   res.json({
     safe: pol.wl.map((r) => ({ id: Number(r.prefid), value: r.value })), blocked: pol.bl.map((r) => ({ id: Number(r.prefid), value: r.value })),
-    preset: q.get("SELECT value FROM settings WHERE key = ?", `spamPreset:${d.domain}`) ? JSON.parse(q.get("SELECT value FROM settings WHERE key = ?", `spamPreset:${d.domain}`).value) : 'standard',
+    preset: await q.get("SELECT value FROM settings WHERE key = ?", `spamPreset:${d.domain}`) ? JSON.parse((await q.get("SELECT value FROM settings WHERE key = ?", `spamPreset:${d.domain}`)).value) : 'standard',
     presets: PRESETS,
   });
 }));
 
 spam.post('/admin/spam/senders', wrap(async (req, res) => {
-  const d = adminDomain(req, req.body.domain);
+  const d = await adminDomain(req, req.body.domain);
   const value = cleanSender(req.body.value);
   await mailcow.addDomainPolicy(d.domain, req.body.list === 'blocked' ? 'bl' : 'wl', value);
-  audit(req.user.email, d.org_id, req.body.list === 'blocked' ? 'spam.domain_block' : 'spam.domain_trust', { domain: d.domain, value });
+  await audit(req.user.email, d.org_id, req.body.list === 'blocked' ? 'spam.domain_block' : 'spam.domain_trust', { domain: d.domain, value });
   res.json({ ok: true });
 }));
 
 spam.delete('/admin/spam/senders', wrap(async (req, res) => {
-  const d = adminDomain(req, req.query.domain);
+  const d = await adminDomain(req, req.query.domain);
   const pol = await mailcow.getDomainPolicy(d.domain);
   const row = [...pol.wl, ...pol.bl].find((r) => String(r.prefid) === String(req.query.id) && String(r.object).toLowerCase() === d.domain);
   if (!row) throw fail(404, 'Not found');
@@ -230,25 +234,25 @@ spam.delete('/admin/spam/senders', wrap(async (req, res) => {
 
 // Apply a sensitivity + digest setting to every user on the domain (new users get it too)
 spam.post('/admin/spam/apply', wrap(async (req, res) => {
-  const d = adminDomain(req, req.body.domain);
+  const d = await adminDomain(req, req.body.domain);
   const preset = PRESETS[req.body.preset] ? req.body.preset : 'standard';
   const users = (await mailcow.listMailboxes(d.domain)).map((m) => m.email);
   if (users.length) {
     await mailcow.setSpamScore(users, PRESETS[preset].score);
     if (req.body.notifications) await mailcow.setQuarantineNotification(users, req.body.notifications).catch(() => {});
   }
-  for (const u of users) setUserSetting(u, 'spamPreset', preset);
-  q.run('INSERT INTO settings(key, value) VALUES(?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value', `spamPreset:${d.domain}`, JSON.stringify(preset));
-  if (req.body.notifications) q.run('INSERT INTO settings(key, value) VALUES(?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value', `quarantineNotify:${d.domain}`, JSON.stringify(req.body.notifications));
-  audit(req.user.email, d.org_id, 'spam.apply_all', { domain: d.domain, preset, users: users.length });
+  for (const u of users) await setUserSetting(u, 'spamPreset', preset);
+  await q.run('INSERT INTO settings(key, value) VALUES(?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value', `spamPreset:${d.domain}`, JSON.stringify(preset));
+  if (req.body.notifications) await q.run('INSERT INTO settings(key, value) VALUES(?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value', `quarantineNotify:${d.domain}`, JSON.stringify(req.body.notifications));
+  await audit(req.user.email, d.org_id, 'spam.apply_all', { domain: d.domain, preset, users: users.length });
   res.json({ ok: true, users: users.length });
 }));
 
 /** New mailboxes inherit the domain's spam settings. */
 export async function applyDomainSpamDefaults(email) {
   const domain = email.split('@')[1];
-  const get = (k) => { const r = q.get('SELECT value FROM settings WHERE key = ?', `${k}:${domain}`); return r ? JSON.parse(r.value) : null; };
-  const preset = get('spamPreset'); const notify = get('quarantineNotify');
-  if (preset && preset !== 'standard') { await mailcow.setSpamScore(email, PRESETS[preset].score).catch(() => {}); setUserSetting(email, 'spamPreset', preset); }
+  const get = async (k) => { const r = await q.get('SELECT value FROM settings WHERE key = ?', `${k}:${domain}`); return r ? JSON.parse(r.value) : null; };
+  const preset = await get('spamPreset'); const notify = await get('quarantineNotify');
+  if (preset && preset !== 'standard') { await mailcow.setSpamScore(email, PRESETS[preset].score).catch(() => {}); await setUserSetting(email, 'spamPreset', preset); }
   if (notify) await mailcow.setQuarantineNotification(email, notify).catch(() => {});
 }

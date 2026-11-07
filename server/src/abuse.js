@@ -1,3 +1,4 @@
+import { counter } from './shared.js';
 import { count } from './ops.js';
 // Abuse protection helpers: send quotas, SSRF-safe hosts, breached-password check, login throttling.
 import crypto from 'node:crypto';
@@ -7,35 +8,34 @@ import { config } from './config.js';
 import { q } from './db.js';
 
 const fail = (status, message) => Object.assign(new Error(message), { status });
-q.run(`CREATE TABLE IF NOT EXISTS send_counts (email TEXT NOT NULL, day TEXT NOT NULL, count INTEGER NOT NULL DEFAULT 0, PRIMARY KEY (email, day))`);
 
-export function accountKind(email) {
+export async function accountKind(email) {
   const e = email.toLowerCase();
-  const org = q.get("SELECT org_id FROM domains WHERE domain = ? AND status = 'active'", e.split('@')[1]);
+  const org = await q.get("SELECT org_id FROM domains WHERE domain = ? AND status = 'active'", e.split('@')[1]);
   if (org) return { business: true, orgId: org.org_id };
-  const s = q.get('SELECT created_at FROM signups WHERE email = ?', e);
+  const s = await q.get('SELECT created_at FROM signups WHERE email = ?', e);
   const ageH = s ? (Date.now() - Date.parse(`${s.created_at.replace(' ', 'T')}Z`)) / 3600e3 : 1e9;
   return { business: false, newAccount: ageH < 48 };
 }
 
 /** Check and count a webmail send. Throws 429 when over the daily quota or recipient limit. */
-export function checkSendQuota(email, recipientCount) {
-  const k = accountKind(email);
+export async function checkSendQuota(email, recipientCount) {
+  const k = await accountKind(email);
   const maxRcpt = k.business ? config.limits.businessRecipientsPerMessage : config.limits.freeRecipientsPerMessage;
   if (recipientCount > maxRcpt) throw fail(400, `You can send to at most ${maxRcpt} people per message${k.business ? '' : ' on a free account'}.`);
   const perDay = k.business ? config.limits.businessPerDay : k.newAccount ? config.limits.newAccountPerDay : config.limits.freePerDay;
   const day = new Date().toISOString().slice(0, 10);
-  const row = q.get('SELECT count FROM send_counts WHERE email = ? AND day = ?', email, day);
+  const row = await q.get('SELECT count FROM send_counts WHERE email = ? AND day = ?', email, day);
   if ((row?.count || 0) + 1 > perDay) {
     throw fail(429, k.newAccount ? `New accounts can send ${perDay} messages a day for the first 48 hours. This protects everyone from spammers.`
       : `You've reached today's limit of ${perDay} messages. It resets at midnight UTC.`);
   }
-  q.run('INSERT INTO send_counts(email, day, count) VALUES(?, ?, 1) ON CONFLICT(email, day) DO UPDATE SET count = count + 1', email, day);
-  q.run("DELETE FROM send_counts WHERE day < date('now', '-30 days')");
+  await q.run('INSERT INTO send_counts(email, day, count) VALUES(?, ?, 1) ON CONFLICT(email, day) DO UPDATE SET count = send_counts.count + 1', email, day);
+  await q.run("DELETE FROM send_counts WHERE day < date('now', '-30 days')");
 }
 
-export function topSenders() {
-  return q.all("SELECT email, count FROM send_counts WHERE day = date('now') ORDER BY count DESC LIMIT 20");
+export async function topSenders() {
+  return await q.all("SELECT email, count FROM send_counts WHERE day = date('now') ORDER BY count DESC LIMIT 20");
 }
 
 // ---------------------------------------------------------------- SSRF guard
@@ -101,33 +101,22 @@ export async function assertNotBreached(password, email) {
 }
 
 // ---------------------------------------------------------------- login throttling
-// Per (account + IP): 10 failures → 15 min pause for that IP only, so attackers can't lock real users out.
-// Per account from many IPs: 50 failures in 15 min → account paused (distributed attack).
-const fails = new Map();
+// Per (account + IP): 10 failures -> 15 min pause for that IP only, so attackers can't lock real users out.
+// Per account from many IPs: 50 failures in 15 min -> account paused (distributed attack).
+// Counters live in Redis when several servers run, so the limits hold across all of them.
 const WINDOW = 15 * 60 * 1000;
-function bucket(key) {
-  const now = Date.now();
-  let b = fails.get(key);
-  if (!b || now - b.start > WINDOW) { b = { start: now, n: 0, lockedUntil: b?.lockedUntil || 0 }; fails.set(key, b); }
-  return b;
+export async function loginBlocked(email, ip) {
+  const [a, b] = await Promise.all([counter.get(`lock:${email}|${ip}`), counter.get(`lock:${email}`)]);
+  const until = Math.max(a, b);
+  return until > Date.now() ? Math.ceil((until - Date.now()) / 60000) : 0;
 }
-setInterval(() => { const now = Date.now(); for (const [k, b] of fails) if (now - b.start > WINDOW && b.lockedUntil < now) fails.delete(k); }, 60000).unref();
-
-export function loginBlocked(email, ip) {
-  const now = Date.now();
-  const pair = fails.get(`${email}|${ip}`); const acct = fails.get(email);
-  const until = Math.max(pair?.lockedUntil || 0, acct?.lockedUntil || 0);
-  return until > now ? Math.ceil((until - now) / 60000) : 0;
-}
-export function loginFailed(email, ip) {
+export async function loginFailed(email, ip) {
   count('logins_failed');
-  const pair = bucket(`${email}|${ip}`); const acct = bucket(email);
-  pair.n++; acct.n++;
-  if (pair.n === 10) { pair.lockedUntil = Date.now() + WINDOW; console.warn(`SECURITY_LOCKOUT ip=${ip} account=${email}`); }
-  if (acct.n === 50) { acct.lockedUntil = Date.now() + WINDOW; console.warn(`SECURITY_LOCKOUT account=${email} distributed`); }
-  if (pair.n > 10) pair.lockedUntil = Date.now() + WINDOW;
+  const [pair, acct] = await Promise.all([counter.hit(`fail:${email}|${ip}`, WINDOW), counter.hit(`fail:${email}`, WINDOW)]);
+  if (pair >= 10) { await counter.set(`lock:${email}|${ip}`, Date.now() + WINDOW, WINDOW); if (pair === 10) console.warn(`SECURITY_LOCKOUT ip=${ip} account=${email}`); }
+  if (acct === 50) { await counter.set(`lock:${email}`, Date.now() + WINDOW, WINDOW); console.warn(`SECURITY_LOCKOUT account=${email} distributed`); }
 }
-export function loginSucceeded(email, ip) { count('logins_ok'); fails.delete(`${email}|${ip}`); }
+export async function loginSucceeded(email, ip) { count('logins_ok'); await counter.del(`fail:${email}|${ip}`); }
 
 /** Display names can't contain addresses or brackets (stops "CEO <boss@bank.com>"-style spoofing). */
 export function cleanDisplayName(n) {

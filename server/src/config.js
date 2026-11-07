@@ -32,6 +32,11 @@ export const config = {
 
 // ---------- accounts / admin ----------
 config.dataDir = env.DATA_DIR || './data';
+config.databaseUrl = env.DATABASE_URL || ''; // postgres://user:pass@host:5432/db  (empty = SQLite in DATA_DIR)
+config.redisUrl = env.REDIS_URL || '';
+// web = serve people only, worker = background work only (scheduled sends, billing, clean-up), all = both (one server)
+config.role = ['web', 'worker', 'all'].includes(env.ROLE) ? env.ROLE : 'all';
+config.runsBackground = config.role !== 'web';       // redis://host:6379  (empty = in-memory, one server only)
 config.mailcow = {
   // Base URL of the mailcow admin UI, e.g. https://mail.example.com
   url: (env.MAILCOW_API_URL || `https://${config.imap.host}`).replace(/\/$/, ''),

@@ -1,14 +1,11 @@
+// App database. One server: SQLite file in DATA_DIR (default). Several servers: PostgreSQL (set DATABASE_URL).
+// Everything goes through the async q.get / q.all / q.run / q.insert helpers, written in SQLite syntax;
+// for PostgreSQL the few differences (placeholders, dates, upserts, auto ids) are translated automatically.
 import fs from 'node:fs';
 import path from 'node:path';
-import { DatabaseSync } from 'node:sqlite';
 import { config } from './config.js';
 
-fs.mkdirSync(config.dataDir, { recursive: true });
-export const db = new DatabaseSync(path.join(config.dataDir, 'app.db'));
-db.exec(`
-PRAGMA journal_mode = WAL;
-PRAGMA foreign_keys = ON;
-CREATE TABLE IF NOT EXISTS orgs (
+const SCHEMA = `CREATE TABLE IF NOT EXISTS orgs (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   name TEXT NOT NULL,
   owner_email TEXT NOT NULL,
@@ -150,68 +147,159 @@ CREATE TABLE IF NOT EXISTS audit (
   actor TEXT, org_id INTEGER, action TEXT, detail TEXT,
   at TEXT NOT NULL DEFAULT (datetime('now'))
 );
-`);
+CREATE TABLE IF NOT EXISTS send_counts (email TEXT NOT NULL, day TEXT NOT NULL, count INTEGER NOT NULL DEFAULT 0, PRIMARY KEY (email, day));
+`;
 
-// Migrations for columns added after first release
-for (const [table, col, def] of [['orgs', 'require_2fa', 'INTEGER NOT NULL DEFAULT 0'], ['orgs', 'allow_external_forward', 'INTEGER NOT NULL DEFAULT 0'], ['signups', 'terms_version', 'TEXT'],
+// Columns added after the first release: [table, column, definition]
+const MIGRATIONS = [['orgs', 'require_2fa', 'INTEGER NOT NULL DEFAULT 0'], ['orgs', 'allow_external_forward', 'INTEGER NOT NULL DEFAULT 0'], ['signups', 'terms_version', 'TEXT'],
   ['orgs', 'plan', "TEXT NOT NULL DEFAULT 'standard'"], ['orgs', 'billing_interval', 'TEXT'], ['orgs', 'stripe_customer', 'TEXT'],
   ['orgs', 'stripe_subscription', 'TEXT'], ['orgs', 'billing_status', "TEXT NOT NULL DEFAULT 'none'"], ['orgs', 'paid_seats', 'INTEGER NOT NULL DEFAULT 0'],
   ['orgs', 'canceled_at', 'TEXT'],
   ['user_security', 'recovery_verified', 'INTEGER NOT NULL DEFAULT 0'], ['user_security', 'recovery_pending', 'TEXT'],
-  ['user_security', 'recovery_code', 'TEXT'], ['user_security', 'recovery_code_exp', 'INTEGER'], ['user_security', 'recovery_code_tries', 'INTEGER NOT NULL DEFAULT 0']]) {
-  const cols = db.prepare(`PRAGMA table_info(${table})`).all().map((c) => c.name);
-  if (!cols.includes(col)) db.exec(`ALTER TABLE ${table} ADD COLUMN ${col} ${def}`);
+  ['user_security', 'recovery_code', 'TEXT'], ['user_security', 'recovery_code_exp', 'INTEGER'], ['user_security', 'recovery_code_tries', 'INTEGER NOT NULL DEFAULT 0'], ['jobs', 'claimed_at', 'INTEGER']];
+
+// ---------------------------------------------------------------- SQLite
+async function sqliteDriver() {
+  const { DatabaseSync } = await import('node:sqlite');
+  fs.mkdirSync(config.dataDir, { recursive: true });
+  const db = new DatabaseSync(path.join(config.dataDir, 'app.db'));
+  db.exec('PRAGMA journal_mode = WAL; PRAGMA foreign_keys = ON; PRAGMA busy_timeout = 5000;');
+  db.exec(SCHEMA);
+  for (const [table, col, def] of MIGRATIONS) {
+    const cols = db.prepare(`PRAGMA table_info(${table})`).all().map((c) => c.name);
+    if (!cols.includes(col)) db.exec(`ALTER TABLE ${table} ADD COLUMN ${col} ${def}`);
+  }
+  const stmts = new Map();
+  const prep = (sql) => {
+    let st = stmts.get(sql);
+    if (!st) { st = db.prepare(sql); if (stmts.size < 500) stmts.set(sql, st); }
+    return st;
+  };
+  return {
+    dialect: 'sqlite', raw: db,
+    get: async (sql, a) => prep(sql).get(...a),
+    all: async (sql, a) => prep(sql).all(...a),
+    run: async (sql, a) => ({ changes: Number(prep(sql).run(...a).changes) }),
+    insert: async (sql, a) => Number(prep(sql).run(...a).lastInsertRowid),
+    close: async () => db.close(),
+  };
 }
 
+// ---------------------------------------------------------------- PostgreSQL
+const PG_NOW = "to_char(timezone('UTC', now()), 'YYYY-MM-DD HH24:MI:SS')";
+export function toPgSchema(sql) {
+  return sql
+    .replace(/INTEGER PRIMARY KEY AUTOINCREMENT/g, 'BIGSERIAL PRIMARY KEY')
+    .replace(/\bINTEGER\b/g, 'BIGINT') // millisecond timestamps don't fit in 32 bits
+    .replace(/\(datetime\('now'\)\)/g, `(${PG_NOW})`);
+}
+/** Translate a SQLite-syntax query to PostgreSQL. */
+export function toPg(sql) {
+  let s = sql
+    .replace(/datetime\('now'\s*,\s*(\?|'[^']*')\)/g, (m, x) => `to_char(timezone('UTC', now()) + CAST(${x} AS interval), 'YYYY-MM-DD HH24:MI:SS')`)
+    .replace(/datetime\('now'\)/g, PG_NOW)
+    .replace(/date\('now'\s*,\s*(\?|'[^']*')\)/g, (m, x) => `to_char(timezone('UTC', now()) + CAST(${x} AS interval), 'YYYY-MM-DD')`)
+    .replace(/date\('now'\)/g, "to_char(timezone('UTC', now()), 'YYYY-MM-DD')");
+  if (/^\s*INSERT OR IGNORE INTO/i.test(s)) s = `${s.replace(/INSERT OR IGNORE INTO/i, 'INSERT INTO')} ON CONFLICT DO NOTHING`;
+  // ? placeholders -> $1, $2 ... (skipping anything inside quotes)
+  let n = 0; let out = ''; let quote = null;
+  for (const ch of s) {
+    if (quote) { if (ch === quote) quote = null; out += ch; continue; }
+    if (ch === "'" || ch === '"') { quote = ch; out += ch; continue; }
+    out += ch === '?' ? `$${++n}` : ch;
+  }
+  return out;
+}
+
+async function pgDriver(url) {
+  const { default: pg } = await import('pg');
+  pg.types.setTypeParser(20, (v) => (v === null ? null : Number(v))); // BIGINT -> number (all our values < 2^53)
+  const local = /@(localhost|127\.0\.0\.1)[:/]/.test(url) || /sslmode=disable/.test(url);
+  const pool = new pg.Pool({
+    connectionString: url, max: Number(process.env.DATABASE_POOL || 20), idleTimeoutMillis: 30000,
+    ssl: local ? false : { rejectUnauthorized: process.env.DATABASE_SSL_INSECURE !== 'true' },
+  });
+  // Only one app server at a time creates or upgrades the tables
+  const c = await pool.connect();
+  try {
+    await c.query('SELECT pg_advisory_lock(727001)');
+    await c.query(toPgSchema(SCHEMA));
+    for (const [table, col, def] of MIGRATIONS) await c.query(`ALTER TABLE ${table} ADD COLUMN IF NOT EXISTS ${col} ${toPgSchema(def)}`);
+    await c.query('SELECT pg_advisory_unlock(727001)');
+  } finally { c.release(); }
+  const cache = new Map();
+  const tr = (sql) => {
+    let t = cache.get(sql);
+    if (!t) { t = toPg(sql); if (cache.size < 1000) cache.set(sql, t); }
+    return t;
+  };
+  return {
+    dialect: 'postgres', raw: pool,
+    get: async (sql, a) => (await pool.query(tr(sql), a)).rows[0],
+    all: async (sql, a) => (await pool.query(tr(sql), a)).rows,
+    run: async (sql, a) => ({ changes: (await pool.query(tr(sql), a)).rowCount }),
+    insert: async (sql, a) => Number((await pool.query(`${tr(sql)} RETURNING id`, a)).rows[0]?.id),
+    close: () => pool.end(),
+  };
+}
+
+const driver = config.databaseUrl ? await pgDriver(config.databaseUrl) : await sqliteDriver();
+/** The underlying SQLite database (null on PostgreSQL). */
+export const db = driver.dialect === 'sqlite' ? driver.raw : null;
+export const dialect = driver.dialect;
+const args = (a) => a.map((v) => (v === undefined ? null : typeof v === 'boolean' ? Number(v) : v));
 export const q = {
-  get: (sql, ...a) => db.prepare(sql).get(...a),
-  all: (sql, ...a) => db.prepare(sql).all(...a),
-  run: (sql, ...a) => db.prepare(sql).run(...a),
+  get: (sql, ...a) => driver.get(sql, args(a)),
+  all: (sql, ...a) => driver.all(sql, args(a)),
+  run: (sql, ...a) => driver.run(sql, args(a)),
+  /** INSERT into a table with an auto id; returns the new id. */
+  insert: (sql, ...a) => driver.insert(sql, args(a)),
+  close: () => driver.close(),
 };
 
-export function setting(key, fallback) {
-  const r = q.get('SELECT value FROM settings WHERE key = ?', key);
+export async function setting(key, fallback) {
+  const r = await q.get('SELECT value FROM settings WHERE key = ?', key);
   return r ? JSON.parse(r.value) : fallback;
 }
-export function setSetting(key, value) {
-  q.run('INSERT INTO settings(key, value) VALUES(?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value', key, JSON.stringify(value));
+export async function setSetting(key, value) {
+  await q.run('INSERT INTO settings(key, value) VALUES(?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value', key, JSON.stringify(value));
 }
-export function audit(actor, orgId, action, detail = {}) {
-  q.run('INSERT INTO audit(actor, org_id, action, detail) VALUES(?, ?, ?, ?)', actor, orgId ?? null, action, JSON.stringify(detail));
+export async function audit(actor, orgId, action, detail = {}) {
+  await q.run('INSERT INTO audit(actor, org_id, action, detail) VALUES(?, ?, ?, ?)', actor, orgId ?? null, action, JSON.stringify(detail));
 }
 
 /** Roles for an email: super admin + org memberships. */
-export function rolesFor(email) {
+export async function rolesFor(email) {
   const e = email.toLowerCase();
-  const orgs = q.all(`SELECT o.id, o.name, o.suspended, m.role FROM members m JOIN orgs o ON o.id = m.org_id WHERE m.email = ?`, e);
+  const orgs = await q.all(`SELECT o.id, o.name, o.suspended, m.role FROM members m JOIN orgs o ON o.id = m.org_id WHERE m.email = ?`, e);
   const domain = e.split('@')[1];
-  const own = q.get('SELECT org_id FROM domains WHERE domain = ?', domain);
+  const own = await q.get('SELECT org_id FROM domains WHERE domain = ?', domain);
   if (own && !orgs.some((o) => o.id === own.org_id)) {
-    const o = q.get('SELECT id, name, suspended FROM orgs WHERE id = ?', own.org_id);
+    const o = await q.get('SELECT id, name, suspended FROM orgs WHERE id = ?', own.org_id);
     if (o) orgs.push({ ...o, role: 'user' });
   }
   return { superAdmin: config.superAdmins.includes(e), orgs };
 }
 
-export function userSetting(email, key, fallback) {
-  const r = q.get('SELECT value FROM user_settings WHERE email = ? AND key = ?', email.toLowerCase(), key);
+export async function userSetting(email, key, fallback) {
+  const r = await q.get('SELECT value FROM user_settings WHERE email = ? AND key = ?', email.toLowerCase(), key);
   return r ? JSON.parse(r.value) : fallback;
 }
-export function setUserSetting(email, key, value) {
-  q.run('INSERT INTO user_settings(email, key, value) VALUES(?, ?, ?) ON CONFLICT(email, key) DO UPDATE SET value = excluded.value',
+export async function setUserSetting(email, key, value) {
+  await q.run('INSERT INTO user_settings(email, key, value) VALUES(?, ?, ?) ON CONFLICT(email, key) DO UPDATE SET value = excluded.value',
     email.toLowerCase(), key, JSON.stringify(value));
 }
-export function security(email) {
+export async function security(email) {
   const e = email.toLowerCase();
-  let r = q.get('SELECT * FROM user_security WHERE email = ?', e);
-  if (!r) { q.run('INSERT OR IGNORE INTO user_security(email) VALUES(?)', e); r = q.get('SELECT * FROM user_security WHERE email = ?', e); }
+  let r = await q.get('SELECT * FROM user_security WHERE email = ?', e);
+  if (!r) { await q.run('INSERT OR IGNORE INTO user_security(email) VALUES(?)', e); r = await q.get('SELECT * FROM user_security WHERE email = ?', e); }
   return r;
 }
 
 /** 2-step verification policy for a user: is it on, and is it required for them? */
-export function twoFactorPolicy(email) {
+export async function twoFactorPolicy(email) {
   const e = email.toLowerCase();
-  const sec = q.get('SELECT totp_enabled FROM user_security WHERE email = ?', e);
-  const org = q.get("SELECT o.require_2fa FROM domains d JOIN orgs o ON o.id = d.org_id WHERE d.domain = ? AND d.status = 'active'", e.split('@')[1]);
+  const sec = await q.get('SELECT totp_enabled FROM user_security WHERE email = ?', e);
+  const org = await q.get("SELECT o.require_2fa FROM domains d JOIN orgs o ON o.id = d.org_id WHERE d.domain = ? AND d.status = 'active'", e.split('@')[1]);
   return { enabled: !!sec?.totp_enabled, requiredByOrg: !!org?.require_2fa };
 }

@@ -3,7 +3,7 @@ import express from 'express';
 import crypto from 'node:crypto';
 import multer from 'multer';
 import ICAL from 'ical.js';
-import rateLimit from 'express-rate-limit';
+import { rateLimit } from './shared.js';
 import { requireAuth } from './session.js';
 import { q, audit } from './db.js';
 import { mailcow } from './mailcow.js';
@@ -113,14 +113,14 @@ setInterval(() => { const now = Date.now(); for (const [k, v] of listCache) if (
 
 /** Coworkers for business users: everyone with a mailbox on the organization's domains. */
 export async function directory(email) {
-  const org = q.get("SELECT org_id FROM domains WHERE domain = ? AND status = 'active'", email.split('@')[1]);
+  const org = await q.get("SELECT org_id FROM domains WHERE domain = ? AND status = 'active'", email.split('@')[1]);
   if (!org) return [];
-  const domains = q.all("SELECT domain FROM domains WHERE org_id = ? AND status = 'active'", org.org_id).map((r) => r.domain);
+  const domains = (await q.all("SELECT domain FROM domains WHERE org_id = ? AND status = 'active'", org.org_id)).map((r) => r.domain);
   const people = [];
   for (const dom of domains) {
     for (const m of await mailcow.listMailboxes(dom).catch(() => [])) {
       if (!m.active) continue;
-      const p = getProfile(m.email);
+      const p = await getProfile(m.email);
       people.push({ email: m.email, name: p.name || m.name || m.email.split('@')[0], title: p.title || '', department: p.department || '', phone: p.phone || '', mobile: p.mobile || '' });
     }
   }
@@ -198,6 +198,6 @@ contacts.post('/address-contacts/import', rateLimit({ windowMs: 60 * 60 * 1000, 
     catch { skipped++; }
   }
   listCache.delete(req.user.sid);
-  audit(req.user.email, null, 'contacts.import', { added, skipped });
+  await audit(req.user.email, null, 'contacts.import', { added, skipped });
   res.json({ ok: true, added, skipped });
 }));

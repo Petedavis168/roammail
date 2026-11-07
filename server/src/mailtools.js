@@ -64,8 +64,8 @@ export function buildSieve({ vacation, rules }, me, orgDomains) {
 }
 
 async function sync(user) {
-  const data = { vacation: userSetting(user.email, 'vacation', null), rules: userSetting(user.email, 'rules', []) };
-  const orgDomains = q.all("SELECT domain FROM domains WHERE status = 'active' AND org_id = (SELECT org_id FROM domains WHERE domain = ?)", user.email.split('@')[1]).map((d) => d.domain);
+  const data = { vacation: await userSetting(user.email, 'vacation', null), rules: await userSetting(user.email, 'rules', []) };
+  const orgDomains = (await q.all("SELECT domain FROM domains WHERE status = 'active' AND org_id = (SELECT org_id FROM domains WHERE domain = ?)", user.email.split('@')[1])).map((d) => d.domain);
   const script = buildSieve(data, user.email, orgDomains.length ? orgDomains : [user.email.split('@')[1]]);
   const existing = (await mailcow.listFilters(user.email)).find((f) => f.script_desc === SCRIPT_DESC);
   if (!script) { if (existing) await mailcow.deleteFilter(existing.id); return; }
@@ -77,26 +77,26 @@ async function sync(user) {
 export const mailtools = express.Router();
 mailtools.use(requireAuth);
 
-mailtools.get('/vacation', (req, res) => res.json(userSetting(req.user.email, 'vacation', { enabled: false, subject: 'Out of office', message: '', start: '', end: '', onlyOrg: false })));
+mailtools.get('/vacation', async (req, res) => res.json(await userSetting(req.user.email, 'vacation', { enabled: false, subject: 'Out of office', message: '', start: '', end: '', onlyOrg: false })));
 mailtools.put('/vacation', wrap(async (req, res) => {
   const b = req.body;
   const date = (d) => (/^\d{4}-\d{2}-\d{2}$/.test(d || '') ? d : '');
   const v = { enabled: !!b.enabled, subject: String(b.subject || 'Out of office').slice(0, 200), message: String(b.message || '').slice(0, 5000),
     start: date(b.start), end: date(b.end), onlyOrg: !!b.onlyOrg };
   if (v.enabled && !v.message.trim()) throw fail(400, 'Write the message people will receive');
-  setUserSetting(req.user.email, 'vacation', v);
+  await setUserSetting(req.user.email, 'vacation', v);
   await sync(req.user);
-  audit(req.user.email, null, v.enabled ? 'vacation.on' : 'vacation.off');
+  await audit(req.user.email, null, v.enabled ? 'vacation.on' : 'vacation.off');
   res.json(v);
 }));
 
 /** Free accounts can't auto-forward; business users only inside the company unless an admin allows external. */
-function assertForwardAllowed(email, targets) {
-  const k = accountKind(email);
+async function assertForwardAllowed(email, targets) {
+  const k = await accountKind(email);
   if (!k.business) throw fail(403, 'Automatic forwarding is available on business accounts');
-  const org = q.get('SELECT allow_external_forward FROM orgs WHERE id = ?', k.orgId);
+  const org = await q.get('SELECT allow_external_forward FROM orgs WHERE id = ?', k.orgId);
   if (org?.allow_external_forward) return;
-  const internal = new Set(q.all("SELECT domain FROM domains WHERE org_id = ? AND status = 'active'", k.orgId).map((d) => d.domain));
+  const internal = new Set((await q.all("SELECT domain FROM domains WHERE org_id = ? AND status = 'active'", k.orgId)).map((d) => d.domain));
   for (const t of targets) {
     const d = String(t || '').toLowerCase().split('@')[1];
     if (!d || !internal.has(d)) throw fail(403, 'Your organization only allows forwarding to addresses inside the company. Ask an admin to allow external forwarding.');
@@ -104,7 +104,7 @@ function assertForwardAllowed(email, targets) {
 }
 
 /** Raw Sieve uploaded by users: apply the same forwarding policy and block side channels. */
-function assertSafeSieve(email, script) {
+async function assertSafeSieve(email, script) {
   if (/\b(notify|enotify|extlists|vnd\.)/i.test(script)) throw fail(400, 'This script uses a Sieve feature that is not allowed here');
   const redirects = [...script.matchAll(/\bredirect\b([^;]*);/gi)].map((m) => m[1]);
   if (!redirects.length) return;
@@ -115,7 +115,7 @@ function assertSafeSieve(email, script) {
     targets.push(...quoted.filter((v) => v.includes('@')));
     if (!quoted.some((v) => v.includes('@'))) throw fail(400, 'Forwarding addresses must be written out in full');
   }
-  assertForwardAllowed(email, targets);
+  await assertForwardAllowed(email, targets);
 }
 
 const cleanRule = (r, i) => ({
@@ -125,14 +125,14 @@ const cleanRule = (r, i) => ({
   actions: (r.actions || []).slice(0, 5).map((a) => ({ type: ['move', 'read', 'flag', 'category', 'forward', 'junk', 'trash'].includes(a.type) ? a.type : 'move', folder: String(a.folder || '').slice(0, 200), value: String(a.value || '').slice(0, 200) })),
 });
 
-mailtools.get('/rules', (req, res) => res.json(userSetting(req.user.email, 'rules', [])));
+mailtools.get('/rules', async (req, res) => res.json(await userSetting(req.user.email, 'rules', [])));
 mailtools.put('/rules', wrap(async (req, res) => {
   const rules = (Array.isArray(req.body.rules) ? req.body.rules : []).slice(0, 100).map(cleanRule);
   // Forwarding everything out is a classic account-takeover trick
-  for (const r of rules) for (const a of r.actions.filter((x) => x.type === 'forward')) assertForwardAllowed(req.user.email, [a.value]);
-  setUserSetting(req.user.email, 'rules', rules);
+  for (const r of rules) for (const a of r.actions.filter((x) => x.type === 'forward')) await assertForwardAllowed(req.user.email, [a.value]);
+  await setUserSetting(req.user.email, 'rules', rules);
   await sync(req.user);
-  audit(req.user.email, null, 'rules.update', { count: rules.length, forwards: rules.filter((r) => r.actions.some((a) => a.type === 'forward')).length });
+  await audit(req.user.email, null, 'rules.update', { count: rules.length, forwards: rules.filter((r) => r.actions.some((a) => a.type === 'forward')).length });
   res.json(rules);
 }));
 
@@ -162,7 +162,7 @@ mailtools.post('/imports', wrap(async (req, res) => {
   if (!user || !password) throw fail(400, 'Enter the email address and password of the old account');
   if ((await mailcow.listSyncJobs(req.user.email)).length >= 5) throw fail(400, 'You can have up to 5 imports');
   await mailcow.addSyncJob(req.user.email, { host, port: Number(req.body.port || p.port || 993), user, password });
-  audit(req.user.email, null, 'import.add', { host, user });
+  await audit(req.user.email, null, 'import.add', { host, user });
   res.json({ ok: true });
 }));
 
@@ -192,9 +192,9 @@ mailtools.post('/filters/server', wrap(async (req, res) => {
   if (!desc || !script.trim()) throw fail(400, 'Give the filter a name and a script');
   if (desc === SCRIPT_DESC) throw fail(400, 'That name is reserved');
   if (script.length > 50000) throw fail(400, 'Script too long');
-  assertSafeSieve(req.user.email, script);
+  await assertSafeSieve(req.user.email, script);
   await mailcow.addFilter(req.user.email, desc, script, req.body.type === 'postfilter' ? 'postfilter' : 'prefilter');
-  audit(req.user.email, null, 'filter.raw_add', { desc });
+  await audit(req.user.email, null, 'filter.raw_add', { desc });
   res.json({ ok: true });
 }));
 mailtools.patch('/filters/server', wrap(async (req, res) => {
@@ -202,7 +202,7 @@ mailtools.patch('/filters/server', wrap(async (req, res) => {
   if (!f) throw fail(404, 'Filter not found');
   const attr = {};
   if (req.body.active !== undefined) attr.active = req.body.active ? 1 : 0;
-  if (req.body.script !== undefined && f.script_desc !== SCRIPT_DESC) { assertSafeSieve(req.user.email, String(req.body.script)); attr.script_data = String(req.body.script); }
+  if (req.body.script !== undefined && f.script_desc !== SCRIPT_DESC) { await assertSafeSieve(req.user.email, String(req.body.script)); attr.script_data = String(req.body.script); }
   await mailcow.editFilter(f.id, attr);
   res.json({ ok: true });
 }));

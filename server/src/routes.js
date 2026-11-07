@@ -109,14 +109,14 @@ api.use(requireAuth);
 
 api.post('/logout', wrap(async (req, res) => {
   await closeClient(req.user.sid);
-  clearSession(req, res);
+  await clearSession(req, res);
   res.json({ ok: true });
 }));
 
-api.get('/me', (req, res) => res.json({
-  email: req.user.email, name: req.user.name, ...rolesFor(req.user.email),
-  twoFactor: twoFactorPolicy(req.user.email), adminRequires2fa: appConfig.requireAdmin2fa,
-  orgDomains: q.all("SELECT d.domain FROM domains d WHERE d.status = 'active' AND d.org_id = (SELECT org_id FROM domains WHERE domain = ?)", req.user.email.split('@')[1]).map((d) => d.domain),
+api.get('/me', async (req, res) => res.json({
+  email: req.user.email, name: req.user.name, ...await rolesFor(req.user.email),
+  twoFactor: await twoFactorPolicy(req.user.email), adminRequires2fa: appConfig.requireAdmin2fa,
+  orgDomains: (await q.all("SELECT d.domain FROM domains d WHERE d.status = 'active' AND d.org_id = (SELECT org_id FROM domains WHERE domain = ?)", req.user.email.split('@')[1])).map((d) => d.domain),
   clientSettings: { imapHost: appConfig.imap.host, imapPort: appConfig.imap.port, smtpHost: appConfig.smtp.host, smtpPort: appConfig.smtp.port, smtpSecure: appConfig.smtp.secure, davEnabled: appConfig.davEnabled, davHost: appConfig.davHost },
 }));
 
@@ -430,7 +430,7 @@ api.post('/send', upload.array('attachments'), wrap(async (req, res) => {
   let mail = buildMail(req.user, req.body, files);
   if (!mail.to && !mail.cc && !mail.bcc) return res.status(400).json({ error: 'Add at least one recipient' });
   const rcptCount = [mail.to, mail.cc, mail.bcc].filter(Boolean).flatMap((v) => addressparser(v)).filter((a) => a.address).length;
-  checkSendQuota(req.user.email, rcptCount);
+  await checkSendQuota(req.user.email, rcptCount);
   mail = await applyEnforcedSignature(req.user, mail, !!(req.body.inReplyTo || req.body.forwardUid));
 
   // Schedule send: store the finished message and send it later from the job worker
@@ -439,7 +439,7 @@ api.post('/send', upload.array('attachments'), wrap(async (req, res) => {
     if (sendAt > Date.now() + 365 * 864e5) return res.status(400).json({ error: 'Pick a time within the next year' });
     const raw = await compile({ ...mail, date: new Date(sendAt) });
     const envelope = { from: req.user.email, to: [mail.to, mail.cc, mail.bcc].filter(Boolean).flatMap((v) => addressparser(v)).map((a) => a.address).filter(Boolean) };
-    const id = addJob(req.user, 'send', sendAt, { raw: raw.toString('base64'), envelope, replyFolder: req.body.replyFolder, replyUid: req.body.replyUid },
+    const id = await addJob(req.user, 'send', sendAt, { raw: raw.toString('base64'), envelope, replyFolder: req.body.replyFolder, replyUid: req.body.replyUid },
       { subject: mail.subject, to: mail.to || mail.cc || mail.bcc });
     if (req.body.draftUid) {
       const drafts = await specialFolder(req.user, '\\Drafts');
@@ -606,9 +606,9 @@ onRevoke(closeLive);
 
 
 // ---------- scheduled send ----------
-api.get('/scheduled', (req, res) => res.json(listJobs(req.user.email, 'send')));
+api.get('/scheduled', async (req, res) => res.json(await listJobs(req.user.email, 'send')));
 api.delete('/scheduled', wrap(async (req, res) => {
-  const job = getJob(req.user.email, req.query.id);
+  const job = await getJob(req.user.email, req.query.id);
   if (!job || job.type !== 'send') return res.status(404).json({ error: 'Not found' });
   if (job.status === 'running') return res.status(409).json({ error: 'It is being sent right now' });
   // Return the message to Drafts so the user can edit it
@@ -617,7 +617,7 @@ api.delete('/scheduled', wrap(async (req, res) => {
     const client = await getClient(req.user);
     await client.append(drafts, Buffer.from(JSON.parse(job.payload).raw, 'base64'), ['\\Draft', '\\Seen']);
   }
-  deleteJob(req.user.email, job.id);
+  await deleteJob(req.user.email, job.id);
   res.json({ ok: true });
 }));
 
@@ -648,14 +648,14 @@ api.post('/snooze', wrap(async (req, res) => {
   }
   if (!newUids.length) return res.status(500).json({ error: 'Could not snooze: the messages were moved to the Snoozed folder but could not be tracked' });
   const subjects = info.map((x) => x.subject);
-  const id = addJob(req.user, 'snooze', at, { folder: snoozed, uids: newUids, back: folder }, { subject: subjects[0] || '', count: newUids.length, uids: newUids, back: folder });
+  const id = await addJob(req.user, 'snooze', at, { folder: snoozed, uids: newUids, back: folder }, { subject: subjects[0] || '', count: newUids.length, uids: newUids, back: folder });
   res.json({ ok: true, id, until: at, folder: snoozed });
 }));
-api.get('/snoozed', (req, res) => res.json(listJobs(req.user.email, 'snooze')));
+api.get('/snoozed', async (req, res) => res.json(await listJobs(req.user.email, 'snooze')));
 api.post('/snoozed/wake', wrap(async (req, res) => {
-  const job = getJob(req.user.email, req.body.id);
+  const job = await getJob(req.user.email, req.body.id);
   if (!job || job.type !== 'snooze') return res.status(404).json({ error: 'Not found' });
-  q.run("UPDATE jobs SET run_at = 0, status = 'pending' WHERE id = ?", job.id);
+  await q.run("UPDATE jobs SET run_at = 0, status = 'pending' WHERE id = ?", job.id);
   const { tick } = await import('./jobs.js');
   await tick();
   res.json({ ok: true });

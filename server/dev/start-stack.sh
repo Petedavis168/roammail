@@ -12,6 +12,12 @@ if [ -n "${1:-}" ] && ! pgrep -f "python3 -m radicale" >/dev/null; then
   python3 -m radicale --config "$1" >/dev/null 2>&1 &
 fi
 DATA="${TMPDIR:-/tmp}/mc-data-$(date +%s)"
+# Optional: PG_ADMIN_URL=postgres://postgres@127.0.0.1:5433 runs the app on a brand-new PostgreSQL database
+if [ -n "${PG_ADMIN_URL:-}" ]; then
+  DB="roammail_$(date +%s)"
+  psql "$PG_ADMIN_URL/postgres" -qc "CREATE DATABASE $DB" && export DATABASE_URL="$PG_ADMIN_URL/$DB"
+  echo "using PostgreSQL database $DB"
+fi
 node dev/mock-mailcow.js > "${TMPDIR:-/tmp}/mock.log" 2>&1 &
 node dev/mock-stripe.js > "${TMPDIR:-/tmp}/stripe.log" 2>&1 &
 DATA_DIR="$DATA" node --env-file=dev/test.env --disable-warning=ExperimentalWarning src/index.js > "${TMPDIR:-/tmp}/app.log" 2>&1 &

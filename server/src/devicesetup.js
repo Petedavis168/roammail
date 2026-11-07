@@ -18,27 +18,27 @@ const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '
 const EMAIL_RE = /^[^\s@<>"]+@[^\s@<>"]+\.[^\s@<>"]+$/;
 const base = (req) => config.publicUrl || `${req.protocol}://${req.get('host')}`;
 
-function orgName(email) {
-  return q.get("SELECT o.name FROM domains d JOIN orgs o ON o.id = d.org_id WHERE d.domain = ? AND d.status = 'active'", email.split('@')[1])?.name || null;
+async function orgName(email) {
+  return (await q.get("SELECT o.name FROM domains d JOIN orgs o ON o.id = d.org_id WHERE d.domain = ? AND d.status = 'active'", email.split('@')[1]))?.name || null;
 }
 
 /** Create a one-time setup link. With a password, the profile installs without typing anything. */
 export async function createSetupLink(req, email, password, minutes) {
   const token = crypto.randomBytes(18).toString('base64url');
   const expires = Date.now() + minutes * 60000;
-  q.run('DELETE FROM setup_tokens WHERE expires < ?', Date.now());
-  q.run('INSERT INTO setup_tokens(token_hash, email, creds, expires) VALUES(?, ?, ?, ?)', sha(token), email.toLowerCase(),
+  await q.run('DELETE FROM setup_tokens WHERE expires < ?', Date.now());
+  await q.run('INSERT INTO setup_tokens(token_hash, email, creds, expires) VALUES(?, ?, ?, ?)', sha(token), email.toLowerCase(),
     password ? seal({ password, exp: expires }) : null, expires);
   const url = `${base(req)}/setup/${token}`;
   return { url, expiresAt: expires, qr: await QRCode.toDataURL(url, { margin: 1, width: 240 }) };
 }
 
-function lookupToken(token, { consume } = {}) {
-  const row = q.get('SELECT * FROM setup_tokens WHERE token_hash = ?', sha(token));
+async function lookupToken(token, { consume } = {}) {
+  const row = await q.get('SELECT * FROM setup_tokens WHERE token_hash = ?', sha(token));
   if (!row || row.expires < Date.now()) return null;
   // Credentials are released once (a short grace window covers the browser fetching twice)
   if (row.used_at && Date.now() - row.used_at > 120000) return { email: row.email, password: null, used: true };
-  if (consume && !row.used_at) q.run('UPDATE setup_tokens SET used_at = ? WHERE token_hash = ?', Date.now(), row.token_hash);
+  if (consume && !row.used_at) await q.run('UPDATE setup_tokens SET used_at = ? WHERE token_hash = ?', Date.now(), row.token_hash);
   return { email: row.email, password: row.creds ? unseal(row.creds)?.password || null : null };
 }
 
@@ -60,9 +60,9 @@ function plist(v, ind = '') {
   return `${ind}<string>${esc(v)}</string>`;
 }
 
-export function buildMobileconfig(email, password) {
-  const company = orgName(email);
-  const name = getProfile(email).name || email.split('@')[0];
+export async function buildMobileconfig(email, password) {
+  const company = await orgName(email);
+  const name = (await getProfile(email)).name || email.split('@')[0];
   const label = company ? `${company} email` : `${config.appName} email`;
   const id = `com.${(config.mailHostname || 'mail').split('.').reverse().join('.')}.setup.${email.replace(/[^a-z0-9]/gi, '-')}`;
   const content = [{
@@ -114,7 +114,7 @@ function signProfile(xml) {
 }
 
 async function sendProfile(res, email, password) {
-  const body = await signProfile(buildMobileconfig(email, password));
+  const body = await signProfile(await buildMobileconfig(email, password));
   res.setHeader('Content-Type', 'application/x-apple-aspen-config');
   res.setHeader('Content-Disposition', `attachment; filename="${email.split('@')[0].replace(/[^\w.-]/g, '')}-email.mobileconfig"`);
   res.setHeader('Cache-Control', 'no-store');
@@ -130,9 +130,9 @@ function detect(ua = '') {
   return 'other';
 }
 
-function page(req, { email, profileUrl, passwordIncluded, expired }) {
+async function page(req, { email, profileUrl, passwordIncluded, expired }) {
   const dev = detect(req.get('user-agent'));
-  const company = email ? orgName(email) : null;
+  const company = email ? await orgName(email) : null;
   const appUrl = base(req);
   const smtpSec = config.smtp.secure ? 'SSL/TLS' : 'STARTTLS';
   const row = (l, v) => `<tr><td>${l}</td><td><code>${esc(v)}</code> <button class="copy" data-copy="${esc(v)}">Copy</button></td></tr>`;
@@ -200,11 +200,11 @@ navigator.clipboard&&navigator.clipboard.writeText(b.getAttribute('data-copy')).
 });
 
 // Public page by email (no secrets: server settings only, password typed on the device)
-deviceSetup.get('/setup', (req, res) => {
+deviceSetup.get('/setup', async (req, res) => {
   const email = String(req.query.email || '').trim().toLowerCase();
   if (!EMAIL_RE.test(email)) return res.status(400).send('Missing email');
   res.setHeader('Cache-Control', 'no-store');
-  res.send(page(req, { email, profileUrl: `/setup/profile.mobileconfig?email=${encodeURIComponent(email)}`, passwordIncluded: false }));
+  res.send(await page(req, { email, profileUrl: `/setup/profile.mobileconfig?email=${encodeURIComponent(email)}`, passwordIncluded: false }));
 });
 deviceSetup.get('/setup/profile.mobileconfig', wrap(async (req, res) => {
   const email = String(req.query.email || '').trim().toLowerCase();
@@ -213,15 +213,15 @@ deviceSetup.get('/setup/profile.mobileconfig', wrap(async (req, res) => {
 }));
 
 // One-time link (from the QR code); may carry the password
-deviceSetup.get('/setup/:token', (req, res) => {
-  const t = lookupToken(req.params.token);
+deviceSetup.get('/setup/:token', async (req, res) => {
+  const t = await lookupToken(req.params.token);
   res.setHeader('Cache-Control', 'no-store');
   res.setHeader('Referrer-Policy', 'no-referrer');
-  if (!t) return res.status(410).send(page(req, { email: '', profileUrl: '#', expired: true }).replace('<p>', '<p>Link expired. Ask for a new one in Settings → Phone &amp; apps. '));
-  res.send(page(req, { email: t.email, profileUrl: `/setup/${encodeURIComponent(req.params.token)}/profile.mobileconfig`, passwordIncluded: !!t.password, expired: !!t.used }));
+  if (!t) return res.status(410).send((await page(req, { email: '', profileUrl: '#', expired: true })).replace('<p>', '<p>Link expired. Ask for a new one in Settings → Phone &amp; apps. '));
+  res.send(await page(req, { email: t.email, profileUrl: `/setup/${encodeURIComponent(req.params.token)}/profile.mobileconfig`, passwordIncluded: !!t.password, expired: !!t.used }));
 });
 deviceSetup.get('/setup/:token/profile.mobileconfig', wrap(async (req, res) => {
-  const t = lookupToken(req.params.token, { consume: true });
+  const t = await lookupToken(req.params.token, { consume: true });
   if (!t) return res.status(410).send('This setup link has expired.');
   await sendProfile(res, t.email, t.password);
 }));

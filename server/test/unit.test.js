@@ -108,11 +108,11 @@ test('abuse: display names cannot impersonate an address', () => {
   assert.equal(abuse.cleanDisplayName('a\r\nBcc: x'), 'aBcc: x');
 });
 
-test('abuse: login throttling is per account+IP', () => {
+test('abuse: login throttling is per account+IP', async () => {
   const e = `t${Date.now()}@x.y`;
-  for (let i = 0; i < 10; i++) abuse.loginFailed(e, '6.6.6.6');
-  assert.ok(abuse.loginBlocked(e, '6.6.6.6') > 0);
-  assert.equal(abuse.loginBlocked(e, '10.0.0.9'), 0, 'the real user on another IP is not locked out');
+  for (let i = 0; i < 10; i++) await abuse.loginFailed(e, '6.6.6.6');
+  assert.ok(await abuse.loginBlocked(e, '6.6.6.6') > 0);
+  assert.equal(await abuse.loginBlocked(e, '10.0.0.9'), 0, 'the real user on another IP is not locked out');
 });
 
 test('sessions: key rotation keeps old sealed data readable', async () => {
@@ -154,4 +154,14 @@ test('database backup: consistent copy, keeps the last 7', async () => {
   assert.ok(fs.statSync(f).size > 0);
   const left = fs.readdirSync(dir).sort();
   assert.equal(left.length, 7); assert.ok(left.includes(path.basename(f))); assert.ok(!left.includes('app-2020-01-01.db'));
+});
+
+test('SQL translation to PostgreSQL', async () => {
+  const { toPg, toPgSchema } = await import('../src/db.js');
+  assert.equal(toPg("SELECT * FROM t WHERE a = ? AND b = '?' AND c = ?"), "SELECT * FROM t WHERE a = $1 AND b = '?' AND c = $2");
+  assert.match(toPg("SELECT 1 WHERE at > datetime('now', '-1 day')"), /CAST\('-1 day' AS interval\)/);
+  assert.match(toPg("DELETE FROM x WHERE at < datetime('now', ?)"), /CAST\(\$1 AS interval\)/);
+  assert.match(toPg("SELECT * FROM s WHERE day = date('now')"), /'YYYY-MM-DD'\)$/);
+  assert.equal(toPg('INSERT OR IGNORE INTO d(a) VALUES(?)'), 'INSERT INTO d(a) VALUES($1) ON CONFLICT DO NOTHING');
+  assert.match(toPgSchema('id INTEGER PRIMARY KEY AUTOINCREMENT, n INTEGER'), /BIGSERIAL PRIMARY KEY, n BIGINT/);
 });

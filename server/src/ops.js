@@ -93,14 +93,14 @@ export async function systemStatus() {
     tcpCheck(config.smtp.host, config.smtp.port, config.smtp.secure),
     mailcowCheck(),
   ]);
-  let db = true; try { q.get('SELECT 1'); } catch { db = false; }
+  let db = true; try { await q.get('SELECT 1'); } catch { db = false; }
   const components = [
     { name: 'Web app', ok: db },
     { name: 'Receiving and reading mail', ok: imap.ok },
     { name: 'Sending mail', ok: smtp.ok },
     { name: 'Sign-up and account management', ok: admin.ok },
   ];
-  let notice = null; try { notice = JSON.parse(setting('status_notice') || 'null'); } catch { /* */ }
+  let notice = null; try { notice = JSON.parse(await setting('status_notice') || 'null'); } catch { /* */ }
   const value = { ok: components.every((c) => c.ok), components, notice, checked: new Date().toISOString() };
   statusCache = { at: Date.now(), value };
   return value;
@@ -132,12 +132,12 @@ ${s.notice ? `<div class="n"><b>${esc(s.notice.title)}</b><br>${esc(s.notice.bod
 <small>Checked ${esc(new Date(s.checked).toUTCString())}. This page refreshes every minute.</small></body></html>`);
 });
 
-ops.put('/api/super/status-notice', requireAuth, (req, res) => {
-  if (!rolesFor(req.user.email).superAdmin) return res.status(403).json({ error: 'Super-admin only' });
+ops.put('/api/super/status-notice', requireAuth, async (req, res) => {
+  if (!(await rolesFor(req.user.email)).superAdmin) return res.status(403).json({ error: 'Super-admin only' });
   const title = String(req.body.title || '').trim().slice(0, 120); const body = String(req.body.body || '').trim().slice(0, 2000);
-  setSetting('status_notice', title ? JSON.stringify({ title, body, at: Date.now() }) : 'null');
+  await setSetting('status_notice', title ? JSON.stringify({ title, body, at: Date.now() }) : 'null');
   statusCache.at = 0;
-  audit(req.user.email, null, 'status.notice', { title });
+  await audit(req.user.email, null, 'status.notice', { title });
   res.json({ ok: true });
 });
 
@@ -148,6 +148,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { db } from './db.js';
 export function backupDatabase(dir = path.join(config.dataDir, 'backups'), keep = 7) {
+  if (!db) return null; // PostgreSQL: use the database service's own backups (RDS automated backups)
   fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
   const file = path.join(dir, `app-${new Date().toISOString().slice(0, 10)}.db`);
   if (fs.existsSync(file)) return file;

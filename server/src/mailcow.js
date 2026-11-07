@@ -140,10 +140,13 @@ export const mailcow = {
 // Mailbox lists and the quarantine are read on almost every admin/spam page; mailcow returns the whole
 // list each time, so we keep a short-lived shared copy and drop it whenever we change something.
 import { createCache } from './cache.js';
+import { broadcast, onBroadcast } from './shared.js';
 export const mailcowCache = createCache({ ttlMs: Number(process.env.MAILCOW_CACHE_SECONDS || 60) * 1000, max: 2000 });
+onBroadcast('mailcow-cache-del', (key) => mailcowCache.delete(key));
+const forget = (key) => broadcast('mailcow-cache-del', key);
 const raw = { ...mailcow };
 const domainOf = (e) => String(e || '').split('@')[1]?.toLowerCase() || '';
-const dropBoxes = (domain) => { mailcowCache.delete(`boxes:${domain}`); };
+const dropBoxes = (domain) => forget(`boxes:${domain}`);
 
 mailcow.listMailboxes = (domain) => mailcowCache.get(`boxes:${String(domain).toLowerCase()}`, () => raw.listMailboxes(domain));
 mailcow.addMailbox = async (o) => { try { return await raw.addMailbox(o); } finally { dropBoxes(String(o.domain).toLowerCase()); } };
@@ -170,5 +173,5 @@ mailcow.listQuarantine = async () => (await quarantineIndex()).items;
 mailcow.quarantineFor = async (rcpt) => (await quarantineIndex()).byRcpt.get(String(rcpt).toLowerCase()) || [];
 mailcow.quarantineForDomain = async (domain) => (await quarantineIndex()).byDomain.get(String(domain).toLowerCase()) || [];
 mailcow.quarantineById = async (id) => (await quarantineIndex()).byId.get(String(id)) || null;
-mailcow.quarantineAction = async (ids, action) => { try { return await raw.quarantineAction(ids, action); } finally { mailcowCache.delete('quarantine'); } };
-mailcow.deleteQuarantine = async (ids) => { try { return await raw.deleteQuarantine(ids); } finally { mailcowCache.delete('quarantine'); } };
+mailcow.quarantineAction = async (ids, action) => { try { return await raw.quarantineAction(ids, action); } finally { forget('quarantine'); } };
+mailcow.deleteQuarantine = async (ids) => { try { return await raw.deleteQuarantine(ids); } finally { forget('quarantine'); } };

@@ -98,3 +98,53 @@ jobs:
           pip install cfn-lint shellcheck-py
           cfn-lint deploy/aws/template.yaml
           shellcheck -S warning deploy/aws/deploy.sh deploy/aws/user-data.sh
+
+  # Same app on PostgreSQL + Redis with two servers side by side (the load-balanced setup)
+  scale:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    services:
+      greenmail:
+        image: greenmail/standalone:2.1.2
+        env:
+          GREENMAIL_OPTS: -Dgreenmail.setup.test.all -Dgreenmail.hostname=0.0.0.0 -Dgreenmail.users.login=email
+        ports: ['3025:3025', '3143:3143', '8080:8080']
+      postgres:
+        image: postgres:16-alpine
+        env: { POSTGRES_PASSWORD: test, POSTGRES_HOST_AUTH_METHOD: trust }
+        ports: ['5433:5432']
+        options: --health-cmd pg_isready --health-interval 5s --health-retries 10
+      redis:
+        image: redis:7-alpine
+        ports: ['6380:6379']
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: server/package-lock.json
+      - run: npm ci --prefix server
+      - name: Start server A (all roles) and server B (web only) on PostgreSQL + Redis
+        working-directory: server
+        env:
+          PG_ADMIN_URL: postgres://postgres@127.0.0.1:5433
+          REDIS_URL: redis://127.0.0.1:6380
+        run: |
+          pip install radicale
+          mkdir -p "$RUNNER_TEMP/radicale"
+          printf '[server]\nhosts = 127.0.0.1:5232\n[auth]\ntype = none\n[storage]\nfilesystem_folder = %s/radicale/collections\n[rights]\ntype = owner_only\n' "$RUNNER_TEMP" > "$RUNNER_TEMP/radicale/config"
+          TMPDIR=$RUNNER_TEMP dev/start-stack.sh "$RUNNER_TEMP/radicale/config"
+          DB=$(psql "$PG_ADMIN_URL/postgres" -Atc "select datname from pg_database where datname like 'roammail_%' order by datname desc limit 1")
+          PORT=3002 ROLE=web DATABASE_URL="$PG_ADMIN_URL/$DB" DATA_DIR="$RUNNER_TEMP/b" nohup node --env-file=dev/test.env src/index.js > "$RUNNER_TEMP/appB.log" 2>&1 &
+          for _ in $(seq 1 30); do curl -sf localhost:3002/healthz && break; sleep 1; done
+      - name: API tests (PostgreSQL)
+        run: npm run test:api --prefix server
+      - name: Billing and groups tests (PostgreSQL)
+        run: npm run test:billing --prefix server
+      - name: Cross-server tests
+        working-directory: server
+        run: node --test test/multiserver.test.js
+      - name: Logs on failure
+        if: failure()
+        run: tail -n 100 "$RUNNER_TEMP/app.log" "$RUNNER_TEMP/appB.log"

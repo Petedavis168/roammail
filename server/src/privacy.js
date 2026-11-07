@@ -112,7 +112,7 @@ privacy.get('/export', wrap(async (req, res) => {
   const name = `${req.user.email.replace(/[^\w.@-]/g, '')}-${new Date().toISOString().slice(0, 10)}.mbox`;
   res.setHeader('Content-Type', 'application/mbox');
   res.setHeader('Content-Disposition', `attachment; filename="${name}"`);
-  audit(req.user.email, null, 'privacy.export', { ip: req.ip });
+  await audit(req.user.email, null, 'privacy.export', { ip: req.ip });
   let aborted = false;
   req.on('close', () => { aborted = true; });
   try {
@@ -140,35 +140,35 @@ privacy.get('/export', wrap(async (req, res) => {
 }));
 
 privacy.post('/account/delete', wrap(async (req, res) => {
-  const k = accountKind(req.user.email);
+  const k = await accountKind(req.user.email);
   if (k.business) throw fail(403, 'Business mailboxes are managed by your organization. Ask your administrator to remove your account.');
   if (String(req.body.confirm || '') !== 'DELETE') throw fail(400, 'Type DELETE to confirm');
   const c = makeClient({ email: req.user.email, password: String(req.body.password || '') });
   try { await c.connect(); await c.logout(); } catch { throw fail(401, 'Wrong password'); }
-  const owns = q.get('SELECT 1 FROM orgs WHERE owner_email = ?', req.user.email);
+  const owns = await q.get('SELECT 1 FROM orgs WHERE owner_email = ?', req.user.email);
   if (owns) throw fail(400, 'You own a business on this service. Transfer or remove it first (Admin → Domains).');
   await closeClient(req.user.sid);
   await mailcow.deleteMailbox(req.user.email);
   const e = req.user.email;
-  for (const t of ['user_security', 'user_settings', 'user_signatures', 'profiles', 'jobs', 'password_resets', 'setup_tokens']) q.run(`DELETE FROM ${t} WHERE email = ?`, e);
-  q.run('DELETE FROM members WHERE email = ?', e);
-  q.run("UPDATE signups SET recovery_email = NULL WHERE email = ?", e); // keep the row for sign-up abuse limits only
-  revokeSessions(e);
-  audit(e, null, 'account.deleted', { ip: req.ip });
-  clearSession(req, res);
+  for (const t of ['user_security', 'user_settings', 'user_signatures', 'profiles', 'jobs', 'password_resets', 'setup_tokens']) await q.run(`DELETE FROM ${t} WHERE email = ?`, e);
+  await q.run('DELETE FROM members WHERE email = ?', e);
+  await q.run("UPDATE signups SET recovery_email = NULL WHERE email = ?", e); // keep the row for sign-up abuse limits only
+  await revokeSessions(e);
+  await audit(e, null, 'account.deleted', { ip: req.ip });
+  await clearSession(req, res);
   res.json({ ok: true });
 }));
 
 // ---------------------------------------------------------------- retention
-export function startRetention() {
-  const run = () => {
+export async function startRetention() {
+  const run = async () => {
     const d = `-${config.legal.retentionDays} days`;
-    q.run("DELETE FROM login_events WHERE at < datetime('now', ?)", d);
-    q.run("DELETE FROM audit WHERE at < datetime('now', '-400 days')");
-    q.run('DELETE FROM password_resets WHERE expires < ?', Date.now());
-    q.run('DELETE FROM setup_tokens WHERE expires < ?', Date.now());
-    q.run("DELETE FROM signups WHERE created_at < datetime('now', '-400 days')");
+    await q.run("DELETE FROM login_events WHERE at < datetime('now', ?)", d);
+    await q.run("DELETE FROM audit WHERE at < datetime('now', '-400 days')");
+    await q.run('DELETE FROM password_resets WHERE expires < ?', Date.now());
+    await q.run('DELETE FROM setup_tokens WHERE expires < ?', Date.now());
+    await q.run("DELETE FROM signups WHERE created_at < datetime('now', '-400 days')");
   };
-  run();
-  setInterval(run, 6 * 3600e3).unref();
+  await run();
+  setInterval(() => run().catch((e) => console.error('APP_ERROR retention', e.message)), 6 * 3600e3).unref();
 }

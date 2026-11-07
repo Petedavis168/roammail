@@ -1,6 +1,6 @@
 import express from 'express';
 import helmet from 'helmet';
-import rateLimit from 'express-rate-limit';
+import { rateLimit } from './shared.js';
 import cookieParser from 'cookie-parser';
 import path from 'node:path';
 import fs from 'node:fs';
@@ -62,10 +62,12 @@ app.use('/api', (req, res, next) => {
 });
 app.get('/healthz', (req, res) => res.json({ ok: true }));
 app.use(ops);
-gauge('sessions_active', () => q.get('SELECT COUNT(*) AS n FROM sessions').n);
-gauge('jobs_pending', () => q.get("SELECT COUNT(*) AS n FROM jobs WHERE status = 'pending'").n);
+gauge('sessions_active', async () => (await q.get('SELECT COUNT(*) AS n FROM sessions')).n);
+gauge('jobs_pending', async () => (await q.get("SELECT COUNT(*) AS n FROM jobs WHERE status = 'pending'")).n);
+// Background work must never crash the server; log it so the error alarm fires instead.
+process.on('unhandledRejection', (e) => console.error('APP_ERROR unhandled', e));
 startMetricsLog();
-startDbBackups();
+if (config.runsBackground) startDbBackups();
 app.use(publicAssets);
 app.use(deviceSetup);
 app.use(legalPages);
@@ -100,9 +102,11 @@ if (fs.existsSync(dist)) {
   app.get(/^\/(?!api\/).*/, (req, res) => res.sendFile(path.join(dist, 'index.html')));
 }
 
-startJobs();
-startRetention();
-setInterval(() => processTwoFactorResets().catch((e) => console.error('2fa resets', e)), 10 * 60 * 1000).unref();
+if (config.runsBackground) {
+  await startJobs();
+  await startRetention();
+  setInterval(() => processTwoFactorResets().catch((e) => console.error('APP_ERROR 2fa resets', e)), 10 * 60 * 1000).unref();
+}
 app.listen(config.port, () => {
   console.log(`Mail client on http://localhost:${config.port}  (IMAP ${config.imap.host}:${config.imap.port}, SMTP ${config.smtp.host}:${config.smtp.port})`);
 });
