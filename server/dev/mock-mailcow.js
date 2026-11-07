@@ -13,7 +13,8 @@ const spamScores = new Map();
 const quarantine = new Map();
 const sources = new Map();
 const notify = new Map();
-const logs = { 'rspamd-history': [], ratelimited: [] }; // newest first, like mailcow
+const logs = { 'rspamd-history': [], ratelimited: [] };
+const bccMaps = new Map(); // newest first, like mailcow
 // Seed quarantine with demo items (rcpt filled in on first signup of that address)
 const seedQuarantine = (rcpt) => {
   for (const [subject, sender, score, virus] of [['You WON a $1000 gift card!!!', 'promo@win-big.test', 22.5, 0], ['Invoice overdue - open attachment', 'billing@paypa1-secure.test', 31.2, 1], ['Re: our meeting (could be real)', 'colleague@partner.test', 15.8, 0]]) {
@@ -43,6 +44,7 @@ http.createServer(async (req, res) => {
   const [verb, what, ...rest] = p.split('/');
   const arg = rest.join('/');
   if (verb === 'get') {
+    if (what === 'bcc') return send(200, [...bccMaps.values()]);
     if (what === 'logs') { const [kind, n] = arg.split('/'); return send(200, (logs[kind] || []).slice(0, Number(n) || 100)); }
     if (what === 'status' && arg === 'version') return send(200, { version: '2026-mock' });
     if (what === 'domain') return send(200, arg === 'all' ? [...domains.values()] : domains.get(arg) || {});
@@ -66,6 +68,7 @@ http.createServer(async (req, res) => {
   }
   if (verb === 'add') {
     // test helper (not a mailcow endpoint): add log lines, e.g. outgoing spam from a hijacked account
+    if (what === 'bcc') { if (![...domains.keys(), ...mailboxes.keys()].includes(b.local_dest)) return send(200, bad('bcc_local_dest_not_found')); const id = nextId++; bccMaps.set(id, { id, ...b }); return send(200, ok('bcc_saved')); }
     if (what === 'mocklog') { logs[arg] = [...[].concat(b).reverse(), ...(logs[arg] || [])]; return send(200, ok('logged')); }
     if (what === 'domain') { if (domains.has(b.domain)) return send(200, bad('domain_exists')); domains.set(b.domain, { domain_name: b.domain, active: 1, ...b }); return send(200, ok(['domain_added', b.domain])); }
     if (what === 'dkim') { const d = domains.get(b.domains); d.dkim = { dkim_selector: 'dkim', dkim_txt: 'v=DKIM1;k=rsa;t=s;s=email;p=MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAmockkey' }; return send(200, ok('dkim_added')); }
@@ -108,6 +111,7 @@ http.createServer(async (req, res) => {
     for (const k of b) { const i = policies.findIndex((p) => String(p.prefid) === String(k)); if (i >= 0) policies.splice(i, 1); }
     return send(200, ok('item_deleted'));
   }
+  if (verb === 'delete' && what === 'bcc') { for (const k of b) bccMaps.delete(Number(k)); return send(200, ok('bcc_deleted')); }
   if (verb === 'delete' && what === 'qitem') { for (const k of b) quarantine.delete(Number(k)); return send(200, ok('item_deleted')); }
   if (verb === 'delete') {
     const store = { mailbox: mailboxes, domain: domains, alias: aliases, filter: filters, syncjob: syncjobs }[what];

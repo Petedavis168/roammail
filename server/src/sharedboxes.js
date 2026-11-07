@@ -21,7 +21,7 @@ export async function sharedMailboxSet() {
 
 /** Shared mailboxes this person can open. */
 export async function sharedFor(email) {
-  return q.all(`SELECT s.email, s.name, a.can_send FROM shared_access a JOIN shared_mailboxes s ON s.email = a.mailbox
+  return q.all(`SELECT s.email, s.name, s.kind, a.can_send FROM shared_access a JOIN shared_mailboxes s ON s.email = a.mailbox
     WHERE a.member = ? ORDER BY s.name`, String(email).toLowerCase());
 }
 
@@ -40,9 +40,11 @@ export function sharedMailboxContext({ sendPaths = ['/send', '/drafts', '/schedu
     const want = String(req.get('X-Mailbox') || req.query.mailbox || '').toLowerCase();
     req.actor = req.user;
     if (!want || want === req.user.email.toLowerCase()) return next();
-    const row = await q.get(`SELECT s.email, s.name, s.creds, a.can_send FROM shared_access a JOIN shared_mailboxes s ON s.email = a.mailbox
+    const row = await q.get(`SELECT s.email, s.name, s.creds, s.kind, a.can_send FROM shared_access a JOIN shared_mailboxes s ON s.email = a.mailbox
       WHERE a.mailbox = ? AND a.member = ?`, want, req.user.email.toLowerCase());
     if (!row) throw fail(403, 'You don\'t have access to that mailbox');
+    // The company archive is evidence: it can be read and searched, never changed or emptied
+    if (row.kind === 'archive' && req.method !== 'GET') throw fail(403, 'The archive is read-only');
     if (!row.can_send && req.method !== 'GET' && sendPaths.some((p) => req.path.startsWith(p))) throw fail(403, 'You can read this mailbox but not send from it');
     const creds = unseal(row.creds);
     if (!creds) throw fail(500, 'This shared mailbox needs to be reset by an admin');
@@ -56,7 +58,7 @@ export const sharedboxes = express.Router();
 sharedboxes.use(['/shared-mailboxes', '/admin/orgs/:id/shared-mailboxes'], requireAuth);
 
 sharedboxes.get('/shared-mailboxes', wrap(async (req, res) => {
-  res.json((await sharedFor(req.user.email)).map((r) => ({ email: r.email, name: r.name, canSend: !!r.can_send })));
+  res.json((await sharedFor(req.user.email)).map((r) => ({ email: r.email, name: r.name, canSend: !!r.can_send && r.kind !== 'archive', archive: r.kind === 'archive' })));
 }));
 
 async function requireOrgAdmin(req, orgId) {
@@ -85,7 +87,7 @@ async function setMembers(mailbox, members) {
 
 sharedboxes.get('/admin/orgs/:id/shared-mailboxes', wrap(async (req, res) => {
   const orgId = await requireOrgAdmin(req, req.params.id);
-  const boxes = await q.all('SELECT email, name, created_at FROM shared_mailboxes WHERE org_id = ? ORDER BY name', orgId);
+  const boxes = await q.all("SELECT email, name, created_at FROM shared_mailboxes WHERE org_id = ? AND kind = 'shared' ORDER BY name", orgId);
   for (const b of boxes) b.members = (await q.all('SELECT member AS email, can_send FROM shared_access WHERE mailbox = ? ORDER BY member', b.email)).map((m) => ({ email: m.email, canSend: !!m.can_send }));
   res.json({ boxes, limit: LIMIT });
 }));
@@ -96,7 +98,7 @@ sharedboxes.post('/admin/orgs/:id/shared-mailboxes', wrap(async (req, res) => {
   if (!await q.get("SELECT 1 FROM domains WHERE domain = ? AND org_id = ? AND status = 'active'", domain, orgId)) throw fail(400, 'Pick one of your active domains');
   const local = String(req.body.localPart || '').trim().toLowerCase();
   if (!/^[a-z0-9]([a-z0-9._-]{0,62}[a-z0-9])?$/.test(local)) throw fail(400, 'Use letters, numbers, dots, dashes or underscores');
-  if ((await q.get('SELECT COUNT(*) AS n FROM shared_mailboxes WHERE org_id = ?', orgId)).n >= LIMIT) throw fail(400, `You can have up to ${LIMIT} shared mailboxes`);
+  if ((await q.get('SELECT COUNT(*) AS n FROM shared_mailboxes WHERE org_id = ? AND kind = \'shared\'', orgId)).n >= LIMIT) throw fail(400, `You can have up to ${LIMIT} shared mailboxes`);
   const email = `${local}@${domain}`;
   if (await mailcow.getMailbox(email)) throw fail(409, 'That address is already a mailbox');
   if (await q.get('SELECT 1 FROM groups WHERE address = ?', email)) throw fail(409, 'That address is already a group');

@@ -8,6 +8,7 @@ import { fileURLToPath } from 'node:url';
 import { config } from './config.js';
 import { api } from './routes.js';
 import { sharedboxes } from './sharedboxes.js';
+import { archive } from './archive.js';
 import { abuseDesk, outboundAdmin, startOutboundChecks } from './outbound.js';
 import { ops, metricsMiddleware, startMetricsLog, gauge, startDbBackups } from './ops.js';
 import { q } from './db.js';
@@ -91,6 +92,7 @@ app.use('/api', groups);
 app.use('/api', billing);
 app.use('/api', recovery);
 app.use('/api', sharedboxes);
+app.use('/api', archive);
 app.use('/api', outboundAdmin);
 app.use('/api', (req, res) => res.status(404).json({ error: 'Not found' }));
 app.use('/api', (err, req, res, _next) => {

@@ -35,6 +35,10 @@ export const mailcow = {
     active: 1, backupmx: 0, relay_all_recipients: 0, restart_sogo: 10,
   }),
   editDomain: (domain, attr) => call('POST', 'edit/domain', { items: [domain], attr }),
+  // BCC maps (journaling): copy mail sent by / to a mailbox or whole domain to another address
+  listBcc: async () => list(await call('GET', 'get/bcc/all')).map((b) => ({ id: Number(b.id), localDest: String(b.local_dest || '').toLowerCase(), bccDest: String(b.bcc_dest || '').toLowerCase(), type: b.type, active: Number(b.active) === 1 })),
+  addBcc: (localDest, bccDest, type) => call('POST', 'add/bcc', { local_dest: localDest, bcc_dest: bccDest, type, active: 1 }),
+  deleteBcc: (ids) => call('POST', 'delete/bcc', [].concat(ids).map(String)),
   /** mailcow logs: rspamd-history, ratelimited, postfix, ... (newest first) */
   logs: async (kind, count = 500) => list(await call('GET', `get/logs/${encodeURIComponent(kind)}/${Number(count)}`)),
   deleteDomain: (domain) => call('POST', 'delete/domain', [domain]),

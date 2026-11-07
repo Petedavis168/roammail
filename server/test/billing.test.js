@@ -210,7 +210,7 @@ test('shared mailboxes: free, members only, read-only members cannot send', asyn
   const login = async (l) => { const c = new Client(); assert.equal((await c.post('/api/login', { email: `${l}@${domain}`, password: PW })).status, 200); return c; };
   const ann = await login('ann'); const ben = await login('ben');
   const as = (c, method, path, body, box = `support@${domain}`) => fetch(BASE + path, { method, headers: { Cookie: c.cookie, 'X-Forwarded-For': c.ip, 'X-Requested-With': 'mailcow-client', 'X-Mailbox': box }, body });
-  assert.deepEqual((await ann.get('/api/shared-mailboxes')).data, [{ email: `support@${domain}`, name: 'Support', canSend: true }]);
+  assert.deepEqual((await ann.get('/api/shared-mailboxes')).data, [{ email: `support@${domain}`, name: 'Support', canSend: true, archive: false }]);
 
   // a customer writes to support@; both members see it
   const fd = new FormData(); fd.append('to', `support@${domain}`); fd.append('subject', `Help ${run}`); fd.append('text', 'my order');
@@ -252,4 +252,38 @@ test('shared mailbox header never reaches account settings', async () => {
   assert.equal(me.email, `zed@${domain}`);
   const sessions = await (await fetch(`${BASE}/api/security/sessions`, { headers: h })).json();
   assert.ok(Array.isArray(sessions) && sessions.length >= 1, 'own sessions, not the shared box');
+});
+
+test('archive / legal hold: copies via mailcow BCC maps, read-only for viewers', async () => {
+  const a = await newAdmin(`arc${run}`);
+  const domain = `arc${run}.test`;
+  const { orgId } = (await a.post('/api/domains', { domain, orgName: `Arc ${run}` })).data;
+  await a.post(`/api/domains/${domain}/verify`);
+  const { url } = (await a.post(`/api/billing/${orgId}/checkout`, { interval: 'month', seats: 2 })).data;
+  const sid = new URL((await fetch(url, { method: 'POST', redirect: 'manual' })).headers.get('location')).searchParams.get('session_id');
+  await a.post('/api/billing/confirm', { sessionId: sid });
+  for (const l of ['hr', 'sam']) assert.equal((await addUser(a, domain, l)).status, 200);
+  const r = await a.req('PUT', `/api/admin/orgs/${orgId}/archive`, { enabled: true, scope: 'all', viewers: [`hr@${domain}`] });
+  assert.equal(r.status, 200, JSON.stringify(r.data));
+  assert.equal(r.data.maps, 2);
+  const maps = await (await fetch(`${process.env.MOCK_MAILCOW || 'http://127.0.0.1:8099'}/api/v1/get/bcc/all`, { headers: { 'X-API-Key': 'dev-key' } })).json();
+  assert.deepEqual(maps.filter((m) => m.bcc_dest === r.data.mailbox).map((m) => `${m.local_dest}|${m.type}`).sort(), [`${domain}|rcpt`, `${domain}|sender`]);
+  assert.equal((await a.get(`/api/billing/${orgId}`)).data.paidSeats, 2, 'archive is free');
+
+  const hr = new Client(); await hr.post('/api/login', { email: `hr@${domain}`, password: PW });
+  const boxes = (await hr.get('/api/shared-mailboxes')).data;
+  assert.deepEqual(boxes.map((b) => [b.email, b.archive, b.canSend]), [[r.data.mailbox, true, false]]);
+  const h = { Cookie: hr.cookie, 'X-Forwarded-For': hr.ip, 'X-Requested-With': 'mailcow-client', 'X-Mailbox': r.data.mailbox, 'Content-Type': 'application/json' };
+  assert.equal((await fetch(`${BASE}/api/messages?folder=INBOX`, { headers: h })).status, 200, 'viewers can read');
+  assert.equal((await fetch(`${BASE}/api/delete`, { method: 'POST', headers: h, body: JSON.stringify({ folder: 'INBOX', uids: [1] }) })).status, 403, 'nobody can delete');
+  assert.equal((await fetch(`${BASE}/api/empty`, { method: 'POST', headers: h, body: JSON.stringify({ folder: 'INBOX' }) })).status, 403);
+  const sam = new Client(); await sam.post('/api/login', { email: `sam@${domain}`, password: PW });
+  assert.equal((await sam.get('/api/shared-mailboxes')).data.length, 0, 'not a viewer');
+  assert.equal((await sam.req('PUT', `/api/admin/orgs/${orgId}/archive`, { enabled: false })).status, 403);
+
+  // narrow to one person on legal hold; turning off removes the maps
+  const held = await a.req('PUT', `/api/admin/orgs/${orgId}/archive`, { enabled: true, scope: 'people', people: [`sam@${domain}`], viewers: [`hr@${domain}`] });
+  assert.equal(held.data.maps, 2);
+  const off = await a.req('PUT', `/api/admin/orgs/${orgId}/archive`, { enabled: false, viewers: [`hr@${domain}`] });
+  assert.equal(off.data.maps, 0);
 });
