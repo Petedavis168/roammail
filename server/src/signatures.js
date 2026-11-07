@@ -7,7 +7,7 @@ import crypto from 'node:crypto';
 import multer from 'multer';
 import sanitizeHtml from 'sanitize-html';
 import { config } from './config.js';
-import { q, rolesFor, audit } from './db.js';
+import { q, rolesFor, audit, setting, setSetting, userSetting, setUserSetting } from './db.js';
 import { requireAuth } from './session.js';
 import { mailcow } from './mailcow.js';
 
@@ -254,4 +254,36 @@ signatures.post('/admin/orgs/:id/signature/preview', wrap(async (req, res) => {
   }
   const domain = (await q.get("SELECT domain FROM domains WHERE org_id = ? AND status = 'active'", id))?.domain || 'example.com';
   res.json({ html: renderTemplate(cleanHtml(req.body.html), { ...vars, ...sample, first_name: 'Alex', email: `alex@${domain}` }) });
+}));
+
+// ---------------------------------------------------------------- templates (canned replies)
+// Personal templates for everyone, plus company templates that business admins share with all staff.
+const cleanTemplates = (list) => (Array.isArray(list) ? list : []).slice(0, 50).map((t) => ({
+  id: /^[\w-]{1,40}$/.test(t.id) ? t.id : crypto.randomBytes(6).toString('hex'),
+  name: String(t.name || 'Template').slice(0, 80),
+  subject: String(t.subject || '').slice(0, 200),
+  html: cleanHtml(t.html),
+}));
+signatures.get('/templates', wrap(async (req, res) => {
+  const orgId = await orgIdForEmail(req.user.email);
+  res.json({
+    personal: await userSetting(req.user.email, 'templates', []),
+    company: orgId ? await setting(`orgTemplates:${orgId}`, []) : [],
+  });
+}));
+signatures.put('/templates', wrap(async (req, res) => {
+  const list = cleanTemplates(req.body.templates);
+  await setUserSetting(req.user.email, 'templates', list);
+  res.json({ ok: true, templates: list });
+}));
+signatures.get('/admin/orgs/:id/templates', wrap(async (req, res) => {
+  const id = await requireOrgAdmin(req, req.params.id);
+  res.json(await setting(`orgTemplates:${id}`, []));
+}));
+signatures.put('/admin/orgs/:id/templates', wrap(async (req, res) => {
+  const id = await requireOrgAdmin(req, req.params.id);
+  const list = cleanTemplates(req.body.templates);
+  await setSetting(`orgTemplates:${id}`, list);
+  await audit(req.user.email, id, 'templates.company', { count: list.length });
+  res.json({ ok: true, templates: list });
 }));

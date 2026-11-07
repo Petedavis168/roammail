@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { api, setMailbox, mailUrl } from '../api.js';
 import { Icon } from '../icons.jsx';
 import { usePrefs, catKeyword } from '../prefs.js';
@@ -10,15 +10,15 @@ import Ribbon from './Ribbon.jsx';
 import ComposeManager, { replyDraft } from './Compose.jsx';
 import SettingsPanel from './Settings.jsx';
 import ShortcutsHelp from './ShortcutsHelp.jsx';
-import Admin from './admin/Admin.jsx';
+const Admin = lazy(() => import('./admin/Admin.jsx'));
 import { initials, avatarColor, folderLabel } from '../util.js';
 import { useSignatures } from '../signatures.js';
 import { fmtWhen } from '../snooze.js';
 import ScheduledList from './ScheduledList.jsx';
 import SnoozeMenu from './SnoozeMenu.jsx';
 import QuarantineList from './QuarantineList.jsx';
-import Calendar from './calendar/Calendar.jsx';
-import Contacts from './contacts/Contacts.jsx';
+const Calendar = lazy(() => import('./calendar/Calendar.jsx'));
+const Contacts = lazy(() => import('./contacts/Contacts.jsx'));
 
 export default function Mail({ me, refreshMe, theme, setTheme, onLogout }) {
   const toast = useToast();
@@ -340,11 +340,11 @@ export default function Mail({ me, refreshMe, theme, setTheme, onLogout }) {
         ))}
       </nav>
       {view === 'admin' ? (
-        <Admin me={me} refreshMe={refreshMe} onExit={() => setView('mail')} />
+        <Suspense fallback={<div className="spinner" />}><Admin me={me} refreshMe={refreshMe} onExit={() => setView('mail')} /></Suspense>
       ) : view === 'calendar' ? (
-        <Calendar me={me} />
+        <Suspense fallback={<div className="spinner" />}><Calendar me={me} /></Suspense>
       ) : view === 'contacts' ? (
-        <Contacts me={me} onEmail={(c) => { compose({ to: [{ name: c.name, address: c.email }] }); setView('mail'); }} />
+        <Suspense fallback={<div className="spinner" />}><Contacts me={me} onEmail={(c) => { compose({ to: [{ name: c.name, address: c.email }] }); setView('mail'); }} /></Suspense>
       ) : (
         <div className="body">
           {sidebarOpen && (

@@ -64,6 +64,17 @@ function Composer({ c, me, prefs, sigData, identities, onClose, onSend, focusInd
   });
   const [sigChoice, setSigChoice] = useState(() => defaultChoice(sigData, isReply));
   const [sigMenu, setSigMenu] = useState(false);
+  const [tplMenu, setTplMenu] = useState(false);
+  const [templates, setTemplates] = useState(null);
+  const openTemplates = () => { setTplMenu((x) => !x); if (!templates) api.get('/api/templates').then(setTemplates).catch(() => setTemplates({ personal: [], company: [] })); };
+  const useTemplate = (t) => {
+    setTplMenu(false);
+    if (t.subject && !subject) setSubject(t.subject);
+    const ed = editor.current; if (!ed) return;
+    ed.focus();
+    document.execCommand('insertHTML', false, safeHtml(t.html));
+    markDirty();
+  };
   const [sendMenu, setSendMenu] = useState(false);
   const [pickTime, setPickTime] = useState(false);
   const [customTime, setCustomTime] = useState(() => localInputValue(new Date(Date.now() + 3600e3)));
@@ -235,6 +246,20 @@ function Composer({ c, me, prefs, sigData, identities, onClose, onSend, focusInd
             <button type="button" className="icon-btn" title="Insert link" onMouseDown={(e) => { e.preventDefault(); addLink(); }}><Icon name="link" size={16} /></button>
             <button type="button" className="icon-btn" title="Attach files" onClick={() => fileInput.current.click()}><Icon name="clip" size={16} /></button>
             <button type="button" className={`icon-btn ${important ? 'on-red' : ''}`} title="High importance" onClick={() => setImportant((x) => !x)}>!</button>
+            <div className="dd">
+              <button type="button" className="icon-btn" title="Insert a template" onClick={openTemplates}>📄</button>
+              {tplMenu && (
+                <div className="menu up" onMouseLeave={() => setTplMenu(false)}>
+                  <div className="menu-head"><b>Templates</b></div>
+                  {!templates && <div className="menu-note">Loading…</div>}
+                  {templates?.company?.length > 0 && <div className="menu-note">Company</div>}
+                  {templates?.company?.map((t) => <button key={`c${t.id}`} onClick={() => useTemplate(t)}><span className="ic-space" /> {t.name}</button>)}
+                  {templates?.company?.length > 0 && templates?.personal?.length > 0 && <div className="menu-note">Mine</div>}
+                  {templates?.personal?.map((t) => <button key={t.id} onClick={() => useTemplate(t)}><span className="ic-space" /> {t.name}</button>)}
+                  {templates && !templates.personal.length && !templates.company.length && <div className="menu-note">Create templates in Settings → Templates.</div>}
+                </div>
+              )}
+            </div>
             <div className="dd">
               <button type="button" className="icon-btn" title="Signature" onClick={() => setSigMenu((x) => !x)}><Icon name="pen" size={16} /></button>
               {sigMenu && (

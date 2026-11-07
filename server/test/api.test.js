@@ -284,3 +284,15 @@ test('signature logos: real images only, served from any server', async () => {
   const bad = new FormData(); bad.append('image', new Blob([Buffer.from('<script>alert(1)</script>')], { type: 'image/png' }), 'x.png');
   assert.equal((await a.req('POST', '/api/sig-assets', bad)).status, 400);
 });
+
+test('templates: personal templates are cleaned and private', async () => {
+  const a = new Client(); await signup(a, `tp${run}`);
+  const r = await a.req('PUT', '/api/templates', { templates: [{ name: 'Thanks', subject: 'Thank you', html: '<p>Thanks!</p><script>alert(1)</script><img src=x onerror=alert(1)>' }] });
+  assert.equal(r.status, 200);
+  const t = (await a.get('/api/templates')).data;
+  assert.equal(t.personal.length, 1); assert.equal(t.personal[0].subject, 'Thank you');
+  assert.ok(!/script|onerror/i.test(t.personal[0].html), 'scripts and handlers removed');
+  const b = new Client(); await signup(b, `tq${run}`);
+  assert.equal((await b.get('/api/templates')).data.personal.length, 0);
+  assert.ok([403, 404].includes((await a.req('PUT', '/api/admin/orgs/1/templates', { templates: [] })).status));
+});

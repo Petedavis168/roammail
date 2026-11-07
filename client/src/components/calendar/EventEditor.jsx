@@ -73,7 +73,13 @@ export default function EventEditor({ event, calendars, me, onClose, onSaved }) 
             <Icon name="alert" />
             <select value={f.reminder} onChange={set('reminder')}>{REMINDERS.map(([v, l]) => <option key={v} value={v}>{l}</option>)}</select>
           </div>
-          <div className="ev-row"><Icon name="globe" /><input placeholder="Add a location" value={f.location} onChange={set('location')} /></div>
+          <div className="ev-row"><Icon name="globe" /><input placeholder="Add a location" value={f.location} onChange={set('location')} />
+            {!/https?:\/\//.test(f.location) && <button type="button" className="btn sm" title="Add a free video meeting link" onClick={() => {
+              const room = `${(me?.name || 'Roammail').replace(/[^A-Za-z0-9]/g, '').slice(0, 20)}-${crypto.getRandomValues(new Uint32Array(2)).join('').slice(0, 12)}`;
+              const link = `${me?.clientSettings?.meetUrl || 'https://meet.jit.si'}/${room}`;
+              setF({ ...f, location: link, description: `${f.description ? `${f.description}\n\n` : ''}Join the video meeting: ${link}` });
+            }}>🎥 Add video meeting</button>}
+          </div>
           <div className="ev-people"><RecipientInput label="Invite" value={f.attendees} onChange={(v) => setF({ ...f, attendees: v })} /></div>
           {!isNew && f.attendees.length > 0 && (
             <div className="rsvp-list">{f.attendees.map((a) => (

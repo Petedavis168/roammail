@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Icon } from '../icons.jsx';
 import Signatures from './settings/Signatures.jsx';
+import Templates from './settings/Templates.jsx';
 import Security from './settings/Security.jsx';
 import { AutoReply, Rules, ImportMail } from './settings/MailTools.jsx';
 import SpamSettings from './settings/Spam.jsx';
@@ -117,7 +118,7 @@ function Apps({ me, sigData }) {
 }
 
 const TABS = [
-  ['general', 'General', 'settings'], ['signatures', 'Signatures', 'pen'], ['security', 'Security', 'lock'],
+  ['general', 'General', 'settings'], ['signatures', 'Signatures', 'pen'], ['templates', 'Templates', 'mail'], ['security', 'Security', 'lock'],
   ['autoreply', 'Automatic replies', 'reply'], ['junk', 'Junk & spam', 'junk'], ['rules', 'Rules', 'filter'], ['import', 'Import mail', 'import'], ['apps', 'Phone & apps', 'phone'], ['privacy', 'Privacy', 'shield'],
 ];
 
@@ -135,6 +136,7 @@ export default function SettingsPanel({ prefs, setPrefs, me, folders, sigData, r
           <div className="drawer-body">
             {tab === 'general' && <General prefs={prefs} setPrefs={setPrefs} me={me} />}
             {tab === 'signatures' && <Signatures sigData={sigData} reloadSigs={reloadSigs} prefs={prefs} setPrefs={setPrefs} />}
+            {tab === 'templates' && <Templates />}
             {tab === 'security' && <Security me={me} />}
             {tab === 'autoreply' && <AutoReply me={me} />}
             {tab === 'junk' && <SpamSettings />}

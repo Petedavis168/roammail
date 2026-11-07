@@ -119,7 +119,7 @@ api.get('/me', async (req, res) => res.json({
   email: req.user.email, name: req.user.name, ...await rolesFor(req.user.email),
   twoFactor: await twoFactorPolicy(req.user.email), adminRequires2fa: appConfig.requireAdmin2fa,
   orgDomains: (await q.all("SELECT d.domain FROM domains d WHERE d.status = 'active' AND d.org_id = (SELECT org_id FROM domains WHERE domain = ?)", req.user.email.split('@')[1])).map((d) => d.domain),
-  clientSettings: { imapHost: appConfig.imap.host, imapPort: appConfig.imap.port, smtpHost: appConfig.smtp.host, smtpPort: appConfig.smtp.port, smtpSecure: appConfig.smtp.secure, davEnabled: appConfig.davEnabled, davHost: appConfig.davHost },
+  clientSettings: { meetUrl: (process.env.MEETING_URL || 'https://meet.jit.si').replace(/\/$/, ''), imapHost: appConfig.imap.host, imapPort: appConfig.imap.port, smtpHost: appConfig.smtp.host, smtpPort: appConfig.smtp.port, smtpSecure: appConfig.smtp.secure, davEnabled: appConfig.davEnabled, davHost: appConfig.davHost },
 }));
 
 // ---------- folders ----------

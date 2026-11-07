@@ -13,6 +13,7 @@ import TwoFactorSetup from '../TwoFactorSetup.jsx';
 import Support from './Support.jsx';
 import Abuse from './Abuse.jsx';
 import SharedMailboxes from './SharedMailboxes.jsx';
+import { TemplatesEditor } from '../settings/Templates.jsx';
 
 const genPassword = () => {
   const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnpqrstuvwxyz23456789';
@@ -514,7 +515,7 @@ export default function Admin({ me, refreshMe, onExit }) {
   }
 
   const tabs = [
-    ...(org ? [['users', 'Users', 'users'], ['groups', 'Groups', 'users'], ['shared', 'Shared mailboxes', 'mail'], ['signature', 'Signature', 'pen'], ['spam', 'Spam filter', 'junk'], ['orgsecurity', 'Security', 'lock'], ['billing', 'Billing', 'tag'], ['aliases', 'Aliases', 'mail'], ['domains', 'Domains', 'globe'], ['activity', 'Activity', 'refresh']] : []),
+    ...(org ? [['users', 'Users', 'users'], ['groups', 'Groups', 'users'], ['shared', 'Shared mailboxes', 'mail'], ['signature', 'Signature', 'pen'], ['templates', 'Templates', 'mail'], ['spam', 'Spam filter', 'junk'], ['orgsecurity', 'Security', 'lock'], ['billing', 'Billing', 'tag'], ['aliases', 'Aliases', 'mail'], ['domains', 'Domains', 'globe'], ['activity', 'Activity', 'refresh']] : []),
     ...(me.superAdmin ? [['platform', 'Platform (super-admin)', 'shield'], ['support', 'Support', 'users'], ['abuse', 'Abuse & sending', 'junk'], ['new', 'New business', 'plus']] : []),
   ];
   const current = tabs.some((t) => t[0] === tab) ? tab : tabs[0][0];
@@ -540,6 +541,8 @@ export default function Admin({ me, refreshMe, onExit }) {
         {current === 'billing' && org && <Billing key={org.id} org={org} />}
         {current === 'groups' && org && <Groups key={org.id} org={org} />}
         {current === 'shared' && org && <SharedMailboxes key={org.id} org={org} />}
+        {current === 'templates' && org && <TemplatesEditor key={org.id} intro="Company templates appear for everyone in your business when they click 📄 in a new message. Good for standard replies, quotes and onboarding emails."
+          load={() => api.get(`/api/admin/orgs/${org.id}/templates`)} save={(templates) => api.put(`/api/admin/orgs/${org.id}/templates`, { templates })} />}
         {current === 'spam' && org && <SpamAdmin key={org.id} org={org} />}
         {current === 'aliases' && org && <Aliases key={org.id} domains={org.domains} />}
         {current === 'domains' && org && <Domains key={org.id} org={org} reload={load} refreshMe={refreshMe} goUsers={() => setTab('users')} />}
