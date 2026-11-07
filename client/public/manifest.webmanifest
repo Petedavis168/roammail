@@ -2,14 +2,51 @@
   "name": "Roammail",
   "short_name": "Roammail",
   "description": "Your business. Delivered. Email, calendar and contacts.",
-  "start_url": "/",
+  "start_url": "/app",
   "display": "standalone",
-  "background_color": "#ffffff",
-  "theme_color": "#0a1e2e",
+  "background_color": "#F6F8FA",
+  "theme_color": "#173D56",
   "icons": [
-    { "src": "/icon-192.png", "sizes": "192x192", "type": "image/png" },
-    { "src": "/icon-512.png", "sizes": "512x512", "type": "image/png" },
-    { "src": "/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" },
-    { "src": "/apple-touch-icon.png", "sizes": "180x180", "type": "image/png" }
+    {
+      "src": "/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png"
+    },
+    {
+      "src": "/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png"
+    },
+    {
+      "src": "/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
+    },
+    {
+      "src": "/apple-touch-icon.png",
+      "sizes": "180x180",
+      "type": "image/png"
+    }
+  ],
+  "id": "/app",
+  "scope": "/",
+  "display_override": [
+    "window-controls-overlay",
+    "standalone"
+  ],
+  "categories": [
+    "productivity",
+    "business"
+  ],
+  "shortcuts": [
+    {
+      "name": "New mail",
+      "url": "/app?compose=1"
+    },
+    {
+      "name": "Calendar",
+      "url": "/app?view=calendar"
+    }
   ]
 }

@@ -47,6 +47,13 @@ test('free accounts get a random 8-digit mailbox ID; pages check ownership and a
   assert.equal((await a.req('GET', `/${ra.mailboxId}/nonsense`)).status, 404);
   assert.equal((await a.req('GET', '/login')).location, `/${ra.mailboxId}/inbox`, 'signed in: the sign-in page goes to the inbox');
   assert.equal((await a.req('GET', '/login?add=1')).status, 200, 'unless adding another account');
+  // installed app (PWA) start URL and home-screen shortcuts
+  assert.equal((await a.req('GET', '/app')).location, `/${ra.mailboxId}/inbox`);
+  assert.equal((await a.req('GET', '/app?compose=1')).location, `/${ra.mailboxId}/inbox?compose=1`);
+  assert.equal((await a.req('GET', '/app?view=calendar')).location, `/${ra.mailboxId}/calendar`);
+  assert.equal((await new Browser().req('GET', '/app')).location, '/login', 'not signed in: sign-in page');
+  const mf = await a.req('GET', '/manifest.webmanifest');
+  assert.equal(mf.status, 200); assert.equal(mf.data.start_url, '/app');
 
   const b = new Browser(); const rb = await signup(b, `rb${run}`);
   assert.notEqual(rb.mailboxId, ra.mailboxId);
