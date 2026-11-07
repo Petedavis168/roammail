@@ -1,13 +1,14 @@
-// Which mailbox the mail views work on: '' = your own, or a shared mailbox you're a member of
-let mailbox = '';
-export const setMailbox = (m) => { mailbox = m || ''; };
-export const currentMailbox = () => mailbox;
-const MAIL_PATHS = /^\/api\/(attachment|copy|delete|drafts|empty|events|flags|folders|mark-all-read|message|messages|move|raw|scheduled|search|send|snooze|snoozed|thread)(\/|\?|$)/;
-export const mailUrl = (url) => (mailbox && MAIL_PATHS.test(url) ? `${url}${url.includes('?') ? '&' : '?'}mailbox=${encodeURIComponent(mailbox)}` : url);
+// Which mailbox this page works on: the public ID from the URL (roammail.net/{id}/...). The server checks it
+// belongs to one of this browser's signed-in mailboxes, or a shared mailbox they may open.
+let mailboxId = '';
+export const setMailboxId = (id) => { mailboxId = id || ''; };
+export const currentMailboxId = () => mailboxId;
+/** For URLs the browser opens directly (attachments, live updates): add ?mid= so the server picks the right mailbox. */
+export const mailUrl = (url) => (mailboxId && url.startsWith('/api/') ? `${url}${url.includes('?') ? '&' : '?'}mid=${encodeURIComponent(mailboxId)}` : url);
 
 async function request(method, url, body, { form } = {}) {
   const opts = { method, headers: { 'X-Requested-With': 'mailcow-client' }, credentials: 'same-origin' };
-  if (mailbox && MAIL_PATHS.test(url)) opts.headers['X-Mailbox'] = mailbox;
+  if (mailboxId && url.startsWith('/api/')) opts.headers['X-Mailbox-Id'] = mailboxId;
   if (form) opts.body = form;
   else if (body !== undefined) {
     opts.headers['Content-Type'] = 'application/json';

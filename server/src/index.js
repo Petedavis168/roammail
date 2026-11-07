@@ -11,7 +11,7 @@ import { sharedboxes } from './sharedboxes.js';
 import { archive } from './archive.js';
 import { push, startPush, pushStats } from './push.js';
 import { help } from './help.js';
-import { hosts } from './hosts.js';
+import { hosts, siteRouter } from './hosts.js';
 import { abuseDesk, outboundAdmin, startOutboundChecks } from './outbound.js';
 import { ops, metricsMiddleware, startMetricsLog, gauge, startDbBackups } from './ops.js';
 import { q } from './db.js';
@@ -108,6 +108,10 @@ app.use('/api', (err, req, res, _next) => {
   const safe = status < 500 || err.responseText || /^mailcow:/.test(err.message || '') || err.code === 'EAUTH';
   res.status(status).json({ error: safe ? (err.responseText || err.message) : 'Something went wrong. Please try again.' });
 });
+
+// Public marketing site (Pete's static site in /site): roammail.net/, its pages and /assets
+const site = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../site');
+if (fs.existsSync(site)) app.use(siteRouter(site));
 
 const dist = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../client/dist');
 if (fs.existsSync(dist)) {

@@ -210,7 +210,14 @@ test('shared mailboxes: free, members only, read-only members cannot send', asyn
   const login = async (l) => { const c = new Client(); assert.equal((await c.post('/api/login', { email: `${l}@${domain}`, password: PW })).status, 200); return c; };
   const ann = await login('ann'); const ben = await login('ben');
   const as = (c, method, path, body, box = `support@${domain}`) => fetch(BASE + path, { method, headers: { Cookie: c.cookie, 'X-Forwarded-For': c.ip, 'X-Requested-With': 'mailcow-client', 'X-Mailbox': box }, body });
-  assert.deepEqual((await ann.get('/api/shared-mailboxes')).data, [{ email: `support@${domain}`, name: 'Support', canSend: true, archive: false }]);
+  const sharedList = (await ann.get('/api/shared-mailboxes')).data;
+  assert.deepEqual(sharedList.map(({ mailboxId, ...x }) => x), [{ email: `support@${domain}`, name: 'Support', canSend: true, archive: false }]);
+  assert.match(sharedList[0].mailboxId, /^\d{6}-\d{3}-SU$/, 'business mailbox ID: account-number-initials');
+  // the ID in the URL opens the shared mailbox for a member, and is a 404 for anyone else
+  const viaId = await fetch(`${BASE}/api/messages?folder=INBOX`, { headers: { Cookie: ann.cookie, 'X-Forwarded-For': ann.ip, 'X-Mailbox-Id': sharedList[0].mailboxId } });
+  assert.equal(viaId.status, 200);
+  const outsider = await fetch(`${BASE}/api/messages?folder=INBOX`, { headers: { Cookie: a.cookie, 'X-Forwarded-For': a.ip, 'X-Mailbox-Id': sharedList[0].mailboxId } });
+  assert.equal(outsider.status, 404);
 
   // a customer writes to support@; both members see it
   const fd = new FormData(); fd.append('to', `support@${domain}`); fd.append('subject', `Help ${run}`); fd.append('text', 'my order');
@@ -286,4 +293,27 @@ test('archive / legal hold: copies via mailcow BCC maps, read-only for viewers',
   assert.equal(held.data.maps, 2);
   const off = await a.req('PUT', `/api/admin/orgs/${orgId}/archive`, { enabled: false, viewers: [`hr@${domain}`] });
   assert.equal(off.data.maps, 0);
+});
+
+test('business mailbox IDs: account-number-mailbox-initials; renaming moves the URL with a 301', async () => {
+  const a = await newAdmin(`bid${run}`);
+  const domain = `bid${run}.test`;
+  const { orgId } = (await a.post('/api/domains', { domain, orgName: `Bid ${run}` })).data;
+  await a.post(`/api/domains/${domain}/verify`);
+  const { url } = (await a.post(`/api/billing/${orgId}/checkout`, { interval: 'month', seats: 2 })).data;
+  const sid = new URL((await fetch(url, { method: 'POST', redirect: 'manual' })).headers.get('location')).searchParams.get('session_id');
+  await a.post('/api/billing/confirm', { sessionId: sid });
+  assert.equal((await a.post('/api/admin/users', { domain, localPart: 'pat', name: 'Pat Smith', password: PW, welcome: false })).status, 200);
+  assert.equal((await a.post('/api/admin/users', { domain, localPart: 'lee', name: 'Lee Ng', password: PW, welcome: false })).status, 200);
+  const pat = new Client(); const login = await pat.post('/api/login', { email: `pat@${domain}`, password: PW });
+  const [acct, no, ini] = login.data.mailboxId.split('-');
+  assert.match(acct, /^\d{6}$/); assert.equal(ini, 'PS');
+  const lee = new Client(); const lid = (await lee.post('/api/login', { email: `lee@${domain}`, password: PW })).data.mailboxId;
+  assert.equal(lid.split('-')[0], acct, 'same business, same account number');
+  assert.equal(Number(lid.split('-')[1]), Number(no) + 1, 'next mailbox number');
+  // rename: new initials, old URL redirects permanently
+  await a.req('PATCH', '/api/admin/users', { email: `pat@${domain}`, name: 'Pat Jones' });
+  const page = await fetch(`${BASE}/${login.data.mailboxId}/inbox`, { headers: { Cookie: pat.cookie, 'X-Forwarded-For': pat.ip }, redirect: 'manual' });
+  assert.equal(page.status, 301);
+  assert.equal(page.headers.get('location'), `/${acct}-${no}-PJ/inbox`);
 });

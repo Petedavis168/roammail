@@ -41,12 +41,13 @@ test('malicious email content cannot run code or overlay the app (reading, reply
     const page = await browser.newPage();
     const remote = [];
     page.on('request', (r) => { if (/tracker\.test|evil\.test/.test(r.url())) remote.push(r.url()); });
-    await page.goto(BASE);
+    await page.goto(`${BASE}/login`);
     // Gmail-style sign-in: email, Next, password, Next
     await page.fill('input[autocomplete=username]', `${user}@${D}`);
     await page.click('.g-btn');
     await page.fill('input[autocomplete=current-password]', PW);
     await page.click('.g-btn');
+    await page.waitForURL(/\/\d{8}\/inbox$/); // lands on roammail.net/{mailboxId}/inbox
     await page.waitForSelector('.row');
     for (const subject of Object.keys(PAYLOADS)) {
       await page.click(`.row:has-text("${subject}")`);

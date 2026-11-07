@@ -78,12 +78,12 @@ export default function Sidebar({ folders, current, onSelect, onCompose, reload,
   return (
     <nav className="sidebar" onClick={() => setMenu(null)}>
       <button className="compose-btn" onClick={onCompose}><Icon name="pen" /> New mail</button>
-      {mailboxes.length > 0 && (
-        <label className="mailbox-pick" title="Switch between your mailbox and shared mailboxes">
+      {(mailboxes.length > 0 || (me?.accounts || []).length > 1) && (
+        <label className="mailbox-pick" title="Switch between your accounts and shared mailboxes">
           <Icon name="users" size={14} />
           <select value={mailbox} onChange={(e) => onMailbox(e.target.value)} aria-label="Mailbox">
-            <option value="">{me?.email || 'My mailbox'}</option>
-            {mailboxes.map((b) => <option key={b.email} value={b.email}>{b.name ? `${b.name} (${b.email})` : b.email}{b.canSend ? '' : ' (read only)'}</option>)}
+            {(me?.accounts || []).map((a) => <option key={a.mailboxId} value={a.mailboxId}>{a.email}</option>)}
+            {mailboxes.map((b) => <option key={b.mailboxId} value={b.mailboxId}>{b.name ? `${b.name} (${b.email})` : b.email}{b.archive ? ' (archive, read only)' : b.canSend ? '' : ' (read only)'}</option>)}
           </select>
         </label>
       )}

@@ -13,7 +13,7 @@ const STRENGTH = ['Too weak', 'Weak', 'Fair', 'Good', 'Strong'];
 function Card({ title, subtitle, children, onSubmit, footer }) {
   return (
     <form className="g-card" onSubmit={onSubmit} noValidate>
-      <img className="g-mark" src="/roammail-mark.png" alt="Roammail" />
+      <img className="g-mark" src="/assets/roammail-symbol.png" alt="Roammail" />
       <h1>{title}</h1>
       {subtitle && <p className="g-sub">{subtitle}</p>}
       <div className="g-body">{children}</div>
@@ -31,12 +31,15 @@ function Field({ label, error, hint, ...props }) {
   );
 }
 
-export default function Login({ onLogin }) {
+export default function Login({ onLogin, mode = 'signin' }) {
   const params = new URLSearchParams(location.search);
   const resetToken = params.get('reset');
   const [cfg, setCfg] = useState({ enabled: false, domain: 'roammail.net' });
-  const [step, setStep] = useState(resetToken ? 'reset' : params.get('signup') ? 'name' : 'email');
-  const [f, setF] = useState({ email: '', password: '', code: '', first: '', last: '', purpose: 'personal', username: '', custom: false, pw: '', pw2: '', recovery: '', terms: false });
+  // login.roammail.net/signup?type=free|domain&billing=monthly|yearly comes from the website's buttons
+  const signupType = params.get('type') === 'domain' ? 'domain' : 'free';
+  const billing = ['monthly', 'yearly'].includes(params.get('billing')) ? params.get('billing') : '';
+  const [step, setStep] = useState(resetToken ? 'reset' : mode === 'signup' || params.get('signup') ? 'name' : 'email');
+  const [f, setF] = useState({ email: '', password: '', code: '', first: '', last: '', purpose: signupType === 'domain' ? 'business' : 'personal', username: '', custom: false, pw: '', pw2: '', recovery: '', terms: false });
   const [show, setShow] = useState(false);
   const [error, setError] = useState('');
   const [info, setInfo] = useState('');
@@ -81,7 +84,7 @@ export default function Login({ onLogin }) {
     <Shell>
       <Card title="Welcome" onSubmit={(e) => { e.preventDefault(); run(async () => {
         const r = await api.login(fullEmail, f.password);
-        if (r.twoFactor) { setTicket(r.ticket); go('code'); } else await onLogin();
+        if (r.twoFactor) { setTicket(r.ticket); go('code'); } else await onLogin(r);
       }); }} footer={<><button type="button" className="g-link" onClick={() => go('forgot')}>Forgot password?</button><button className="g-btn" disabled={busy}>{busy ? 'Signing in…' : 'Next'}</button></>}>
         <button type="button" className="g-chip" onClick={() => go('email')}><Icon name="mail" size={14} /> {fullEmail} <Icon name="down" size={12} /></button>
         <Field label="Enter your password" type={show ? 'text' : 'password'} autoComplete="current-password" autoFocus value={f.password} onChange={set('password')} error={error} />
@@ -92,7 +95,7 @@ export default function Login({ onLogin }) {
   if (step === 'code') return (
     <Shell>
       <Card title="2-Step Verification" subtitle="Open your authenticator app and enter the 6-digit code. You can also use a backup code."
-        onSubmit={(e) => { e.preventDefault(); run(async () => { await api.post('/api/login/2fa', { ticket, code: f.code }); await onLogin(); }); }}
+        onSubmit={(e) => { e.preventDefault(); run(async () => { onLogin(await api.post('/api/login/2fa', { ticket, code: f.code })); }); }}
         footer={<><button type="button" className="g-link" onClick={() => go('password')}>Back</button><button className="g-btn" disabled={busy}>Next</button></>}>
         <button type="button" className="g-chip" onClick={() => go('email')}><Icon name="shield" size={14} /> {fullEmail}</button>
         <Field label="Enter code" inputMode="numeric" autoComplete="one-time-code" autoFocus value={f.code} onChange={set('code')} error={error} />
@@ -211,9 +214,10 @@ export default function Login({ onLogin }) {
     <Shell>
       <Card title="Privacy and Terms" subtitle={`Almost done, ${f.first}.`}
         onSubmit={(e) => { e.preventDefault(); if (!f.terms) return setError('Please agree to continue'); run(async () => {
-          await api.signup({ name: `${f.first} ${f.last}`.trim(), username, password: f.pw, recoveryEmail: f.recovery, captcha, acceptTerms: true });
+          const r = await api.signup({ name: `${f.first} ${f.last}`.trim(), username, password: f.pw, recoveryEmail: f.recovery, captcha, acceptTerms: true });
+          // Own-domain sign-ups go straight on to connecting the domain (and choosing monthly/yearly)
           if (f.purpose === 'business') localStorage.setItem('startBusiness', '1');
-          await onLogin();
+          onLogin({ ...r, redirect: f.purpose === 'business' ? `${r.redirect}?setup=domain${billing ? `&billing=${billing}` : ''}` : r.redirect });
         }); }}
         footer={<><button type="button" className="g-link" onClick={() => go('recovery')}>Back</button><button className="g-btn" disabled={busy}>{busy ? 'Creating your account…' : 'Create account'}</button></>}>
         <div className="g-review">
@@ -238,7 +242,7 @@ function Shell({ children }) {
   return (
     <div className="g-page">
       {children}
-      <div className="g-legal"><span>Roammail · Your business. Delivered.</span><span><a href="/legal/privacy">Privacy</a><a href="/legal/terms">Terms</a><a href="/legal/security">Security</a></span></div>
+      <div className="g-legal"><span>Roammail · Your business. Delivered. · Powered by Friendly Web Services</span><span><a href="/legal/privacy">Privacy</a><a href="/legal/terms">Terms</a><a href="/legal/security">Security</a></span></div>
     </div>
   );
 }

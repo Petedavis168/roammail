@@ -9,7 +9,7 @@ const money = (n, cur = 'USD') => new Intl.NumberFormat([], { style: 'currency',
 export function PlanPicker({ orgId, seats = 1, adding = 0, title = 'Choose your plan', note, onCancel }) {
   const toast = useToast();
   const [cfg, setCfg] = useState(null);
-  const [interval, setInterval] = useState('month');
+  const [interval, setInterval] = useState(() => localStorage.getItem('preferredBilling') || 'month');
   const [busy, setBusy] = useState(false);
   useEffect(() => { api.get('/api/billing/config').then(setCfg).catch(() => {}); }, []);
   if (!cfg) return <div className="spinner" />;

@@ -43,7 +43,8 @@ test('free accounts get a random 8-digit mailbox ID; pages check ownership and a
   }
   assert.equal((await a.req('GET', `/${ra.mailboxId}`)).location, `/${ra.mailboxId}/inbox`);
   assert.equal((await a.req('GET', `/${ra.mailboxId}/nonsense`)).status, 404);
-  assert.equal((await a.req('GET', '/')).location, `/${ra.mailboxId}/inbox`, 'signed-in home goes to the inbox');
+  assert.equal((await a.req('GET', '/login')).location, `/${ra.mailboxId}/inbox`, 'signed in: the sign-in page goes to the inbox');
+  assert.equal((await a.req('GET', '/login?add=1')).status, 200, 'unless adding another account');
 
   const b = new Browser(); const rb = await signup(b, `rb${run}`);
   assert.notEqual(rb.mailboxId, ra.mailboxId);
@@ -94,8 +95,24 @@ test('hosts: www/app redirect to the root, sign-in host keeps to sign-in, health
   assert.deepEqual(await get('app.roammail.test', '/').then((r) => [r.status, r.location]), [301, 'https://roammail.test/']);
   assert.deepEqual(await get('login.roammail.test', '/12345678/inbox').then((r) => [r.status, r.location]), [302, 'https://roammail.test/12345678/inbox']);
   assert.equal((await get('10.0.1.23', '/healthz')).status, 200, 'load balancer health checks use the server IP');
-  assert.equal((await get('roammail.test', '/')).status, 200, 'landing page');
+  assert.equal((await get('roammail.test', '/')).status, 200, 'website home');
+  assert.deepEqual(await get('roammail.test', '/signup?type=domain').then((r) => [r.status, r.location]), [301, 'https://login.roammail.test/signup?type=domain']);
+  assert.equal((await get('login.roammail.test', '/signup?type=free&billing=monthly')).status, 200, 'sign-up page');
   assert.equal((await get('login.roammail.test', '/')).status, 200, 'sign-in page');
   const anon = await get('roammail.test', '/12345678/inbox');
   assert.deepEqual([anon.status, anon.location], [302, 'https://login.roammail.test/']);
+});
+
+test('public website: home page and pages from the site, sign-up links, assets', async () => {
+  const b = new Browser();
+  const home = await b.req('GET', '/');
+  assert.equal(home.status, 200); assert.match(home.data, /Your business\. Delivered\./); assert.match(home.data, /login\.roammail\.net\/signup/);
+  for (const p of ['/terms.html', '/privacy', '/cookies.html', '/acceptable-use', '/accessibility.html', '/legal', '/brand.html', '/style.css', '/assets/roammail-symbol.png']) {
+    assert.equal((await b.req('GET', p)).status, 200, p);
+  }
+  const gs = await b.req('GET', '/get-started.html?type=domain&billing=yearly');
+  assert.equal(gs.status, 301); assert.equal(gs.location, '/signup?type=domain&billing=yearly');
+  const su = await b.req('GET', '/signup?type=free');
+  assert.equal(su.status, 200); assert.match(su.data, /<div id="root">/, 'sign-up is the web app');
+  assert.equal((await b.req('GET', '/login')).status, 200);
 });

@@ -4,6 +4,7 @@
 //   www. / app.roammail.net    301 to roammail.net, same path
 // With no ROOT_DOMAIN (development) everything is served from one host and sign-in lives at /login.
 import express from 'express';
+import path from 'node:path';
 import { config } from './config.js';
 import { resolveMailboxId, ensureMailboxId, ID_RE } from './mailboxids.js';
 import { browserMailboxes } from './session.js';
@@ -39,16 +40,20 @@ hosts.use((req, res, next) => {
   next();
 });
 
-// "/" on the root: signed in -> your inbox; otherwise the landing page (served by the web app).
-// "/" on the sign-in host: already signed in (and not adding another account) -> back to the inbox.
+// Sign-in page while already signed in (and not adding another account): straight to the inbox.
 hosts.get(['/', '/login'], async (req, res, next) => {
   const h = String(req.hostname || '').toLowerCase();
   const onLogin = config.loginHost ? h === config.loginHost : req.path === '/login';
-  if (onLogin && (req.query.add || req.query.reset)) return next();
+  if (!onLogin || req.query.add || req.query.reset) return next();
   const emails = await browserMailboxes(req);
   if (!emails.length) return next();
-  const id = await ensureMailboxId(emails[0]);
-  if (onLogin || req.path === '/') return res.redirect(302, appUrl(`/${id}/inbox`));
+  return res.redirect(302, appUrl(`/${await ensureMailboxId(emails[0])}/inbox`));
+});
+// Sign-up lives on the sign-in host: roammail.net/signup -> login.roammail.net/signup (query kept)
+hosts.get('/signup', (req, res, next) => {
+  if (config.loginHost && String(req.hostname || '').toLowerCase() !== config.loginHost) {
+    return res.redirect(301, `https://${config.loginHost}${req.originalUrl}`);
+  }
   next();
 });
 
@@ -72,3 +77,28 @@ hosts.get(ID_PATH, async (req, res, next) => {
 });
 
 export { ID_RE };
+
+// ---------------------------------------------------------------- the public website
+const SITE_PAGES = ['index', 'terms', 'privacy', 'cookies', 'acceptable-use', 'accessibility', 'legal', 'brand'];
+const SITE_FILES = /^\/(style\.css|app\.js|pricing\.js|comparison\.js|setup\.js|privacy-controls\.js)$/;
+export function siteRouter(dir) {
+  const r = express.Router();
+  // Logos are used by the sign-in pages and the app too, so /assets is served on every host
+  r.use('/assets', express.static(path.join(dir, 'assets'), { maxAge: '7d', fallthrough: false }));
+  const onSite = (req) => !config.rootDomain || String(req.hostname || '').toLowerCase() === config.rootDomain;
+  r.get('/get-started.html', (req, res, next) => {
+    if (!onSite(req)) return next();
+    const qs = req.originalUrl.includes('?') ? req.originalUrl.slice(req.originalUrl.indexOf('?')) : '';
+    res.redirect(301, config.loginHost ? `https://${config.loginHost}/signup${qs}` : `/signup${qs}`);
+  });
+  r.get(/^\/([a-z-]+)?(\.html)?$/, (req, res, next) => {
+    if (!onSite(req)) return next();
+    const name = (req.params[0] || 'index');
+    if (!SITE_PAGES.includes(name)) return next();
+    if (!req.params[0] && req.path !== '/') return next();
+    res.set('Cache-Control', 'public, max-age=600');
+    res.sendFile(path.join(dir, `${name}.html`));
+  });
+  r.get(SITE_FILES, (req, res, next) => (onSite(req) ? res.set('Cache-Control', 'public, max-age=600').sendFile(path.join(dir, req.path.slice(1))) : next()));
+  return r;
+}

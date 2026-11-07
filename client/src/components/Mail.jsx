@@ -1,5 +1,6 @@
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { api, setMailbox, mailUrl } from '../api.js';
+import { api, mailUrl } from '../api.js';
+import { messageKey, parseMessageKey, sectionForFolder, folderForSection, loginHref } from '../nav.js';
 import { Icon } from '../icons.jsx';
 import { usePrefs, catKeyword } from '../prefs.js';
 import { useToast } from './Toast.jsx';
@@ -20,20 +21,21 @@ import QuarantineList from './QuarantineList.jsx';
 const Calendar = lazy(() => import('./calendar/Calendar.jsx'));
 const Contacts = lazy(() => import('./contacts/Contacts.jsx'));
 
-export default function Mail({ me, refreshMe, theme, setTheme, onLogout }) {
+export default function Mail({ me, route, refreshMe, theme, setTheme, onLogout }) {
   const toast = useToast();
   const [prefs, setPrefs] = usePrefs(me.email);
   const [view, setView] = useState(() => {
     // Business sign-ups continue straight into domain setup
     if (localStorage.getItem('startBusiness')) { localStorage.removeItem('startBusiness'); return 'admin'; }
-    return 'mail';
+    return ['calendar', 'contacts', 'admin'].includes(route.section) ? route.section : 'mail';
   });
   const [folders, setFolders] = useState([]);
   const [folder, setFolder] = useState('INBOX');
-  const [mailbox, setMailboxState] = useState('');
+  const mailbox = route.id; // the mailbox ID in the URL
   const [sharedBoxes, setSharedBoxes] = useState([]);
   useEffect(() => { api.get('/api/shared-mailboxes').then(setSharedBoxes).catch(() => {}); }, []);
-  const switchMailbox = (m) => { setMailbox(m); setMailboxState(m); setFolder('INBOX'); };
+  // Switching mailbox = changing the ID in the path (a full page load, so nothing from the other mailbox lingers)
+  const switchMailbox = (id) => { if (id && id !== route.id) location.assign(`/${id}/inbox`); };
   const [filter, setFilter] = useState('');
   const [search, setSearch] = useState(null); // active query string
   const [searchInput, setSearchInput] = useState('');
@@ -83,6 +85,39 @@ export default function Mail({ me, refreshMe, theme, setTheme, onLogout }) {
   }, [folder, filter, search, toast]);
 
   useEffect(() => { loadFolders(); }, [loadFolders, mailbox]);
+
+  // ---------- URL <-> view: roammail.net/{id}/inbox, /sent, /folder/{name}, /message/{key}, /calendar, /settings ...
+  const applyRoute = useCallback((r, fl) => {
+    if (r.section === 'settings') { setShowSettings(true); return true; }
+    if (['calendar', 'contacts', 'admin'].includes(r.section)) { setView(r.section); return true; }
+    if (r.section === 'message') {
+      const k = parseMessageKey(r.arg);
+      if (k) { setView('mail'); setFolder(k.folder); setTimeout(() => setActive(k.uid), 0); }
+      return true;
+    }
+    const f = folderForSection(r.section, r.arg, fl);
+    if (f) { setView('mail'); setFolder(f); return true; }
+    return !fl.length ? false : (setFolder('INBOX'), true);
+  }, []);
+  const routeApplied = useRef(false);
+  useEffect(() => { if (!routeApplied.current && (folders.length || ['inbox', 'folder', 'calendar', 'contacts', 'settings', 'admin', 'message', 'scheduled', 'quarantine'].includes(route.section))) routeApplied.current = applyRoute(route, folders); }, [folders, applyRoute]);
+  useEffect(() => {
+    const onPop = () => {
+      const m = /^\/[^/]+\/(.*)$/.exec(location.pathname);
+      const [section = 'inbox', ...rest] = (m?.[1] || 'inbox').split('/');
+      setShowSettings(false); setActive(null);
+      applyRoute({ section, arg: rest.length ? decodeURIComponent(rest.join('/')) : '' }, foldersRef.current);
+    };
+    window.addEventListener('popstate', onPop);
+    return () => window.removeEventListener('popstate', onPop);
+  }, [applyRoute]);
+  const foldersRef = useRef(folders); foldersRef.current = folders;
+  useEffect(() => {
+    if (!routeApplied.current) return;
+    const section = showSettings ? 'settings' : view !== 'mail' ? view : active ? `message/${messageKey(folder, active)}` : sectionForFolder(folder, folders);
+    const path = `/${route.id}/${section}`;
+    if (location.pathname !== path) history[active || showSettings ? 'replaceState' : 'pushState'](null, '', path);
+  }, [view, folder, active, showSettings, folders]);
   useEffect(() => { setSelected(new Set()); setActive(null); if (!folder.startsWith('@')) load(); }, [load]);
   const loadSnoozed = useCallback(() => api.get('/api/snoozed').then((jobs) => {
     const m = {};
@@ -327,7 +362,13 @@ export default function Mail({ me, refreshMe, theme, setTheme, onLogout }) {
                 <div className="menu-head"><b>{prefs.displayName || me.name || me.email.split('@')[0]}</b><small>{me.email}</small></div>
                 <button onClick={() => { setShowSettings(true); setUserMenu(false); }}><Icon name="settings" /> Settings</button>
                 {(isAdmin || !inOrg) && <button onClick={() => { setView('admin'); setUserMenu(false); }}><Icon name="shield" /> {isAdmin ? 'Admin portal' : 'Set up business email'}</button>}
-                <button onClick={onLogout}><Icon name="logout" /> Sign out</button>
+                {(me.accounts || []).filter((a) => a.mailboxId !== me.mailboxId).length > 0 && <div className="menu-note">Your other accounts</div>}
+                {(me.accounts || []).filter((a) => a.mailboxId !== me.mailboxId).map((a) => (
+                  <button key={a.mailboxId} onClick={() => switchMailbox(a.mailboxId)}><Icon name="mail" /> {a.name || a.email}<small style={{ marginLeft: 6, opacity: 0.7 }}>{a.email}</small></button>
+                ))}
+                <a className="menu-link" href={loginHref('?add=1')}><Icon name="plus" /> Add another account</a>
+                <button onClick={() => onLogout(false)}><Icon name="logout" /> Sign out{(me.accounts || []).length > 1 ? ` of ${me.email}` : ''}</button>
+                {(me.accounts || []).length > 1 && <button onClick={() => onLogout(true)}><Icon name="logout" /> Sign out of all accounts</button>}
               </div>
             )}
           </div>

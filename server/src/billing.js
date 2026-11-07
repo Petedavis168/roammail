@@ -1,3 +1,4 @@
+import { ensureMailboxId } from './mailboxids.js';
 // Billing: Friendly Web Services customer codes (first mailbox free) and Stripe subscriptions ($ per user).
 // Card details never touch this server: payment happens on Stripe Checkout and the Stripe customer portal.
 import express from 'express';
@@ -240,8 +241,9 @@ billing.post('/billing/:orgId/checkout', wrap(async (req, res) => {
   const session = await stripe('POST', 'checkout/sessions', {
     mode: 'subscription', customer, client_reference_id: String(id),
     line_items: { 0: { price: priceId, quantity: seats } },
-    success_url: `${base(req)}/?billing=success&session_id={CHECKOUT_SESSION_ID}`,
-    cancel_url: `${base(req)}/?billing=canceled`,
+    // back to the admin's own mailbox URL (roammail.net/{id}/inbox), never the marketing home page
+    success_url: `${base(req)}/${await ensureMailboxId(req.user.email)}/inbox?billing=success&session_id={CHECKOUT_SESSION_ID}`,
+    cancel_url: `${base(req)}/${await ensureMailboxId(req.user.email)}/inbox?billing=canceled`,
     metadata: { org_id: id, seats, interval }, subscription_data: { metadata: { org_id: id } },
     allow_promotion_codes: 'true',
     // Sales tax / VAT worked out by Stripe Tax (turn it on in the Stripe dashboard first, then STRIPE_TAX=true)
@@ -282,7 +284,7 @@ billing.post('/billing/:orgId/portal', wrap(async (req, res) => {
   const id = await requireOrgAdmin(req, req.params.orgId);
   const b = await orgBilling(id);
   if (!b.stripe_customer) throw fail(400, 'No billing account yet');
-  const p = await stripe('POST', 'billing_portal/sessions', { customer: b.stripe_customer, return_url: `${base(req)}/?billing=portal` });
+  const p = await stripe('POST', 'billing_portal/sessions', { customer: b.stripe_customer, return_url: `${base(req)}/${await ensureMailboxId(req.user.email)}/inbox?billing=portal` });
   res.json({ url: p.url });
 }));
 

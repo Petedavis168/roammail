@@ -15,6 +15,8 @@ COPY server/package*.json server/
 RUN cd server && npm ci --omit=dev && npm cache clean --force
 COPY server/src server/src
 COPY --from=client /app/client/dist client/dist
+# Public website (roammail.net/), served by the same app
+COPY site site
 RUN mkdir -p /data && chown node:node /data
 USER node
 VOLUME /data
