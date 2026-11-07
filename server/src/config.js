@@ -107,7 +107,7 @@ config.requireAdmin2fa = (env.REQUIRE_ADMIN_2FA ?? 'true') === 'true';
 // ---------- abuse limits (webmail; SMTP from other apps is limited by mailcow's rate limit) ----------
 config.limits = {
   freePerDay: Number(env.FREE_SENDS_PER_DAY || 150),
-  newAccountPerDay: Number(env.NEW_ACCOUNT_SENDS_PER_DAY || 25),   // free accounts younger than 48 hours
+  newAccountPerDay: Number(env.NEW_ACCOUNT_SENDS_PER_DAY || 150),  // free accounts in their first 7 days (send ramp 5a: 25/h, 150/day)
   businessPerDay: Number(env.BUSINESS_SENDS_PER_DAY || 2000),
   freeRecipientsPerMessage: Number(env.FREE_MAX_RECIPIENTS || 20),
   businessRecipientsPerMessage: Number(env.BUSINESS_MAX_RECIPIENTS || 100),

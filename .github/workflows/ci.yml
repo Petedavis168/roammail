@@ -74,6 +74,13 @@ jobs:
         run: npm run test:tasks --prefix server
       - name: Mail import tests
         run: npm run test:imports --prefix server
+      - name: SMS phone verification tests (second instance with the mock SMS service)
+        working-directory: server
+        run: |
+          PORT=3004 DATA_DIR="$RUNNER_TEMP/phone" TWILIO_ACCOUNT_SID=AC1 TWILIO_AUTH_TOKEN=x TWILIO_VERIFY_SID=VA1 TWILIO_API_BASE=http://127.0.0.1:8097 \
+            nohup node --env-file=dev/test.env src/index.js > "$RUNNER_TEMP/appP.log" 2>&1 &
+          for _ in $(seq 1 30); do curl -sf localhost:3004/healthz >/dev/null && break; sleep 0.5; done
+          PHONE_BASE=http://localhost:3004 npm run test:phone
 
       - name: Browser injection tests
         working-directory: server

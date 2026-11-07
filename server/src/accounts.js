@@ -1,7 +1,7 @@
 import { markChosen, markTemporary, setupState } from './setup.js';
 import { renameMailboxId, ensureMailboxId, inboxUrl } from './mailboxids.js';
 import { syncArchive } from './archive.js';
-import { applySendingRoute } from './outbound.js';
+import { applySendingRoute, applyRate, RAMP, BUSINESS_RATE } from './outbound.js';
 // Free sign-up, business domains, and the admin / super-admin portals.
 import express from 'express';
 import crypto from 'node:crypto';
@@ -21,6 +21,7 @@ import { assertNotBreached, topSenders } from './abuse.js';
 import { resetTwoFactor } from './recovery.js';
 import { syncOrgGroups } from './groups.js';
 import { tempPassword } from './temppass.js';
+import { phoneRequired, requireVerifiedPhone } from './phone.js';
 import { sendSystemMail } from './recovery.js';
 import { needsPaymentToActivate, seatCheck, shrinkSeats, onPaid, startBillingChecks, orgBilling, setSeats } from './billing.js';
 
@@ -53,6 +54,7 @@ publicAccounts.get('/signup/config', async (req, res) => res.json({
   rootDomain: config.rootDomain || null, loginHost: config.loginHost || null,
   // mailbox sizes (config values, in MB)
   quota: { free: config.signup.quotaMb, business: config.business.defaultQuotaMb, businessMax: config.business.maxQuotaMb },
+  phoneRequired: phoneRequired(), // 5b: free sign-ups verify a mobile number by SMS
 }));
 
 async function checkCaptcha(token, ip) {
@@ -118,15 +120,16 @@ publicAccounts.post('/signup', rateLimit({ windowMs: 60 * 60_000, limit: 10 }), 
   if (lastHour >= config.limits.signupsPerHour) throw fail(429, 'Sign-ups are very busy right now. Please try again in a little while.');
   await assertNotBreached(password, `${local}@x`);
   await checkCaptcha(req.body.captcha, req.ip);
+  const phoneHash = await requireVerifiedPhone(req.body.phoneToken);
 
   const email = `${local}@${config.signup.domain}`;
   if (!(await addressAvailable(local))) throw fail(409, 'That address is taken. Try one of the suggestions.');
   await mailcow.addMailbox({ localPart: local, domain: config.signup.domain, name, password, quotaMb: config.signup.quotaMb });
   await markChosen(`${local}@${config.signup.domain}`);
-  const rl = /^(\d+)\/([smhd])$/.exec(config.signup.rateLimit);
-  if (rl) await mailcow.setMailboxRateLimit(email, rl[1], rl[2]).catch((e) => console.warn('rate limit not set:', e.message));
-  await q.run('INSERT INTO signups(email, ip, recovery_email, terms_version) VALUES(?, ?, ?, ?) ON CONFLICT(email) DO UPDATE SET ip = excluded.ip, recovery_email = excluded.recovery_email, terms_version = excluded.terms_version, created_at = excluded.created_at', email, req.ip, String(req.body.recoveryEmail || '').slice(0, 200) || null, config.legal.termsVersion);
-  await audit(email, null, 'signup', { ip: req.ip });
+  // Send ramp (5a): new free accounts start at 25/h; the daily job raises it as the account ages
+  if (config.signup.rateLimit) await applyRate(email, RAMP[0]).catch((e) => console.warn('rate limit not set:', e.message));
+  await q.run('INSERT INTO signups(email, ip, recovery_email, terms_version, phone_hash) VALUES(?, ?, ?, ?, ?) ON CONFLICT(email) DO UPDATE SET ip = excluded.ip, recovery_email = excluded.recovery_email, terms_version = excluded.terms_version, created_at = excluded.created_at, phone_hash = excluded.phone_hash', email, req.ip, String(req.body.recoveryEmail || '').slice(0, 200) || null, config.legal.termsVersion, phoneHash);
+  await audit(email, null, 'signup', { ip: req.ip, phoneVerified: !!phoneHash });
   await saveProfile(email, { name });
   await setRecoveryEmail(email, String(req.body.recoveryEmail || '').trim());
   deliverWelcome({ email, password, name }).catch(() => {});
@@ -255,8 +258,11 @@ accounts.get('/domains/:domain', wrap(async (req, res) => {
   if (d.status === 'pending') {
     return res.json({ ...base, route53, verify: { ...verifyRecord(d.domain, d.verify_token), ok: await checkVerification(d.domain, d.verify_token) }, records: requiredRecords(d.domain, null) });
   }
-  const records = await checkRecords(d.domain, dkimOf(d));
-  res.json({ ...base, route53, records, ready: records.filter((r) => !r.optional).every((r) => r.ok) });
+  // 5i: "Sending: Direct / Trusted relay" comes from the mailcow domain's relayhost (set on the server by fwd-relay-sync)
+  const mc = await mailcow.getDomain(d.domain).catch(() => null);
+  const relay = !!(mc && Number(mc.relayhost || 0) > 0);
+  const records = await checkRecords(d.domain, dkimOf(d), { relay });
+  res.json({ ...base, route53, records, sending: relay ? 'relay' : 'direct', ready: records.filter((r) => !r.optional).every((r) => r.ok) });
 }));
 
 // Step 2: verify ownership -> domain is created in mailcow with a DKIM key
@@ -354,6 +360,7 @@ async function createUser(req, d, body) {
   const quotaMb = Math.max(256, Math.min(Number(body.quotaMb) || config.business.defaultQuotaMb, config.business.maxQuotaMb));
   const email = `${local}@${d.domain}`;
   await mailcow.addMailbox({ localPart: local, domain: d.domain, name: String(body.name || '').slice(0, 100), password: body.password, quotaMb });
+  await applyRate(`${local}@${d.domain}`, BUSINESS_RATE).catch((e) => console.warn('rate limit not set:', e.message)); // business: 100/h
   await markTemporary(`${local}@${d.domain}`, body.inviteEmail ? 'invite' : 'admin');
   await q.run('INSERT INTO members(email, org_id, role) VALUES(?, ?, ?) ON CONFLICT(email, org_id) DO UPDATE SET role = excluded.role', email, d.org_id, body.admin ? 'admin' : 'user');
   await saveProfile(email, { name: body.name || '', title: body.title, department: body.department, phone: body.phone, mobile: body.mobile });

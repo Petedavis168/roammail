@@ -39,7 +39,7 @@ export default function Login({ onLogin, mode = 'signin' }) {
   const signupType = params.get('type') === 'domain' ? 'domain' : 'free';
   const billing = ['monthly', 'yearly'].includes(params.get('billing')) ? params.get('billing') : '';
   const [step, setStep] = useState(resetToken ? 'reset' : mode === 'signup' || params.get('signup') ? 'name' : 'email');
-  const [f, setF] = useState({ email: '', password: '', code: '', first: '', last: '', purpose: signupType === 'domain' ? 'business' : 'personal', username: '', custom: false, pw: '', pw2: '', recovery: '', terms: false, remember: localStorage.getItem('remember') === '1' });
+  const [f, setF] = useState({ email: '', password: '', code: '', first: '', last: '', purpose: signupType === 'domain' ? 'business' : 'personal', username: '', custom: false, pw: '', pw2: '', recovery: '', terms: false, phone: '', code: '', phoneToken: null, codeSent: false, remember: localStorage.getItem('remember') === '1' });
   const [show, setShow] = useState(false);
   const [error, setError] = useState('');
   const [info, setInfo] = useState('');
@@ -208,9 +208,25 @@ export default function Login({ onLogin, mode = 'signin' }) {
   if (step === 'recovery') return (
     <Shell>
       <Card title="Add a recovery email" subtitle="If you ever forget your password, we'll send a reset link here."
-        onSubmit={(e) => { e.preventDefault(); if (f.recovery && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(f.recovery)) return setError('Enter a valid email address'); go('review'); }}
-        footer={<><button type="button" className="g-link" onClick={() => { setF({ ...f, recovery: '' }); go('review'); }}>Skip</button><button className="g-btn">Next</button></>}>
+        onSubmit={(e) => { e.preventDefault(); if (f.recovery && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(f.recovery)) return setError('Enter a valid email address'); go(cfg.phoneRequired && !f.phoneToken ? 'phone' : 'review'); }}
+        footer={<><button type="button" className="g-link" onClick={() => { setF({ ...f, recovery: '' }); go(cfg.phoneRequired && !f.phoneToken ? 'phone' : 'review'); }}>Skip</button><button className="g-btn">Next</button></>}>
         <Field label="Recovery email" type="email" autoFocus value={f.recovery} onChange={set('recovery')} error={error} />
+      </Card>
+    </Shell>
+  );
+  // 5b: free sign-ups confirm a mobile number by text message (one free account per number)
+  if (step === 'phone') return (
+    <Shell>
+      <Card title="Verify your phone" subtitle="We'll text you a code. This keeps spammers out; your number isn't shown to anyone or used for marketing."
+        onSubmit={(e) => { e.preventDefault(); run(async () => {
+          if (!f.codeSent) { await api.post('/api/signup/phone/start', { phone: f.phone }); setF((x) => ({ ...x, codeSent: true })); return; }
+          const r = await api.post('/api/signup/phone/check', { phone: f.phone, code: f.code });
+          setF((x) => ({ ...x, phoneToken: r.token })); go('review');
+        }); }}
+        footer={<>{f.codeSent && <button type="button" className="g-link" onClick={() => setF({ ...f, codeSent: false, code: '' })}>Change number</button>}<button className="g-btn" disabled={busy}>{f.codeSent ? 'Verify' : 'Send code'}</button></>}>
+        {!f.codeSent
+          ? <Field label="Mobile number" type="tel" inputMode="tel" autoComplete="tel" autoFocus value={f.phone} onChange={set('phone')} error={error} hint="Include your country code, e.g. +1 555 123 4567" />
+          : <Field label="6-digit code" inputMode="numeric" autoComplete="one-time-code" autoFocus value={f.code} onChange={set('code')} error={error} hint={`Sent to ${f.phone}`} />}
       </Card>
     </Shell>
   );
@@ -218,7 +234,7 @@ export default function Login({ onLogin, mode = 'signin' }) {
     <Shell>
       <Card title="Privacy and Terms" subtitle={`Almost done, ${f.first}.`}
         onSubmit={(e) => { e.preventDefault(); if (!f.terms) return setError('Please agree to continue'); run(async () => {
-          const r = await api.signup({ name: `${f.first} ${f.last}`.trim(), username, password: f.pw, recoveryEmail: f.recovery, captcha, acceptTerms: true });
+          const r = await api.signup({ name: `${f.first} ${f.last}`.trim(), username, password: f.pw, recoveryEmail: f.recovery, captcha, acceptTerms: true, phoneToken: f.phoneToken });
           // Own-domain sign-ups go straight on to connecting the domain (and choosing monthly/yearly)
           if (f.purpose === 'business') localStorage.setItem('startBusiness', '1');
           onLogin({ ...r, redirect: f.purpose === 'business' ? `${r.redirect}?setup=domain${billing ? `&billing=${billing}` : ''}` : r.redirect });

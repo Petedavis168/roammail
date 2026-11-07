@@ -31,9 +31,16 @@ const ARTICLES = () => [
 <li><b>Business accounts:</b> your administrator can reset your password or 2-step verification in Admin → Users.</li></ul>`],
   ['business-domain', 'Use your own business domain', 'Business', `<p>Choose <b>Business email</b> in the app and follow the steps:</p><ol>
 <li>Enter your domain (for example yourcompany.com).</li>
-<li>Add the DNS records we show you at your domain provider (GoDaddy, Namecheap, Cloudflare, …). We check them for you and say which are missing.</li>
+<li>Add the DNS records we show you at your domain provider (GoDaddy, Namecheap, Cloudflare, …). Each value has a <b>Copy</b> button. Then press <b>Check records</b>: we say which are in place and which are still missing (we also re-check automatically).</li>
 <li>Choose a plan (or enter your Friendly Web Services customer code), then add your people.</li></ol>
-<p>Each record has a job: <b>MX</b> sends your mail to us, <b>SPF</b> and <b>DKIM</b> prove mail from us is really from you, and <b>DMARC</b> tells Gmail and Outlook to reject fakes. Together they keep your mail out of spam folders.</p>`],
+<p>Each record has a job: <b>MX</b> sends your mail to us, <b>SPF</b> and <b>DKIM</b> prove mail from us is really from you, and <b>DMARC</b> tells Gmail and Outlook to reject fakes. Together they keep your mail out of spam folders.</p>
+<p><b>Sending: Direct or Trusted relay.</b> Your domain page shows how your outgoing mail leaves us. With <b>Trusted relay</b>, mail goes out through a specialist delivery service for better inbox placement; it needs three extra CNAME records (shown in the list), which we keep the same for every domain. Your SPF record already includes the relay.</p>`],
+  ['sending-limits', 'Sending limits and paused accounts', 'Account', `<p>To keep everyone's mail out of spam folders, how much you can send grows as your account gets older:</p>
+<ul><li><b>Free accounts, first 7 days:</b> 25 messages an hour, up to 150 a day.</li>
+<li><b>Free accounts, days 8 to 30:</b> 60 an hour.</li>
+<li><b>Free accounts after 30 days, and business accounts:</b> 100 an hour.</li></ul>
+<p>Limits count every app you use (web, phone, Outlook). A message to several people counts once per message.</p>
+<p><b>Automatic pause.</b> We check outgoing mail every 5 minutes. Sending is paused (reading mail still works) if an account keeps hitting its limit, has many messages bounce, sends mail our spam filter rejects, gets spam complaints from recipients, or suddenly mails lots of people right after a sign-in from a new device. That last one usually means a stolen password, so we also sign out every device and ask for a new password. You'll get an email explaining what happened; contact support to turn sending back on.</p>`],
   ['billing', 'Plans, billing and invoices', 'Business', `<ul>
 <li>Business email is <b>US$${config.billing.perUserMonthly} per mailbox per month</b>, or US$${config.billing.perUserYearly} per mailbox per year. Friendly Web Services customers get their first mailbox free.</li>
 <li>Shared mailboxes (like support@) and the company archive are free.</li>
