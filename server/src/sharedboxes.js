@@ -7,6 +7,7 @@ import { config } from './config.js';
 import { q, audit, rolesFor, twoFactorPolicy } from './db.js';
 import { requireAuth, seal, unseal } from './session.js';
 import { mailcow } from './mailcow.js';
+import { ensureMailboxId } from './mailboxids.js';
 
 const wrap = (fn) => (req, res, next) => Promise.resolve(fn(req, res, next)).catch(next);
 const fail = (status, message) => Object.assign(new Error(message), { status });
@@ -37,7 +38,7 @@ export function sharedMailboxContext({ sendPaths = ['/send', '/drafts', '/schedu
   return wrap(async (req, res, next) => {
     req.actor = req.user;
     if (!MAIL_PATHS.some((p) => req.path === p || req.path.startsWith(`${p}/`))) return next();
-    const want = String(req.get('X-Mailbox') || req.query.mailbox || '').toLowerCase();
+    const want = String(req.delegatedMailbox || req.get('X-Mailbox') || req.query.mailbox || '').toLowerCase();
     req.actor = req.user;
     if (!want || want === req.user.email.toLowerCase()) return next();
     const row = await q.get(`SELECT s.email, s.name, s.creds, s.kind, a.can_send FROM shared_access a JOIN shared_mailboxes s ON s.email = a.mailbox
@@ -58,7 +59,11 @@ export const sharedboxes = express.Router();
 sharedboxes.use(['/shared-mailboxes', '/admin/orgs/:id/shared-mailboxes'], requireAuth);
 
 sharedboxes.get('/shared-mailboxes', wrap(async (req, res) => {
-  res.json((await sharedFor(req.user.email)).map((r) => ({ email: r.email, name: r.name, canSend: !!r.can_send && r.kind !== 'archive', archive: r.kind === 'archive' })));
+  const list = [];
+  for (const r of await sharedFor(req.user.email)) {
+    list.push({ email: r.email, name: r.name, canSend: !!r.can_send && r.kind !== 'archive', archive: r.kind === 'archive', mailboxId: await ensureMailboxId(r.email, { name: r.name }) });
+  }
+  res.json(list);
 }));
 
 async function requireOrgAdmin(req, orgId) {

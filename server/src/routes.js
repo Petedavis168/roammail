@@ -8,6 +8,7 @@ import { config } from './config.js';
 import { clearSession, requireAuth, onRevoke } from './session.js';
 import { createCache } from './cache.js';
 import { sharedMailboxContext } from './sharedboxes.js';
+import { ensureMailboxId } from './mailboxids.js';
 import { count, gauge } from './ops.js';
 import { getClient, closeClient, withMailbox, specialFolder, makeClient } from './imap.js';
 import { parseQuery } from './search.js';
@@ -111,12 +112,17 @@ api.use(sharedMailboxContext());
 
 api.post('/logout', wrap(async (req, res) => {
   await closeClient(req.user.sid);
-  await clearSession(req, res);
+  await clearSession(req, res, { all: req.body?.all === true });
   res.json({ ok: true });
 }));
 
 api.get('/me', async (req, res) => res.json({
   email: req.user.email, name: req.user.name, ...await rolesFor(req.user.email),
+  mailboxId: await ensureMailboxId(req.user.email, { name: req.user.name || undefined }),
+  // every mailbox signed in on this browser (switch = change the ID in the URL)
+  accounts: await Promise.all((req.accounts || []).map(async (a) => ({ email: a.email, name: a.name, mailboxId: await ensureMailboxId(a.email) }))),
+  // set when the URL points at a shared mailbox this person can open
+  viewing: req.delegatedMailbox ? { email: req.delegatedMailbox, mailboxId: await ensureMailboxId(req.delegatedMailbox) } : null,
   twoFactor: await twoFactorPolicy(req.user.email), adminRequires2fa: appConfig.requireAdmin2fa,
   orgDomains: (await q.all("SELECT d.domain FROM domains d WHERE d.status = 'active' AND d.org_id = (SELECT org_id FROM domains WHERE domain = ?)", req.user.email.split('@')[1])).map((d) => d.domain),
   clientSettings: { meetUrl: (process.env.MEETING_URL || 'https://meet.jit.si').replace(/\/$/, ''), imapHost: appConfig.imap.host, imapPort: appConfig.imap.port, smtpHost: appConfig.smtp.host, smtpPort: appConfig.smtp.port, smtpSecure: appConfig.smtp.secure, davEnabled: appConfig.davEnabled, davHost: appConfig.davHost },

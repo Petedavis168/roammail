@@ -11,6 +11,7 @@ import { sharedboxes } from './sharedboxes.js';
 import { archive } from './archive.js';
 import { push, startPush, pushStats } from './push.js';
 import { help } from './help.js';
+import { hosts } from './hosts.js';
 import { abuseDesk, outboundAdmin, startOutboundChecks } from './outbound.js';
 import { ops, metricsMiddleware, startMetricsLog, gauge, startDbBackups } from './ops.js';
 import { q } from './db.js';
@@ -66,6 +67,7 @@ app.use('/api', (req, res, next) => {
   next();
 });
 app.get('/healthz', (req, res) => res.json({ ok: true }));
+app.use(hosts);
 app.use(ops);
 app.use(abuseDesk);
 app.use(help);

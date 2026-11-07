@@ -1,3 +1,4 @@
+import { renameMailboxId, ensureMailboxId, inboxUrl } from './mailboxids.js';
 import { syncArchive } from './archive.js';
 import { applySendingRoute } from './outbound.js';
 // Free sign-up, business domains, and the admin / super-admin portals.
@@ -45,6 +46,8 @@ publicAccounts.get('/signup/config', async (req, res) => res.json({
   enabled: config.signup.enabled && await setting('signupEnabled', true) && !!config.signup.domain,
   domain: config.signup.domain,
   turnstileSiteKey: config.turnstile.siteKey || null,
+  // where sign-in and the app live (the web app uses these to build links)
+  rootDomain: config.rootDomain || null, loginHost: config.loginHost || null,
 }));
 
 async function checkCaptcha(token, ip) {
@@ -122,7 +125,8 @@ publicAccounts.post('/signup', rateLimit({ windowMs: 60 * 60_000, limit: 10 }), 
   await setRecoveryEmail(email, String(req.body.recoveryEmail || '').trim());
   deliverWelcome({ email, password, name }).catch(() => {});
   await setSession(res, { email, password, name }, req);
-  res.json({ email });
+  const mailboxId = await ensureMailboxId(email, { name });
+  res.json({ email, mailboxId, redirect: inboxUrl(mailboxId) });
 }));
 
 // =================================================================== helpers
@@ -450,7 +454,7 @@ accounts.patch('/admin/users', wrap(async (req, res) => {
   const email = String(req.body.email || '').toLowerCase();
   const d = await requireDomainAdmin(req, email.split('@')[1]);
   const attr = {};
-  if (req.body.name !== undefined) attr.name = String(req.body.name).slice(0, 100);
+  if (req.body.name !== undefined) { attr.name = String(req.body.name).slice(0, 100); await renameMailboxId(email, attr.name); }
   if (req.body.password) { checkPassword(req.body.password); attr.password = req.body.password; attr.password2 = req.body.password; }
   if (req.body.quotaMb !== undefined) attr.quota = Math.max(256, Math.min(Number(req.body.quotaMb) || config.business.defaultQuotaMb, config.business.maxQuotaMb));
   if (req.body.active !== undefined) {

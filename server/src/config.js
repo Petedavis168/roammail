@@ -34,6 +34,11 @@ export const config = {
 config.dataDir = env.DATA_DIR || './data';
 config.databaseUrl = env.DATABASE_URL || ''; // postgres://user:pass@host:5432/db  (empty = SQLite in DATA_DIR)
 config.redisUrl = env.REDIS_URL || '';
+// Hosts (production): ROOT_DOMAIN=roammail.net serves the landing page, sign-up and the app (roammail.net/{id}/inbox);
+// login.<root> serves sign-in and recovery; www.<root> and app.<root> redirect to the root. Empty = one host (dev).
+config.rootDomain = (env.ROOT_DOMAIN || '').toLowerCase();
+config.loginHost = (env.LOGIN_HOST || (config.rootDomain ? `login.${config.rootDomain}` : '')).toLowerCase();
+config.cookieDomain = env.COOKIE_DOMAIN || (config.rootDomain ? `.${config.rootDomain}` : '');
 // web = serve people only, worker = background work only (scheduled sends, billing, clean-up), all = both (one server)
 config.role = ['web', 'worker', 'all'].includes(env.ROLE) ? env.ROLE : 'all';
 config.runsBackground = config.role !== 'web';       // redis://host:6379  (empty = in-memory, one server only)

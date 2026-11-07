@@ -172,6 +172,11 @@ CREATE TABLE IF NOT EXISTS support_tickets (
   id INTEGER PRIMARY KEY AUTOINCREMENT, email TEXT NOT NULL, account TEXT, topic TEXT, message TEXT, ip TEXT, at INTEGER NOT NULL,
   status TEXT NOT NULL DEFAULT 'open'
 );
+CREATE TABLE IF NOT EXISTS mailbox_ids (
+  id TEXT PRIMARY KEY, email TEXT NOT NULL, kind TEXT NOT NULL, account_no TEXT, mailbox_no INTEGER,
+  status TEXT NOT NULL DEFAULT 'active', created_at INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS mailbox_ids_email ON mailbox_ids(email, status);
 CREATE TABLE IF NOT EXISTS send_counts (email TEXT NOT NULL, day TEXT NOT NULL, count INTEGER NOT NULL DEFAULT 0, PRIMARY KEY (email, day));
 `;
 
@@ -181,7 +186,10 @@ const MIGRATIONS = [['orgs', 'require_2fa', 'INTEGER NOT NULL DEFAULT 0'], ['org
   ['orgs', 'stripe_subscription', 'TEXT'], ['orgs', 'billing_status', "TEXT NOT NULL DEFAULT 'none'"], ['orgs', 'paid_seats', 'INTEGER NOT NULL DEFAULT 0'],
   ['orgs', 'canceled_at', 'TEXT'],
   ['user_security', 'recovery_verified', 'INTEGER NOT NULL DEFAULT 0'], ['user_security', 'recovery_pending', 'TEXT'],
-  ['user_security', 'recovery_code', 'TEXT'], ['user_security', 'recovery_code_exp', 'INTEGER'], ['user_security', 'recovery_code_tries', 'INTEGER NOT NULL DEFAULT 0'], ['jobs', 'claimed_at', 'INTEGER'], ['shared_mailboxes', 'kind', "TEXT NOT NULL DEFAULT 'shared'"]];
+  ['user_security', 'recovery_code', 'TEXT'], ['user_security', 'recovery_code_exp', 'INTEGER'], ['user_security', 'recovery_code_tries', 'INTEGER NOT NULL DEFAULT 0'], ['jobs', 'claimed_at', 'INTEGER'], ['shared_mailboxes', 'kind', "TEXT NOT NULL DEFAULT 'shared'"], ['orgs', 'account_no', 'TEXT']];
+
+// Indexes on migrated columns (run after MIGRATIONS)
+const AFTER = ['CREATE UNIQUE INDEX IF NOT EXISTS orgs_account_no ON orgs(account_no)'];
 
 // ---------------------------------------------------------------- SQLite
 async function sqliteDriver() {
@@ -194,6 +202,7 @@ async function sqliteDriver() {
     const cols = db.prepare(`PRAGMA table_info(${table})`).all().map((c) => c.name);
     if (!cols.includes(col)) db.exec(`ALTER TABLE ${table} ADD COLUMN ${col} ${def}`);
   }
+  for (const sql of AFTER) db.exec(sql);
   const stmts = new Map();
   const prep = (sql) => {
     let st = stmts.get(sql);
@@ -251,6 +260,7 @@ async function pgDriver(url) {
     await c.query('SELECT pg_advisory_lock(727001)');
     await c.query(toPgSchema(SCHEMA));
     for (const [table, col, def] of MIGRATIONS) await c.query(`ALTER TABLE ${table} ADD COLUMN IF NOT EXISTS ${col} ${toPgSchema(def)}`);
+    for (const sql of AFTER) await c.query(sql);
     await c.query('SELECT pg_advisory_unlock(727001)');
   } finally { c.release(); }
   const cache = new Map();

@@ -1,3 +1,4 @@
+import { ensureMailboxId, inboxUrl } from './mailboxids.js';
 // Sign-in security: 2-step verification (TOTP), lockout, sign-in history,
 // password change / reset, sign out everywhere.
 import express from 'express';
@@ -105,7 +106,8 @@ publicSecurity.post('/login', loginLimiter, wrap(async (req, res) => {
   await logEvent(req, email, true);
   await setSession(res, { email, password, name: '' }, req);
   await newDeviceCheck(req, email, password);
-  res.json({ email });
+  const mailboxId = await ensureMailboxId(email);
+  res.json({ email, mailboxId, redirect: inboxUrl(mailboxId) });
 }));
 
 publicSecurity.post('/login/2fa', loginLimiter, wrap(async (req, res) => {
@@ -139,7 +141,8 @@ publicSecurity.post('/login/2fa', loginLimiter, wrap(async (req, res) => {
   await logEvent(req, t.email, true, '2fa');
   await setSession(res, { email: t.email, password: t.password, name: '' }, req);
   await newDeviceCheck(req, t.email, t.password);
-  res.json({ email: t.email });
+  const mailboxId = await ensureMailboxId(t.email);
+  res.json({ email: t.email, mailboxId, redirect: inboxUrl(mailboxId) });
 }));
 
 const resetLimiter = rateLimit({ windowMs: 60 * 60 * 1000, limit: 10 });
@@ -153,8 +156,8 @@ publicSecurity.post('/password/forgot', resetLimiter, wrap(async (req, res) => {
   const token = crypto.randomBytes(24).toString('base64url');
   await q.run('DELETE FROM password_resets WHERE email = ? OR expires < ?', email, Date.now());
   await q.run('INSERT INTO password_resets(token_hash, email, expires) VALUES(?, ?, ?)', sha(token), email, Date.now() + 30 * 60 * 1000);
-  const base = config.publicUrl || `${req.protocol}://${req.get('host')}`;
-  const link = `${base}/?reset=${token}`;
+  // Reset links open the sign-in host (login.roammail.net) in production
+  const link = config.loginHost ? `https://${config.loginHost}/?reset=${token}` : `${config.publicUrl || `${req.protocol}://${req.get('host')}`}/login?reset=${token}`;
   await mailer.sendMail({
     from: { name: config.appName, address: config.systemMail.from }, to: sec.recovery_email,
     subject: `Reset your ${config.appName} password`,

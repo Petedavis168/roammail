@@ -147,6 +147,7 @@ export const mailcow = {
 // list each time, so we keep a short-lived shared copy and drop it whenever we change something.
 import { createCache } from './cache.js';
 import { broadcast, onBroadcast } from './shared.js';
+import { ensureMailboxId, retireMailboxIds } from './mailboxids.js';
 export const mailcowCache = createCache({ ttlMs: Number(process.env.MAILCOW_CACHE_SECONDS || 60) * 1000, max: 2000 });
 onBroadcast('mailcow-cache-del', (key) => mailcowCache.delete(key));
 const forget = (key) => broadcast('mailcow-cache-del', key);
@@ -155,9 +156,15 @@ const domainOf = (e) => String(e || '').split('@')[1]?.toLowerCase() || '';
 const dropBoxes = (domain) => forget(`boxes:${domain}`);
 
 mailcow.listMailboxes = (domain) => mailcowCache.get(`boxes:${String(domain).toLowerCase()}`, () => raw.listMailboxes(domain));
-mailcow.addMailbox = async (o) => { try { return await raw.addMailbox(o); } finally { dropBoxes(String(o.domain).toLowerCase()); } };
+mailcow.addMailbox = async (o) => {
+  try { return await raw.addMailbox(o); } finally {
+    dropBoxes(String(o.domain).toLowerCase());
+    // every mailbox gets its public URL ID the moment it exists
+    await ensureMailboxId(`${o.localPart}@${o.domain}`, { name: o.name }).catch((e) => console.error('APP_ERROR mailbox id', e.message));
+  }
+};
 mailcow.editMailbox = async (email, attr) => { try { return await raw.editMailbox(email, attr); } finally { for (const e of [].concat(email)) dropBoxes(domainOf(e)); } };
-mailcow.deleteMailbox = async (email) => { try { return await raw.deleteMailbox(email); } finally { dropBoxes(domainOf(email)); } };
+mailcow.deleteMailbox = async (email) => { try { return await raw.deleteMailbox(email); } finally { dropBoxes(domainOf(email)); await retireMailboxIds(email).catch(() => {}); } };
 
 // Quarantine: one fetch shared by everyone, indexed by recipient and by recipient domain.
 async function quarantineIndex() {
