@@ -190,3 +190,66 @@ test('bulk import: preview, problems reported, extra seats confirmed and billed'
   const other = await newAdmin(`imo${run}`);
   assert.equal((await other.post('/api/admin/users/import', { domain, csv, dryRun: true })).status, 403);
 });
+
+test('shared mailboxes: free, members only, read-only members cannot send', async () => {
+  const a = await newAdmin(`shr${run}`);
+  const domain = `shared${run}.test`;
+  const { orgId } = (await a.post('/api/domains', { domain, orgName: `Shared ${run}` })).data;
+  await a.post(`/api/domains/${domain}/verify`);
+  const { url } = (await a.post(`/api/billing/${orgId}/checkout`, { interval: 'month', seats: 2 })).data;
+  const sid = new URL((await fetch(url, { method: 'POST', redirect: 'manual' })).headers.get('location')).searchParams.get('session_id');
+  await a.post('/api/billing/confirm', { sessionId: sid });
+  for (const l of ['ann', 'ben']) assert.equal((await addUser(a, domain, l)).status, 200);
+  const created = await a.post(`/api/admin/orgs/${orgId}/shared-mailboxes`, { domain, localPart: 'support', name: 'Support',
+    members: [{ email: `ann@${domain}`, canSend: true }, { email: `ben@${domain}`, canSend: false }] });
+  assert.equal(created.status, 200, JSON.stringify(created.data));
+  assert.equal((await a.get(`/api/billing/${orgId}`)).data.paidSeats, 2, 'no extra seat for a shared mailbox');
+  assert.ok(!(await a.get(`/api/admin/users?domain=${domain}`)).data.some((u) => u.email === `support@${domain}`), 'not listed as a person');
+  assert.equal((await a.post(`/api/admin/orgs/${orgId}/shared-mailboxes`, { domain, localPart: 'x', members: ['someone@elsewhere.test'] })).status, 400);
+
+  const login = async (l) => { const c = new Client(); assert.equal((await c.post('/api/login', { email: `${l}@${domain}`, password: PW })).status, 200); return c; };
+  const ann = await login('ann'); const ben = await login('ben');
+  const as = (c, method, path, body, box = `support@${domain}`) => fetch(BASE + path, { method, headers: { Cookie: c.cookie, 'X-Forwarded-For': c.ip, 'X-Requested-With': 'mailcow-client', 'X-Mailbox': box }, body });
+  assert.deepEqual((await ann.get('/api/shared-mailboxes')).data, [{ email: `support@${domain}`, name: 'Support', canSend: true }]);
+
+  // a customer writes to support@; both members see it
+  const fd = new FormData(); fd.append('to', `support@${domain}`); fd.append('subject', `Help ${run}`); fd.append('text', 'my order');
+  assert.equal((await fetch(`${BASE}/api/send`, { method: 'POST', headers: { Cookie: a.cookie, 'X-Forwarded-For': a.ip, 'X-Requested-With': 'mailcow-client' }, body: fd })).status, 200);
+  await sleep(1500);
+  for (const c of [ann, ben]) {
+    const list = await (await as(c, 'GET', '/api/messages?folder=INBOX')).json();
+    assert.ok(list.messages.some((m) => m.subject === `Help ${run}`));
+  }
+  // ann replies from support@, ben (read-only) can't
+  const reply = () => { const f = new FormData(); f.append('to', `ann@${domain}`); f.append('subject', `Re: Help ${run}`); f.append('text', 'on it'); return f; };
+  assert.equal((await as(ann, 'POST', '/api/send', reply())).status, 200);
+  assert.equal((await as(ben, 'POST', '/api/send', reply())).status, 403);
+  // outsiders and the admin (not a member) can't open it
+  assert.equal((await as(a, 'GET', '/api/messages?folder=INBOX')).status, 403);
+  // their own mailbox still works normally
+  assert.equal((await ben.get('/api/me')).data.email, `ben@${domain}`);
+  // removing ben takes effect immediately
+  await a.req('PUT', `/api/admin/orgs/${orgId}/shared-mailboxes/support@${domain}`, { members: [{ email: `ann@${domain}`, canSend: true }] });
+  assert.equal((await as(ben, 'GET', '/api/messages?folder=INBOX')).status, 403);
+});
+
+test('shared mailbox header never reaches account settings', async () => {
+  // Uses the shared mailbox from the previous test's naming scheme: create a fresh one quickly
+  const a = await newAdmin(`shx${run}`);
+  const domain = `sx${run}.test`;
+  const { orgId } = (await a.post('/api/domains', { domain, orgName: `SX ${run}` })).data;
+  await a.post(`/api/domains/${domain}/verify`);
+  const { url } = (await a.post(`/api/billing/${orgId}/checkout`, { interval: 'month', seats: 1 })).data;
+  const sid = new URL((await fetch(url, { method: 'POST', redirect: 'manual' })).headers.get('location')).searchParams.get('session_id');
+  await a.post('/api/billing/confirm', { sessionId: sid });
+  assert.equal((await addUser(a, domain, 'zed')).status, 200);
+  await a.post(`/api/admin/orgs/${orgId}/shared-mailboxes`, { domain, localPart: 'info', members: [{ email: `zed@${domain}`, canSend: true }] });
+  const z = new Client(); await z.post('/api/login', { email: `zed@${domain}`, password: PW });
+  const h = { Cookie: z.cookie, 'X-Forwarded-For': z.ip, 'X-Requested-With': 'mailcow-client', 'X-Mailbox': `info@${domain}` };
+  const sec = await (await fetch(`${BASE}/api/security`, { headers: h })).json();
+  assert.equal(sec.email ?? `zed@${domain}`, `zed@${domain}`);
+  const me = await (await fetch(`${BASE}/api/me`, { headers: h })).json();
+  assert.equal(me.email, `zed@${domain}`);
+  const sessions = await (await fetch(`${BASE}/api/security/sessions`, { headers: h })).json();
+  assert.ok(Array.isArray(sessions) && sessions.length >= 1, 'own sessions, not the shared box');
+});

@@ -759,3 +759,5 @@ kbd { font: 12px ui-monospace, monospace; background: var(--panel-2); border: 1p
 table.kv { border-collapse: collapse; margin: 12px 0; font-size: 14px; }
 table.kv th { text-align: left; color: var(--muted, #666); font-weight: 500; padding: 4px 18px 4px 0; vertical-align: top; }
 table.kv td { padding: 4px 0; }
+.mailbox-pick { display: flex; align-items: center; gap: 6px; margin: 4px 10px 10px; padding: 4px 8px; border: 1px solid var(--border, #ddd); border-radius: 6px; font-size: 13px; }
+.mailbox-pick select { flex: 1; border: 0; background: transparent; font: inherit; color: inherit; min-width: 0; }

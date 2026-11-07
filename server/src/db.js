@@ -156,6 +156,14 @@ CREATE TABLE IF NOT EXISTS abuse_reports (
   at INTEGER NOT NULL, status TEXT NOT NULL DEFAULT 'open'
 );
 CREATE INDEX IF NOT EXISTS abuse_reports_offender ON abuse_reports(offender, at);
+CREATE TABLE IF NOT EXISTS shared_mailboxes (
+  email TEXT PRIMARY KEY, org_id INTEGER NOT NULL, name TEXT, creds TEXT NOT NULL, created_by TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE TABLE IF NOT EXISTS shared_access (
+  mailbox TEXT NOT NULL, member TEXT NOT NULL, can_send INTEGER NOT NULL DEFAULT 1, PRIMARY KEY (mailbox, member)
+);
+CREATE INDEX IF NOT EXISTS shared_access_member ON shared_access(member);
 CREATE TABLE IF NOT EXISTS send_counts (email TEXT NOT NULL, day TEXT NOT NULL, count INTEGER NOT NULL DEFAULT 0, PRIMARY KEY (email, day));
 `;
 

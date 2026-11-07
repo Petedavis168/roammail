@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { api } from '../api.js';
+import { api, setMailbox, mailUrl } from '../api.js';
 import { Icon } from '../icons.jsx';
 import { usePrefs, catKeyword } from '../prefs.js';
 import { useToast } from './Toast.jsx';
@@ -30,6 +30,10 @@ export default function Mail({ me, refreshMe, theme, setTheme, onLogout }) {
   });
   const [folders, setFolders] = useState([]);
   const [folder, setFolder] = useState('INBOX');
+  const [mailbox, setMailboxState] = useState('');
+  const [sharedBoxes, setSharedBoxes] = useState([]);
+  useEffect(() => { api.get('/api/shared-mailboxes').then(setSharedBoxes).catch(() => {}); }, []);
+  const switchMailbox = (m) => { setMailbox(m); setMailboxState(m); setFolder('INBOX'); };
   const [filter, setFilter] = useState('');
   const [search, setSearch] = useState(null); // active query string
   const [searchInput, setSearchInput] = useState('');
@@ -78,7 +82,7 @@ export default function Mail({ me, refreshMe, theme, setTheme, onLogout }) {
     }
   }, [folder, filter, search, toast]);
 
-  useEffect(() => { loadFolders(); }, [loadFolders]);
+  useEffect(() => { loadFolders(); }, [loadFolders, mailbox]);
   useEffect(() => { setSelected(new Set()); setActive(null); if (!folder.startsWith('@')) load(); }, [load]);
   const loadSnoozed = useCallback(() => api.get('/api/snoozed').then((jobs) => {
     const m = {};
@@ -95,7 +99,7 @@ export default function Mail({ me, refreshMe, theme, setTheme, onLogout }) {
   useEffect(() => {
     let es; let retry;
     const connect = () => {
-      es = new EventSource('/api/events');
+      es = new EventSource(mailUrl('/api/events'));
       es.addEventListener('new', (e) => {
         const d = JSON.parse(e.data);
         loadFolders();
@@ -111,7 +115,7 @@ export default function Mail({ me, refreshMe, theme, setTheme, onLogout }) {
     connect();
     if ('Notification' in window && Notification.permission === 'default') Notification.requestPermission().catch(() => {});
     return () => { es?.close(); clearTimeout(retry); };
-  }, [loadFolders, prefs.notifications]);
+  }, [loadFolders, prefs.notifications, mailbox]);
 
   // Page title with unread count
   useEffect(() => {
@@ -345,6 +349,7 @@ export default function Mail({ me, refreshMe, theme, setTheme, onLogout }) {
         <div className="body">
           {sidebarOpen && (
             <Sidebar folders={folders} current={search ? null : folder} onCompose={() => compose()} reload={loadFolders}
+              me={me} mailboxes={sharedBoxes} mailbox={mailbox} onMailbox={switchMailbox}
               onSelect={(p) => { setFolder(p); clearSearch(); setFilter(''); if (window.innerWidth <= 900) setSidebarOpen(false); }}
               onDropMessages={(dest, uids) => act.move(dest, uids)} onScheduled={() => { setFolder('@scheduled'); clearSearch(); }} onQuarantine={() => { setFolder('@quarantine'); clearSearch(); }} qCount={qCount}
               categories={prefs.categories} onCategory={(c) => runSearch(`label:${catKeyword(c.name).slice(4)}`)} />

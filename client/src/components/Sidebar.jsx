@@ -4,7 +4,7 @@ import { Icon } from '../icons.jsx';
 import { folderIcon, folderLabel, SPECIAL_ORDER } from '../util.js';
 import { useToast } from './Toast.jsx';
 
-export default function Sidebar({ folders, current, onSelect, onCompose, reload, onDropMessages, categories, onCategory, onScheduled, onQuarantine, qCount }) {
+export default function Sidebar({ folders, current, onSelect, onCompose, reload, onDropMessages, categories, onCategory, onScheduled, onQuarantine, qCount, me, mailboxes = [], mailbox = '', onMailbox }) {
   const toast = useToast();
   const [collapsed, setCollapsed] = useState(() => JSON.parse(localStorage.getItem('collapsed') || '{}'));
   const [dragOver, setDragOver] = useState(null);
@@ -78,6 +78,15 @@ export default function Sidebar({ folders, current, onSelect, onCompose, reload,
   return (
     <nav className="sidebar" onClick={() => setMenu(null)}>
       <button className="compose-btn" onClick={onCompose}><Icon name="pen" /> New mail</button>
+      {mailboxes.length > 0 && (
+        <label className="mailbox-pick" title="Switch between your mailbox and shared mailboxes">
+          <Icon name="users" size={14} />
+          <select value={mailbox} onChange={(e) => onMailbox(e.target.value)} aria-label="Mailbox">
+            <option value="">{me?.email || 'My mailbox'}</option>
+            {mailboxes.map((b) => <option key={b.email} value={b.email}>{b.name ? `${b.name} (${b.email})` : b.email}{b.canSend ? '' : ' (read only)'}</option>)}
+          </select>
+        </label>
+      )}
       <div className="nav-section">
         {specials.map((f) => (
           <span key={f.path}>

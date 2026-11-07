@@ -18,9 +18,10 @@ const orgOfEmail = async (email) => (await q.get("SELECT org_id FROM domains WHE
 
 async function orgPeople(orgId) {
   const people = [];
+  const shared = new Set((await q.all('SELECT email FROM shared_mailboxes WHERE org_id = ?', orgId)).map((r) => r.email));
   for (const d of await orgDomains(orgId)) {
     for (const m of await mailcow.listMailboxes(d).catch(() => [])) {
-      if (m.active) people.push({ email: m.email.toLowerCase(), name: (await getProfile(m.email)).name || m.name || '', department: (await getProfile(m.email)).department || '' });
+      if (m.active && !shared.has(m.email.toLowerCase())) people.push({ email: m.email.toLowerCase(), name: (await getProfile(m.email)).name || m.name || '', department: (await getProfile(m.email)).department || '' });
     }
   }
   return people;

@@ -1,5 +1,13 @@
+// Which mailbox the mail views work on: '' = your own, or a shared mailbox you're a member of
+let mailbox = '';
+export const setMailbox = (m) => { mailbox = m || ''; };
+export const currentMailbox = () => mailbox;
+const MAIL_PATHS = /^\/api\/(attachment|copy|delete|drafts|empty|events|flags|folders|mark-all-read|message|messages|move|raw|scheduled|search|send|snooze|snoozed|thread)(\/|\?|$)/;
+export const mailUrl = (url) => (mailbox && MAIL_PATHS.test(url) ? `${url}${url.includes('?') ? '&' : '?'}mailbox=${encodeURIComponent(mailbox)}` : url);
+
 async function request(method, url, body, { form } = {}) {
   const opts = { method, headers: { 'X-Requested-With': 'mailcow-client' }, credentials: 'same-origin' };
+  if (mailbox && MAIL_PATHS.test(url)) opts.headers['X-Mailbox'] = mailbox;
   if (form) opts.body = form;
   else if (body !== undefined) {
     opts.headers['Content-Type'] = 'application/json';
@@ -26,6 +34,7 @@ export const api = {
   patch: (url, body) => request('PATCH', url, body),
   put: (url, body) => request('PUT', url, body),
   del: (url, params) => request('DELETE', params ? `${url}?${qs(params)}` : url),
+  delWith: (url, body) => request('DELETE', url, body),
   form: (url, form) => request('POST', url, undefined, { form }),
 
   me: () => api.get('/api/me'),
@@ -42,5 +51,5 @@ export const api = {
   move: (folder, uids, to) => api.post('/api/move', { folder, uids, to }),
   remove: (folder, uids, permanent) => api.post('/api/delete', { folder, uids, permanent }),
   contacts: (q) => api.get('/api/contacts', { q }),
-  attachmentUrl: (folder, uid, index, inline) => `/api/attachment?${qs({ folder, uid, index, inline: inline ? 1 : '' })}`,
+  attachmentUrl: (folder, uid, index, inline) => mailUrl(`/api/attachment?${qs({ folder, uid, index, inline: inline ? 1 : '' })}`),
 };

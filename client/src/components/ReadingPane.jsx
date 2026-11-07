@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { api } from '../api.js';
+import { api, mailUrl } from '../api.js';
 import { Icon } from '../icons.jsx';
 import { fmtDate, fmtSize, personName, avatarColor, initials } from '../util.js';
 import MessageBody from './MessageBody.jsx';
@@ -139,7 +139,7 @@ function ThreadMessage({ m, expanded, onToggle, onReply, prefs, setPrefs, last, 
                   catch (e) { alert(e.message); }
                 }}><Icon name="users" /> Add to contacts</button>}
                 {sender.address && <button onClick={() => { setMenu(false); onBlock(sender.address); }}><Icon name="block" /> Block {sender.address}</button>}
-                <button onClick={() => window.open(`/api/raw?folder=${encodeURIComponent(m.folder)}&uid=${m.uid}`, '_blank')}><Icon name="external" /> View source</button>
+                <button onClick={() => window.open(mailUrl(`/api/raw?folder=${encodeURIComponent(m.folder)}&uid=${m.uid}`), '_blank')}><Icon name="external" /> View source</button>
                 <button onClick={() => { const f = document.querySelector(`[data-msg="${m.folder}:${m.uid}"] iframe`); f?.contentWindow?.print(); }}><Icon name="print" /> Print</button>
               </div>
             )}

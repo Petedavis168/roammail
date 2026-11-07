@@ -7,6 +7,7 @@ import { simpleParser } from 'mailparser';
 import { config } from './config.js';
 import { clearSession, requireAuth, onRevoke } from './session.js';
 import { createCache } from './cache.js';
+import { sharedMailboxContext } from './sharedboxes.js';
 import { count, gauge } from './ops.js';
 import { getClient, closeClient, withMailbox, specialFolder, makeClient } from './imap.js';
 import { parseQuery } from './search.js';
@@ -106,6 +107,7 @@ function transport(user) {
 
 // ---------- auth (login lives in security.js) ----------
 api.use(requireAuth);
+api.use(sharedMailboxContext());
 
 api.post('/logout', wrap(async (req, res) => {
   await closeClient(req.user.sid);

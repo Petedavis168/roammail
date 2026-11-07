@@ -44,7 +44,10 @@ export async function orgBilling(orgId) {
 }
 async function mailboxCount(orgId) {
   let n = 0;
-  for (const d of await q.all("SELECT domain FROM domains WHERE org_id = ? AND status = 'active'", orgId)) n += (await mailcow.listMailboxes(d.domain).catch(() => [])).length;
+  const shared = new Set((await q.all('SELECT email FROM shared_mailboxes WHERE org_id = ?', orgId)).map((r) => r.email));
+  for (const d of await q.all("SELECT domain FROM domains WHERE org_id = ? AND status = 'active'", orgId)) {
+    n += (await mailcow.listMailboxes(d.domain).catch(() => [])).filter((m) => !shared.has(m.email.toLowerCase())).length; // shared mailboxes are free
+  }
   return n;
 }
 export function price(interval) { return interval === 'year' ? B.perUserYearly : B.perUserMonthly; }

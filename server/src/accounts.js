@@ -325,7 +325,8 @@ accounts.get('/admin/users', wrap(async (req, res) => {
   const d = await requireDomainAdmin(req, req.query.domain);
   if (d.status !== 'active') return res.json([]);
   const admins = new Set((await q.all("SELECT email FROM members WHERE org_id = ? AND role = 'admin'", d.org_id)).map((m) => m.email));
-  res.json(await Promise.all((await mailcow.listMailboxes(d.domain)).map(async (m) => {
+  const shared = new Set((await q.all('SELECT email FROM shared_mailboxes WHERE org_id = ?', d.org_id)).map((r) => r.email));
+  res.json(await Promise.all((await mailcow.listMailboxes(d.domain)).filter((m) => !shared.has(m.email.toLowerCase())).map(async (m) => {
     const p = await getProfile(m.email);
     const tf = await q.get('SELECT totp_enabled FROM user_security WHERE email = ?', m.email.toLowerCase());
     return { ...m, admin: admins.has(m.email.toLowerCase()), twoFactor: !!tf?.totp_enabled, title: p.title || '', department: p.department || '', phone: p.phone || '', mobile: p.mobile || '' };
