@@ -46,6 +46,7 @@ async function newAdmin(username) {
   }
   return c;
 }
+let billingSuper = null;
 const addUser = (c, domain, local) => c.post('/api/admin/users', { domain, localPart: local, name: local, password: PW, welcome: false });
 
 test('standard business: pays at the end, seats follow users, webhooks are verified', async () => {
@@ -106,6 +107,7 @@ test('standard business: pays at the end, seats follow users, webhooks are verif
 test('Friendly Web Services customer: code makes the first mailbox free, codes are single use', async (t) => {
   const owner = await newAdmin('billingsuper');
   if (!owner) return t.skip('billingsuper@free.test already has 2FA from an earlier run; restart with a fresh data folder');
+  billingSuper = owner;
   const { code } = (await owner.post('/api/super/friendly-codes', { note: `test ${run}` })).data;
   assert.match(code, /^FWS-[A-Z2-9]{4}-[A-Z2-9]{4}-[A-Z2-9]{4}$/);
   const f = await newAdmin(`friend${run}`);
@@ -123,6 +125,27 @@ test('Friendly Web Services customer: code makes the first mailbox free, codes a
   assert.equal((await g.post(`/api/billing/${o2}/friendly`, { code })).status, 400);
   // only super-admins can create codes
   assert.equal((await f.post('/api/super/friendly-codes', { note: 'x' })).status, 403);
+});
+
+test('complimentary plan (fee waiver): every mailbox free, no checkout; only super-admins; can end', async (t) => {
+  const owner = billingSuper || await newAdmin('billingsuper');
+  if (!owner) return t.skip('billingsuper@free.test already has 2FA from an earlier run; restart with a fresh data folder');
+  const c = await newAdmin(`comp${run}`);
+  const domain = `comp${run}.test`;
+  const { orgId } = (await c.post('/api/domains', { domain, orgName: `Pete Co ${run}` })).data;
+  assert.equal((await c.req('PUT', `/api/super/orgs/${orgId}/comp`, { mode: 'forever', note: 'x' })).status, 403, 'not for org admins');
+  assert.equal((await owner.req('PUT', `/api/super/orgs/${orgId}/comp`, { mode: 'forever' })).status, 400, 'needs a note');
+  assert.equal((await owner.req('PUT', `/api/super/orgs/${orgId}/comp`, { mode: 'until', until: '2001-01-01', note: 'x y z' })).status, 400, 'past date');
+  const set = await owner.req('PUT', `/api/super/orgs/${orgId}/comp`, { mode: 'months', months: 12, note: "Pete's company" });
+  assert.equal(set.status, 200); assert.ok(set.data.comp.until > Date.now() + 300 * 864e5);
+  assert.equal((await c.post(`/api/domains/${domain}/verify`)).data.status, 'active', 'goes live without payment');
+  for (const u of ['a', 'b', 'c']) assert.equal((await addUser(c, domain, u)).status, 200, `mailbox ${u} is free`);
+  const bill = (await c.get(`/api/billing/${orgId}`)).data;
+  assert.ok(bill.comp && !bill.comp.forever); assert.equal(bill.billable, 0); assert.equal(bill.needsPayment, false);
+  assert.equal((await owner.req('PUT', `/api/super/orgs/${orgId}/comp`, { mode: 'forever', note: 'founder' })).data.comp.forever, true);
+  assert.equal((await owner.req('PUT', `/api/super/orgs/${orgId}/comp`, { mode: 'off' })).status, 200);
+  assert.equal((await c.get(`/api/billing/${orgId}`)).data.comp, null);
+  assert.equal((await addUser(c, domain, 'd')).status, 402, 'after the comp ends, new mailboxes need a seat again');
 });
 
 test('groups: department lists stay in sync, send-as is limited to members', async () => {

@@ -61,7 +61,7 @@ config.mailHostname = env.MAIL_HOSTNAME || config.imap.host;
 config.signup = {
   enabled: (env.SIGNUP_ENABLED ?? 'true') === 'true',
   domain: (env.SIGNUP_DOMAIN || config.rootDomain || '').toLowerCase(), // free addresses: @roammail.net
-  // Mailbox size for free accounts. FREE_MAILBOX_QUOTA_GB (or SIGNUP_QUOTA_MB). Pending final decision; the site says 20 GB.
+  // Mailbox size for free accounts. FREE_MAILBOX_QUOTA_GB (or SIGNUP_QUOTA_MB). The site says 10 GB (item 1).
   quotaMb: env.FREE_MAILBOX_QUOTA_GB ? Number(env.FREE_MAILBOX_QUOTA_GB) * 1024 : Number(env.SIGNUP_QUOTA_MB || 10240),
   perIpPerDay: Number(env.SIGNUP_PER_IP_PER_DAY || 3),
 };

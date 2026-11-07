@@ -86,7 +86,7 @@ hosts.get(ID_PATH, async (req, res, next) => {
   next(); // the web app's index.html
 });
 
-export { ID_RE };
+export { ID_RE, ID_PATH, notFound };
 
 // ---------------------------------------------------------------- the public website
 const SITE_PAGES = ['index', 'terms', 'privacy', 'cookies', 'acceptable-use', 'accessibility', 'legal', 'brand'];
