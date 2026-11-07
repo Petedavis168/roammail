@@ -259,7 +259,12 @@ accounts.get('/domains', wrap(async (req, res) => {
 // Step 1: claim a domain (creates the organization if needed)
 /** Is this a domain a business can bring? Returns the cleaned domain or throws with a plain-English reason. */
 async function checkNewDomain(input) {
-  const domain = String(input || '').trim().toLowerCase().replace(/^https?:\/\//, '').replace(/^www\./, '').replace(/\/.*$/, '').replace(/^.*@/, '');
+  // plain string cutting (no backtracking regexes) on a length-capped input
+  let domain = String(input || '').slice(0, 300).trim().toLowerCase();
+  for (const p of ['https://', 'http://']) if (domain.startsWith(p)) domain = domain.slice(p.length);
+  if (domain.startsWith('www.')) domain = domain.slice(4);
+  if (domain.includes('/')) domain = domain.slice(0, domain.indexOf('/'));
+  if (domain.includes('@')) domain = domain.slice(domain.lastIndexOf('@') + 1);
   if (!DOMAIN_RE.test(domain)) throw fail(400, 'That doesn\'t look like a domain name (e.g. mybusiness.com)');
   if (BLOCKED_DOMAINS.test(domain) || domain === config.signup.domain || domain.endsWith(`.${config.mailHostname}`) || domain === config.mailHostname) {
     throw fail(400, 'That domain can\'t be added');
