@@ -141,7 +141,7 @@ const TABS = [
   ['autoreply', 'Automatic replies', 'reply'], ['junk', 'Junk & spam', 'junk'], ['rules', 'Rules', 'filter'], ['import', 'Import mail', 'import'], ['apps', 'Phone & apps', 'phone'], ['privacy', 'Privacy', 'shield'],
 ];
 
-export default function SettingsPanel({ prefs, setPrefs, me, folders, sigData, reloadSigs, onClose, initialTab = 'general' }) {
+export default function SettingsPanel({ prefs, setPrefs, me, folders, sigData, reloadSigs, onClose, initialTab = 'general', importMsg }) {
   const [tab, setTab] = useState(initialTab);
   return (
     <div className="modal-wrap" onClick={onClose}>
@@ -160,7 +160,7 @@ export default function SettingsPanel({ prefs, setPrefs, me, folders, sigData, r
             {tab === 'autoreply' && <AutoReply me={me} />}
             {tab === 'junk' && <SpamSettings />}
             {tab === 'rules' && <Rules folders={folders} categories={prefs.categories} me={me} />}
-            {tab === 'import' && <ImportMail />}
+            {tab === 'import' && <ImportMail me={me} importMsg={importMsg} />}
             {tab === 'apps' && <Apps me={me} sigData={sigData} />}
             {tab === 'privacy' && <Privacy me={me} />}
           </div>

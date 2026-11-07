@@ -15,7 +15,8 @@
     "test:push": "node --test test/push.test.js",
     "test:routing": "node --test test/routing.test.js",
     "test:setup": "node --test test/setup.test.js",
-    "test:tasks": "node --disable-warning=ExperimentalWarning --test test/tasks.test.js"
+    "test:tasks": "node --disable-warning=ExperimentalWarning --test test/tasks.test.js",
+    "test:imports": "node --disable-warning=ExperimentalWarning --test test/imports.test.js"
   },
   "keywords": [],
   "author": "",

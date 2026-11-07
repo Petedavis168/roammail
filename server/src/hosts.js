@@ -54,8 +54,10 @@ const appLimiter = rateLimit({ windowMs: 60 * 1000, limit: 60, standardHeaders: 
 hosts.get('/app', appLimiter, async (req, res) => {
   const emails = await browserMailboxes(req);
   if (!emails.length) return res.redirect(302, loginUrl('/'));
-  const section = ['calendar', 'contacts'].includes(req.query.view) ? req.query.view : 'inbox';
-  return res.redirect(302, appUrl(`/${await ensureMailboxId(emails[0])}/${section}${req.query.compose === '1' ? '?compose=1' : ['tasks', 'notes', 'followups'].includes(req.query.panel) ? `?panel=${req.query.panel}` : ''}`));
+  const imp = /^[a-z-]{1,20}$/.test(String(req.query.import || '')) ? String(req.query.import) : '';
+  const section = imp ? 'settings' : ['calendar', 'contacts'].includes(req.query.view) ? req.query.view : 'inbox';
+  const qs = imp ? `?import=${imp}` : req.query.compose === '1' ? '?compose=1' : ['tasks', 'notes', 'followups'].includes(req.query.panel) ? `?panel=${req.query.panel}` : '';
+  return res.redirect(302, appUrl(`/${await ensureMailboxId(emails[0])}/${section}${qs}`));
 });
 // Sign-up lives on the sign-in host: roammail.net/signup -> login.roammail.net/signup (query kept)
 hosts.get('/signup', (req, res, next) => {

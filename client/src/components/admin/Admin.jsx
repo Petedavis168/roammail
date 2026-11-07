@@ -42,6 +42,39 @@ const loadQuota = () => (quotaCfg ||= api.signupConfig().then((c) => c.quota || 
 const sizeOptions = (q, current) => [...new Set([1024, 2048, 5120, 10240, 20480, 51200, 102400].filter((m) => m <= q.businessMax).concat([q.business, current].filter(Boolean)))].sort((a, b) => a - b);
 function useQuota() { const [q, setQ] = useState({ business: 10240, businessMax: 10240 }); useEffect(() => { loadQuota().then(setQ); }, []); return q; }
 
+// Item 6: copy many people's old mailboxes at once (one row per person; app passwords from their old provider)
+function ImportMailBulk({ domain, onClose }) {
+  const toast = useToast();
+  const [results, setResults] = useState(null);
+  const [busy, setBusy] = useState(false);
+  const template = () => {
+    const blob = new Blob([`Mailbox,Provider,Old email,App password,IMAP server\r\njane@${domain},gmail,jane.smith@gmail.com,abcd efgh ijkl mnop,\r\nbob@${domain},other,bob@oldhost.com,secret,imap.oldhost.com\r\n`], { type: 'text/csv' });
+    const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = 'roammail-mail-import-template.csv'; a.click();
+  };
+  const run = async (file) => {
+    setBusy(true);
+    try { setResults(await api.post('/api/admin/imports/bulk', { csv: await file.text() })); } catch (e) { toast(e.message, { error: true }); } finally { setBusy(false); }
+  };
+  return (
+    <Modal title={`Import old mail for @${domain}`} onClose={onClose}>
+      {!results ? (
+        <>
+          <p className="small">One row per person: <b>Mailbox</b> (their new address here), <b>Provider</b> (gmail, yahoo, aol, icloud or other), <b>Old email</b>, <b>App password</b>, and <b>IMAP server</b> for "other".
+            Each login is tested first; mail keeps syncing for 7 days. Delete the file afterwards: it contains passwords. <button className="link" onClick={template}>Download a template</button></p>
+          <input type="file" accept=".csv,text/csv" onChange={(e) => e.target.files[0] && run(e.target.files[0])} />
+          {busy && <div className="spinner" />}
+        </>
+      ) : (
+        <>
+          <p><b>{results.started}</b> of {results.results.length} imports started.</p>
+          {results.results.filter((r) => !r.ok).map((r, i) => <div key={i} className="bad small">{r.mailbox}: {r.error}</div>)}
+          <div className="actions"><button className="btn" onClick={onClose}>Done</button></div>
+        </>
+      )}
+    </Modal>
+  );
+}
+
 function ImportUsers({ domain, onClose }) {
   const toast = useToast();
   const [csv, setCsv] = useState('');
@@ -107,6 +140,7 @@ function Users({ org, domains }) {
   const [users, setUsers] = useState(null);
   const [adding, setAdding] = useState(false);
   const [importing, setImporting] = useState(false);
+  const [importingMail, setImportingMail] = useState(false);
   const [created, setCreated] = useState(null);
   const [edit, setEdit] = useState(null);
   const [q, setQ] = useState('');
@@ -133,6 +167,7 @@ function Users({ org, domains }) {
         <div className="spacer" />
         <span className="muted small">{users?.length ?? '…'} of {org.max_mailboxes} users</span>
         <button className="btn" onClick={() => setImporting(true)}><Icon name="users" size={16} /> Import from spreadsheet</button>
+        <button className="btn" onClick={() => setImportingMail(true)}><Icon name="import" size={16} /> Import old mail</button>
         <button className="btn primary" onClick={() => setAdding(true)}><Icon name="plus" size={16} /> Invite people</button>
       </div>
       <div className="table">
@@ -164,6 +199,7 @@ function Users({ org, domains }) {
       </div>
       <datalist id="org-departments">{[...new Set((users || []).map((u) => u.department).filter(Boolean))].map((d) => <option key={d} value={d} />)}</datalist>
       {importing && <ImportUsers domain={domain} onClose={() => { setImporting(false); load(); }} />}
+      {importingMail && <ImportMailBulk domain={domain} onClose={() => setImportingMail(false)} />}
       {adding && <AddUser domain={domain} orgId={org.id} onClose={() => setAdding(false)} onCreated={(c) => { setAdding(false); setCreated(c); load(); }} />}
       {edit && <EditUser u={edit} onClose={() => setEdit(null)} onSave={async (patch) => { await update(edit.email, patch, 'User updated'); setEdit(null); }} />}
       {created && (

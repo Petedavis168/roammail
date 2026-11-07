@@ -141,7 +141,7 @@ async function isOrgAdmin(user, orgId) {
   const r = await rolesFor(user.email);
   return r.superAdmin || r.orgs.some((o) => o.id === orgId && o.role === 'admin');
 }
-async function requireDomainAdmin(req, domain) {
+export async function requireDomainAdmin(req, domain) {
   const d = await orgOf(String(domain || '').toLowerCase());
   if (!d) throw fail(404, 'Domain not found');
   if (!await isOrgAdmin(req.user, d.org_id)) throw fail(403, 'You are not an admin of this domain');

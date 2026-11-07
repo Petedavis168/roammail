@@ -72,6 +72,8 @@ jobs:
         run: npm run test:setup --prefix server
       - name: Tasks, notes and follow-ups tests
         run: npm run test:tasks --prefix server
+      - name: Mail import tests
+        run: npm run test:imports --prefix server
 
       - name: Browser injection tests
         working-directory: server
