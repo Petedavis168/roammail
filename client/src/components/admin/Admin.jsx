@@ -38,6 +38,29 @@ const sizeOptions = (q, current) => [...new Set([1024, 2048, 5120, 10240, 20480,
 function useQuota() { const [q, setQ] = useState({ business: 10240, businessMax: 10240 }); useEffect(() => { loadQuota().then(setQ); }, []); return q; }
 
 // Item 6: copy many people's old mailboxes at once (one row per person; app passwords from their old provider)
+// Staff-only addresses: a bare first name on the free domain (e.g. pete@roammail.net). Customers can't take these.
+function StaffAddresses({ domain }) {
+  const [f, setF] = useState({ localPart: '', name: '' });
+  const [made, setMade] = useState(null);
+  const [err, setErr] = useState('');
+  return (
+    <div className="card" style={{ marginTop: 16 }}>
+      <h3>Staff addresses</h3>
+      <p className="muted small">Addresses that are only a first name (like <b>pete@{domain}</b>) are kept for Roammail staff so nobody can pose as us. Create them here; the person sets their own password at first sign-in.</p>
+      <form className="pick-time" onSubmit={async (e) => {
+        e.preventDefault(); setErr(''); setMade(null);
+        try { setMade(await api.post('/api/super/staff-mailboxes', f)); setF({ localPart: '', name: '' }); } catch (x) { setErr(x.message); }
+      }}>
+        <input placeholder="first name (address)" value={f.localPart} onChange={(e) => setF({ ...f, localPart: e.target.value })} required />
+        <input placeholder="Full name" value={f.name} onChange={(e) => setF({ ...f, name: e.target.value })} required />
+        <button className="btn primary">Create</button>
+      </form>
+      {err && <div className="form-error">{err}</div>}
+      {made && <div className="callout ok"><small>Created <b>{made.email}</b>. Temporary password: <code>{made.password}</code> (shown once; they must change it at first sign-in).</small></div>}
+    </div>
+  );
+}
+
 // Item 2: complimentary plan (fee waiver) for a business: forever, until a date, or N months. Super-admins only.
 function CompControl({ o, onChange }) {
   const COMP_FOREVER = 32503680000000;
@@ -535,6 +558,7 @@ function Platform() {
         <p className="muted small">Mail server: <b>{d.settings.mailHostname}</b> · Route 53 auto-DNS: <b>{d.settings.route53 ? 'on' : 'off'}</b></p>
       </div>
       <FriendlyCodes />
+      <StaffAddresses domain={d.settings.signupDomain} />
       <h3>Businesses</h3>
       <div className="table">
         <div className="tr th"><span>Business</span><span>Domains</span><span>User limit</span><span>Status</span><span /></div>

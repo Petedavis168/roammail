@@ -21,6 +21,7 @@ import { assertNotBreached, topSenders } from './abuse.js';
 import { resetTwoFactor } from './recovery.js';
 import { syncOrgGroups } from './groups.js';
 import { tempPassword } from './temppass.js';
+import { isBareFirstName, FIRST_NAME_HINT } from './names.js';
 import { phoneRequired, requireVerifiedPhone } from './phone.js';
 import { sendSystemMail } from './recovery.js';
 import { needsPaymentToActivate, seatCheck, shrinkSeats, onPaid, startBillingChecks, orgBilling, setSeats } from './billing.js';
@@ -66,8 +67,9 @@ async function checkCaptcha(token, ip) {
 }
 
 /** Is local@SIGNUP_DOMAIN free? Checks mailboxes, aliases/groups, and addresses of deleted accounts (never reused). */
-async function addressAvailable(local) {
+async function addressAvailable(local, { staff = false } = {}) {
   if (!LOCAL_RE.test(local) || RESERVED.has(local) || local.length < 3) return false;
+  if (!staff && isBareFirstName(local)) return false;
   const email = `${local}@${config.signup.domain}`;
   if (await q.get('SELECT 1 FROM signups WHERE email = ?', email)) return false;
   if (await q.get('SELECT 1 FROM groups WHERE address = ?', email)) return false;
@@ -82,7 +84,7 @@ async function aliasesCached() {
   }
   return aliasCache.set;
 }
-const usernameHint = (local) => (local.length < 3 ? 'Use at least 3 characters' : !LOCAL_RE.test(local) ? 'Use only letters, numbers, dots, dashes and underscores' : RESERVED.has(local) ? 'That name is reserved' : null);
+const usernameHint = (local) => (local.length < 3 ? 'Use at least 3 characters' : !LOCAL_RE.test(local) ? 'Use only letters, numbers, dots, dashes and underscores' : RESERVED.has(local) ? 'That name is reserved' : isBareFirstName(local) ? FIRST_NAME_HINT : null);
 
 publicAccounts.get('/signup/check', rateLimit({ windowMs: 60_000, limit: 60 }), wrap(async (req, res) => {
   const local = String(req.query.username || '').toLowerCase().trim();
@@ -110,6 +112,7 @@ publicAccounts.post('/signup', rateLimit({ windowMs: 60 * 60_000, limit: 10 }), 
   const password = String(req.body.password || '');
   checkLocal(local);
   if (RESERVED.has(local)) throw fail(400, 'That username is reserved');
+  if (isBareFirstName(local)) throw fail(400, FIRST_NAME_HINT);
   if (local.length < 3) throw fail(400, 'Use at least 3 characters for your address');
   if (!name) throw fail(400, 'Please enter your name');
   checkPassword(password);
@@ -627,6 +630,27 @@ accounts.patch('/super/settings', requireSuper, wrap(async (req, res) => {
   if (req.body.signupEnabled !== undefined) await setSetting('signupEnabled', !!req.body.signupEnabled);
   await audit(req.user.email, null, 'settings.update', req.body);
   res.json({ ok: true });
+}));
+
+// Staff addresses (anti-impersonation rule): only Roammail staff get a bare-first-name address on the free domain.
+// Created by a super-admin with a temporary password the person must replace at first sign-in.
+accounts.post('/super/staff-mailboxes', requireSuper, rateLimit({ windowMs: 3600e3, limit: 30 }), wrap(async (req, res) => {
+  if (!config.signup.domain) throw fail(400, 'No free domain is set up');
+  const local = String(req.body.localPart || '').trim().toLowerCase();
+  const name = String(req.body.name || '').trim().slice(0, 100);
+  checkLocal(local);
+  if (RESERVED.has(local)) throw fail(400, 'That name is reserved for system addresses');
+  if (!name) throw fail(400, "Enter the staff member's name");
+  if (!(await addressAvailable(local, { staff: true }))) throw fail(409, 'That address is taken (or belonged to someone before)');
+  const email = `${local}@${config.signup.domain}`;
+  const password = tempPassword();
+  await mailcow.addMailbox({ localPart: local, domain: config.signup.domain, name, password, quotaMb: config.business.defaultQuotaMb });
+  await markTemporary(email, 'staff');
+  await applyRate(email, BUSINESS_RATE).catch(() => {});
+  await q.run('INSERT INTO signups(email, ip, recovery_email, terms_version) VALUES(?, ?, ?, ?) ON CONFLICT(email) DO NOTHING', email, 'staff', null, config.legal.termsVersion);
+  await saveProfile(email, { name });
+  await audit(req.user.email, null, 'staff.mailbox_created', { email });
+  res.json({ ok: true, email, password });
 }));
 
 accounts.patch('/super/orgs/:id', requireSuper, wrap(async (req, res) => {
