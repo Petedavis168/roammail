@@ -122,6 +122,19 @@ const base = (req) => {
 export const billing = express.Router();
 
 // Stripe webhook: raw body + signature check (mounted before the JSON parser in index.js)
+const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+const money = (cents, cur = 'usd') => new Intl.NumberFormat('en-US', { style: 'currency', currency: String(cur || 'usd').toUpperCase() }).format(Number(cents || 0) / 100);
+/** Email every admin of a business (billing receipts, failed payments, trial reminders). */
+async function tellAdmins(orgId, subject, html) {
+  if (!B.emails) return;
+  const admins = (await q.all("SELECT email FROM members WHERE org_id = ? AND role = 'admin'", orgId)).map((r) => r.email);
+  const owner = (await q.get('SELECT owner_email FROM orgs WHERE id = ?', orgId))?.owner_email;
+  const to = [...new Set([...admins, owner].filter(Boolean))];
+  if (!to.length) return;
+  const { sendSystemMail } = await import('./recovery.js');
+  await sendSystemMail(to, subject, `<div style="font-family:Segoe UI,Arial,sans-serif;font-size:14px;color:#242424;max-width:560px">${html}<p style="color:#888;font-size:12px">${esc(config.legal.company)} · Billing questions: ${esc(config.legal.contact || '')}</p></div>`).catch((e) => console.error('APP_ERROR billing email', e.message));
+}
+
 export const billingWebhook = express.Router();
 billingWebhook.post('/api/billing/webhook', express.raw({ type: 'application/json', limit: '1mb' }), wrap(async (req, res) => {
   if (!B.webhookSecret) return res.status(503).end();
@@ -156,9 +169,21 @@ billingWebhook.post('/api/billing/webhook', express.raw({ type: 'application/jso
       break;
     case 'invoice.payment_failed':
       await q.run("UPDATE orgs SET billing_status = 'past_due' WHERE id = ?", orgId);
+      await tellAdmins(orgId, 'Payment failed: please update your card', `<p>We couldn't take payment of <b>${money(obj.amount_due, obj.currency)}</b> for ${esc(obj.customer_name || 'your business')}'s ${esc(config.appName)} plan.</p>
+<p>We'll try again over the next few days. To avoid any interruption, update your card: Admin → Billing → <b>Manage billing</b>${obj.hosted_invoice_url ? `, or <a href="${esc(obj.hosted_invoice_url)}">pay this invoice now</a>` : ''}.</p>
+<p>If payment still fails, email accounts stay on for ${B.graceDays} days after the subscription ends, then are paused (nothing is deleted).</p>`);
       break;
     case 'invoice.paid':
       await q.run("UPDATE orgs SET billing_status = 'active' WHERE id = ? AND billing_status = 'past_due'", orgId);
+      if (Number(obj.amount_paid) > 0) {
+        await tellAdmins(orgId, `Receipt: ${money(obj.amount_paid, obj.currency)} paid`, `<p>Thank you! We received <b>${money(obj.amount_paid, obj.currency)}</b> for your ${esc(config.appName)} plan${obj.number ? ` (invoice ${esc(obj.number)})` : ''}.</p>
+${obj.hosted_invoice_url ? `<p><a href="${esc(obj.hosted_invoice_url)}">View invoice and receipt</a>${obj.invoice_pdf ? ` · <a href="${esc(obj.invoice_pdf)}">Download PDF</a>` : ''}</p>` : ''}
+<p>Invoices are always available in Admin → Billing → Manage billing.</p>`);
+      }
+      break;
+    case 'customer.subscription.trial_will_end':
+      await tellAdmins(orgId, 'Your free trial ends in 3 days', `<p>Your ${esc(config.appName)} trial ends on <b>${esc(new Date(Number(obj.trial_end) * 1000).toDateString())}</b>. Your card will be charged then and everything keeps working.</p>
+<p>Changed your mind? Cancel any time before then in Admin → Billing → Manage billing.</p>`);
       break;
     default: break;
   }
@@ -215,7 +240,12 @@ billing.post('/billing/:orgId/checkout', wrap(async (req, res) => {
     success_url: `${base(req)}/?billing=success&session_id={CHECKOUT_SESSION_ID}`,
     cancel_url: `${base(req)}/?billing=canceled`,
     metadata: { org_id: id, seats, interval }, subscription_data: { metadata: { org_id: id } },
-    allow_promotion_codes: 'true', billing_address_collection: 'auto',
+    allow_promotion_codes: 'true',
+    // Sales tax / VAT worked out by Stripe Tax (turn it on in the Stripe dashboard first, then STRIPE_TAX=true)
+    ...(B.tax ? { automatic_tax: { enabled: 'true' }, billing_address_collection: 'required', customer_update: { address: 'auto', name: 'auto' }, tax_id_collection: { enabled: 'true' } }
+      : { billing_address_collection: 'auto' }),
+    // Free trial for a business's first subscription (TRIAL_DAYS); the card is collected now and charged when it ends
+    ...(B.trialDays && !b.canceled_at ? { subscription_data: { metadata: { org_id: id }, trial_period_days: B.trialDays } } : {}),
   });
   await audit(req.user.email, id, 'billing.checkout', { seats, interval });
   res.json({ url: session.url });

@@ -66,8 +66,11 @@ export async function closeClient(sid) {
 /** Run fn with the given mailbox selected (locks are queued per connection). */
 export async function withMailbox(user, path, fn, { readOnly = false } = {}) {
   const client = await getClient(user);
+  const wasOpen = client.mailbox && client.mailbox.path === path;
   const lock = await client.getMailboxLock(path, { readOnly });
   try {
+    // Already open on this shared connection: ask the server what changed (new mail, deletions) before reading
+    if (wasOpen) await client.noop();
     return await fn(client);
   } finally {
     lock.release();

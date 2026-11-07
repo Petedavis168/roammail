@@ -127,5 +127,8 @@ config.billing = {
   friendlyFreeMailboxes: Number(env.FRIENDLY_FREE_MAILBOXES || 1),
   standardFreeMailboxes: Number(env.STANDARD_FREE_MAILBOXES || 0),
   graceDays: Number(env.BILLING_GRACE_DAYS || 7),
+  tax: env.STRIPE_TAX === 'true',                       // Stripe Tax: automatic sales tax / VAT
+  trialDays: Number(env.TRIAL_DAYS || 0),                // free trial for a business's first subscription
+  emails: env.BILLING_EMAILS !== 'false',                 // receipts, failed-payment and trial emails to business admins
 };
 config.billing.enabled = (env.BILLING_ENABLED ?? (config.billing.stripeKey ? 'true' : 'false')) === 'true';

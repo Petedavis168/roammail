@@ -36,7 +36,11 @@ http.createServer(async (req, res) => {
       db.items.set(itemId, { id: itemId, quantity: Number(s.line_items[0].quantity), price: { id: s.line_items[0].price, recurring: { interval: s.metadata.interval } } });
       db.subs.set(subId, { id: subId, status: 'active', customer: s.customer, metadata: s.metadata, items: { data: [db.items.get(itemId)] } });
       Object.assign(s, { status: 'complete', payment_status: 'paid', subscription: subId });
-      if (url.searchParams.get('webhook') !== '0') await webhook('checkout.session.completed', s);
+      if (url.searchParams.get('webhook') !== '0') {
+        await webhook('checkout.session.completed', s);
+        await webhook('invoice.paid', { id: id('in'), object: 'invoice', customer: s.customer, subscription: subId, number: `MOCK-${db.subs.size}`, currency: 'usd',
+          amount_paid: Number(s.line_items[0].quantity) * (s.metadata.interval === 'year' ? 4800 : 400), hosted_invoice_url: 'http://127.0.0.1:12111/invoice', subscription_details: { metadata: s.metadata } });
+      }
       res.writeHead(303, { Location: s.success_url.replace('{CHECKOUT_SESSION_ID}', s.id) }); return res.end();
     }
     return send(200, `<!doctype html><title>Mock Stripe Checkout</title><body style="font-family:sans-serif;padding:40px"><h2>Mock checkout</h2><p>${s.line_items[0].quantity} user(s), ${s.metadata.interval}ly</p><form method="post"><button id="pay">Pay</button></form></body>`, 'text/html');
@@ -47,7 +51,7 @@ http.createServer(async (req, res) => {
   if (req.method === 'POST' && p === 'customers') { const c = { id: id('cus'), ...b }; db.customers.set(c.id, c); return send(200, c); }
   if (req.method === 'POST' && p === 'checkout/sessions') {
     const s = { id: id('cs_test'), object: 'checkout.session', status: 'open', payment_status: 'unpaid', mode: b.mode, customer: b.customer, metadata: b.metadata, success_url: b.success_url,
-      line_items: Object.values(b.line_items) };
+      line_items: Object.values(b.line_items), params: b };
     s.url = `http://127.0.0.1:12111/pay?s=${s.id}`;
     db.sessions.set(s.id, s); return send(200, s);
   }
@@ -59,6 +63,12 @@ http.createServer(async (req, res) => {
     it.quantity = Number(b.quantity); return send(200, it);
   }
   if (req.method === 'POST' && p === 'billing_portal/sessions') return send(200, { url: `http://127.0.0.1:12111/portal?c=${b.customer}` });
+  if (req.method === 'POST' && p === 'test/fail') { // test helper: a renewal payment fails
+    const sub = db.subs.get(b.subscription);
+    await webhook('invoice.payment_failed', { id: id('in'), object: 'invoice', customer: sub.customer, subscription: sub.id, currency: 'usd', amount_due: 400, hosted_invoice_url: 'http://127.0.0.1:12111/invoice', subscription_details: { metadata: sub.metadata } });
+    return send(200, { ok: true });
+  }
+  if (req.method === 'GET' && p === 'test/last-session') return send(200, [...db.sessions.values()].pop()?.params || {});
   if (req.method === 'POST' && p === 'test/cancel') { // test helper: cancel a subscription
     const sub = db.subs.get(b.subscription); sub.status = 'canceled'; await webhook('customer.subscription.deleted', sub); return send(200, sub);
   }

@@ -82,8 +82,20 @@ test('standard business: pays at the end, seats follow users, webhooks are verif
   assert.equal((await other.post('/api/billing/confirm', { sessionId: sid })).status, 403);
   assert.equal((await other.get(`/api/billing/${orgId}`)).status, 403);
 
-  // a real (signed) cancellation webhook from Stripe is applied
+  // checkout asked Stripe for tax and a trial; the admin got a receipt
+  const params = await (await fetch(`${STRIPE}/v1/test/last-session`, { headers: { Authorization: 'Bearer sk_test_mock' } })).json();
+  assert.equal(params.automatic_tax?.enabled, 'true'); assert.equal(params.subscription_data?.trial_period_days, '14');
+  const inbox = async () => (await a.get('/api/messages?folder=INBOX')).data.messages.map((m) => m.subject);
+  assert.ok((await inbox()).some((x) => /^Receipt: \$4\.00 paid/.test(x)), 'receipt emailed to the admin');
+
+  // a failed renewal marks the business past due and tells the admin
   const sub = (await (await fetch(`${STRIPE}/v1/checkout/sessions/${sid}`, { headers: { Authorization: 'Bearer sk_test_mock' } })).json()).subscription;
+  await fetch(`${STRIPE}/v1/test/fail`, { method: 'POST', headers: { Authorization: 'Bearer sk_test_mock', 'Content-Type': 'application/x-www-form-urlencoded' }, body: `subscription=${sub}` });
+  await sleep(1500);
+  assert.equal((await a.get(`/api/billing/${orgId}`)).data.status, 'past_due');
+  assert.ok((await inbox()).some((x) => /Payment failed/.test(x)), 'failed-payment email sent');
+
+  // a real (signed) cancellation webhook from Stripe is applied
   await fetch(`${STRIPE}/v1/test/cancel`, { method: 'POST', headers: { Authorization: 'Bearer sk_test_mock', 'Content-Type': 'application/x-www-form-urlencoded' }, body: `subscription=${sub}` });
   await sleep(500);
   assert.equal((await a.get(`/api/billing/${orgId}`)).data.status, 'canceled');
