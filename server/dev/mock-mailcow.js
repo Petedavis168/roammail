@@ -99,7 +99,7 @@ http.createServer(async (req, res) => {
     return send(200, ok(b.attr.action === 'release' ? 'item_released' : 'item_learned'));
   }
   if (verb === 'edit') {
-    const store = { mailbox: mailboxes, filter: filters, syncjob: syncjobs, alias: aliases }[what] || domains;
+    const store = { mailbox: mailboxes, 'rl-mbox': mailboxes, filter: filters, syncjob: syncjobs, alias: aliases }[what] || domains;
     for (const k of b.items) {
       const key = store === filters || store === syncjobs || store === aliases ? Number(k) : k;
       Object.assign(store.get(key) || {}, b.attr);

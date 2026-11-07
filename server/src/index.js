@@ -12,6 +12,7 @@ import { archive } from './archive.js';
 import { push, startPush, pushStats, notify } from './push.js';
 import { tasksApi, startReminders, setReminderNotifier } from './tasks.js';
 import { importsApi, importsPublic, startImports, setImportNotifier } from './imports.js';
+import { phoneApi } from './phone.js';
 import { sendSystemMail } from './recovery.js';
 import { help } from './help.js';
 import { hosts, siteRouter } from './hosts.js';
@@ -91,6 +92,7 @@ app.use('/api', publicRecovery);
 app.use('/api', requireSetupApi); // server tool may call with a signed request (no session)
 app.use('/api/setup', requireAuth);
 app.use('/api', setupApi);
+app.use('/api', phoneApi);
 app.use('/api', publicAccounts);
 app.use('/api', api);
 app.use('/api', accounts);

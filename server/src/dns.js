@@ -12,7 +12,11 @@ export const verifyRecord = (domain, token) => ({
   type: 'TXT', host: '@', name: domain, value: `mailcow-verify=${token}`, purpose: 'Proves you own this domain',
 });
 
-export function requiredRecords(domain, dkim) {
+// Trusted relay (5f/5i): mail can leave through a relay (SMTP2GO) for deliverability. Its records are CNAMEs the
+// customer adds once: bounce handling, the relay's DKIM key and link tracking. RELAY_CNAMES="host:target,..."
+export const relayCnames = () => String(process.env.RELAY_CNAMES ?? '').split(',').map((x) => x.trim()).filter(Boolean)
+  .map((x) => { const [host, target] = x.split(':').map((y) => y.trim()); return host && target ? { host, target } : null; }).filter(Boolean);
+export function requiredRecords(domain, dkim, { relay = false } = {}) {
   const mx = config.mailHostname;
   const recs = [
     { key: 'mx', type: 'MX', host: '@', name: domain, value: mx, priority: 10, purpose: 'Delivers mail for your domain to us' },
@@ -27,6 +31,11 @@ export function requiredRecords(domain, dkim) {
     { key: 'autodiscover', type: 'CNAME', host: 'autodiscover', name: `autodiscover.${domain}`, value: mx, purpose: 'Outlook / phone auto-setup', optional: true },
     { key: 'autoconfig', type: 'CNAME', host: 'autoconfig', name: `autoconfig.${domain}`, value: mx, purpose: 'Thunderbird / phone auto-setup', optional: true },
   );
+  const purposes = { return: 'Relay: handles bounces for your outgoing mail', dkim: 'Relay: signs mail it delivers for you (DKIM)', track: 'Relay: link tracking domain' };
+  for (const c of relayCnames()) {
+    const kind = /_domainkey/.test(c.host) ? 'dkim' : /track/.test(c.target) ? 'track' : 'return';
+    recs.push({ key: `relay-${c.host}`, type: 'CNAME', host: c.host, name: `${c.host}.${domain}`, value: c.target, purpose: purposes[kind], optional: !relay, relay: true });
+  }
   return recs;
 }
 
@@ -39,8 +48,8 @@ export async function checkVerification(domain, token) {
   return (await txt(domain)).some((v) => v.trim() === `mailcow-verify=${token}`);
 }
 
-export async function checkRecords(domain, dkim) {
-  const recs = requiredRecords(domain, dkim);
+export async function checkRecords(domain, dkim, opts = {}) {
+  const recs = requiredRecords(domain, dkim, opts);
   const out = [];
   for (const r of recs) {
     let ok = false;

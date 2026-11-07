@@ -101,3 +101,19 @@ The allowlist and a reference implementation of the check are in `server/src/pro
 - **Shared failure budget:** failures across all users are counted. Once `IMAP_AUTH_FAIL_BUDGET` is used up in a 10-minute window, sign-ins pause briefly instead of risking a ban.
 - **One attempt only:** passwords are never retried (sign-in, password confirmation, sending, scheduled sends, push watchers).
 - **Connections reused:** each session keeps one IMAP connection. A session whose saved password mailcow rejects is ended immediately, so it can't keep failing in the background. The same goes for push watchers and scheduled sends.
+
+## Settings added in items 4a–11 (all optional unless noted)
+
+| Variable | What it does |
+|---|---|
+| `SPF_INCLUDE` | Added to every domain's SPF record. For the relay: `include:spf.smtp2go.com` |
+| `RELAY_CNAMES` | Relay CNAMEs shown on every domain (required when the domain sends through the relay). For SMTP2GO: `em1184580:return.smtp2go.net,s1184580._domainkey:dkim.smtp2go.net,link:track.smtp2go.net` |
+| `FREE_RELAYHOST_ID` / `BUSINESS_RELAYHOST_ID` | mailcow relayhost ids for free vs business domains (separate reputations, 5e) |
+| `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN` (secret), `TWILIO_VERIFY_SID` | Turns on SMS phone verification for free sign-ups (5b). One free account per number. |
+| `FBL_MAILBOX`, `FBL_PASSWORD` (secret) | Mailbox that receives feedback-loop (spam complaint) reports; each complaint pauses the sender (5c) |
+| `MS_CLIENT_ID`, `MS_CLIENT_SECRET` (secret) | Microsoft sign-in for Outlook imports (item 6). Entra app: personal + work accounts, redirect `https://roammail.net/api/imports/outlook/callback`, permissions `IMAP.AccessAsUser.All`, `offline_access` |
+| `BUSINESS_SEND_RATE` | Business hourly send limit (default 100) |
+
+**Provisioner allowlist:** the watchdog now also reads `GET get/logs/postfix/N` (bounces and the compromised-account guard).
+Add it to the provisioner's allowlist (same as `server/src/provisioner.js`). Until then those two checks are skipped quietly;
+everything else works.

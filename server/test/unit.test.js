@@ -198,3 +198,23 @@ test('mail-server sign-in guard: bad input never reaches the server, repeats are
   await assert.rejects(g.beforeAuth('fresh@b.cd', 'anything'), (e) => e.status === 429, 'budget used: nobody hits the mail server');
   assert.ok(g.isAuthError({ authenticationFailed: true }) && g.isAuthError({ code: 'EAUTH' }) && !g.isAuthError({ code: 'ECONNREFUSED' }));
 });
+
+test('send ramp (5a): 25/h for the first week, 60/h to day 30, then 100/h', async () => {
+  const { rampFor } = await import('../src/outbound.js');
+  const day = 864e5; const now = Date.now();
+  assert.deepEqual([rampFor(now, now).value, rampFor(now, now).perDay], [25, 150]);
+  assert.equal(rampFor(now - 6.5 * day, now).value, 25);
+  assert.equal(rampFor(now - 7 * day, now).value, 60);
+  assert.equal(rampFor(now - 29 * day, now).value, 60);
+  assert.equal(rampFor(now - 30 * day, now).value, 100);
+});
+
+test('relay records (5i): three CNAMEs, required only when the domain sends through the relay', async () => {
+  process.env.RELAY_CNAMES = 'em1184580:return.smtp2go.net,s1184580._domainkey:dkim.smtp2go.net,link:track.smtp2go.net';
+  const { requiredRecords } = await import('../src/dns.js');
+  const direct = requiredRecords('acme.test', null).filter((r) => r.relay);
+  assert.deepEqual(direct.map((r) => [r.type, r.name, r.value, r.optional]), [
+    ['CNAME', 'em1184580.acme.test', 'return.smtp2go.net', true], ['CNAME', 's1184580._domainkey.acme.test', 'dkim.smtp2go.net', true], ['CNAME', 'link.acme.test', 'track.smtp2go.net', true]]);
+  assert.ok(requiredRecords('acme.test', null, { relay: true }).filter((r) => r.relay).every((r) => !r.optional));
+  delete process.env.RELAY_CNAMES;
+});
