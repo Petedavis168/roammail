@@ -7,6 +7,7 @@ import fs from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { config } from './config.js';
 import { api } from './routes.js';
+import { abuseDesk, outboundAdmin, startOutboundChecks } from './outbound.js';
 import { ops, metricsMiddleware, startMetricsLog, gauge, startDbBackups } from './ops.js';
 import { q } from './db.js';
 import { publicAccounts, accounts } from './accounts.js';
@@ -62,6 +63,7 @@ app.use('/api', (req, res, next) => {
 });
 app.get('/healthz', (req, res) => res.json({ ok: true }));
 app.use(ops);
+app.use(abuseDesk);
 gauge('sessions_active', async () => (await q.get('SELECT COUNT(*) AS n FROM sessions')).n);
 gauge('jobs_pending', async () => (await q.get("SELECT COUNT(*) AS n FROM jobs WHERE status = 'pending'")).n);
 // Background work must never crash the server; log it so the error alarm fires instead.
@@ -87,6 +89,7 @@ app.use('/api', contacts);
 app.use('/api', groups);
 app.use('/api', billing);
 app.use('/api', recovery);
+app.use('/api', outboundAdmin);
 app.use('/api', (req, res) => res.status(404).json({ error: 'Not found' }));
 app.use('/api', (err, req, res, _next) => {
   const status = err.status || (err.code === 'LIMIT_FILE_SIZE' ? 413 : err.authenticationFailed ? 401 : 500);
@@ -102,6 +105,7 @@ if (fs.existsSync(dist)) {
   app.get(/^\/(?!api\/).*/, (req, res) => res.sendFile(path.join(dist, 'index.html')));
 }
 
+startOutboundChecks();
 if (config.runsBackground) {
   await startJobs();
   await startRetention();

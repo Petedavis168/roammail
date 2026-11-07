@@ -148,6 +148,14 @@ CREATE TABLE IF NOT EXISTS audit (
   at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 CREATE TABLE IF NOT EXISTS sig_assets (name TEXT PRIMARY KEY, mime TEXT NOT NULL, data BLOB NOT NULL, created_at TEXT NOT NULL DEFAULT (datetime('now')));
+CREATE TABLE IF NOT EXISTS sending_holds (
+  email TEXT PRIMARY KEY, status TEXT NOT NULL, reason TEXT, evidence TEXT, at INTEGER NOT NULL, lifted_by TEXT
+);
+CREATE TABLE IF NOT EXISTS abuse_reports (
+  id INTEGER PRIMARY KEY AUTOINCREMENT, offender TEXT NOT NULL, reporter TEXT, details TEXT, headers TEXT, ip TEXT,
+  at INTEGER NOT NULL, status TEXT NOT NULL DEFAULT 'open'
+);
+CREATE INDEX IF NOT EXISTS abuse_reports_offender ON abuse_reports(offender, at);
 CREATE TABLE IF NOT EXISTS send_counts (email TEXT NOT NULL, day TEXT NOT NULL, count INTEGER NOT NULL DEFAULT 0, PRIMARY KEY (email, day));
 `;
 

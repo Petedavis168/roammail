@@ -16,7 +16,7 @@ export function requiredRecords(domain, dkim) {
   const mx = config.mailHostname;
   const recs = [
     { key: 'mx', type: 'MX', host: '@', name: domain, value: mx, priority: 10, purpose: 'Delivers mail for your domain to us' },
-    { key: 'spf', type: 'TXT', host: '@', name: domain, value: `v=spf1 mx a:${mx} ~all`, purpose: 'Authorises our server to send as you (SPF)' },
+    { key: 'spf', type: 'TXT', host: '@', name: domain, value: `v=spf1 mx a:${mx}${process.env.SPF_INCLUDE ? ` ${process.env.SPF_INCLUDE}` : ''} ~all`, purpose: 'Authorises our server to send as you (SPF)' },
   ];
   if (dkim) recs.push({ key: 'dkim', type: 'TXT', host: `${dkim.selector}._domainkey`, name: `${dkim.selector}._domainkey.${domain}`, value: dkim.txt, purpose: 'Signs your outgoing mail (DKIM)' });
   recs.push(

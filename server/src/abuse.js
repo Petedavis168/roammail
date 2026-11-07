@@ -1,3 +1,4 @@
+import { assertCanSend } from './outbound.js';
 import { counter } from './shared.js';
 import { count } from './ops.js';
 // Abuse protection helpers: send quotas, SSRF-safe hosts, breached-password check, login throttling.
@@ -20,6 +21,7 @@ export async function accountKind(email) {
 
 /** Check and count a webmail send. Throws 429 when over the daily quota or recipient limit. */
 export async function checkSendQuota(email, recipientCount) {
+  await assertCanSend(email);
   const k = await accountKind(email);
   const maxRcpt = k.business ? config.limits.businessRecipientsPerMessage : config.limits.freeRecipientsPerMessage;
   if (recipientCount > maxRcpt) throw fail(400, `You can send to at most ${maxRcpt} people per message${k.business ? '' : ' on a free account'}.`);

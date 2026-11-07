@@ -1,3 +1,4 @@
+import { applySendingRoute } from './outbound.js';
 // Free sign-up, business domains, and the admin / super-admin portals.
 import express from 'express';
 import crypto from 'node:crypto';
@@ -175,6 +176,7 @@ async function activateDomain(d, actor) {
   await q.run("UPDATE domains SET status = 'active', verified_at = datetime('now'), dkim_txt = ?, dkim_selector = ? WHERE domain = ?",
     dkim?.txt || null, dkim?.selector || null, d.domain);
   await audit(actor, d.org_id, 'domain.activate', { domain: d.domain });
+  await applySendingRoute(d.domain).catch((e) => console.error('APP_ERROR sending route', d.domain, e.message));
 }
 
 const dkimOf = (d) => (d.dkim_txt ? { txt: d.dkim_txt, selector: d.dkim_selector || 'dkim' } : null);

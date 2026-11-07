@@ -10,7 +10,8 @@
     "test:api": "node --disable-warning=ExperimentalWarning --test test/api.test.js",
     "test:e2e": "node --disable-warning=ExperimentalWarning --test test/e2e.test.js",
     "test:billing": "node --disable-warning=ExperimentalWarning --test test/billing.test.js",
-    "test:workspace": "node --disable-warning=ExperimentalWarning --test test/workspace.test.js"
+    "test:workspace": "node --disable-warning=ExperimentalWarning --test test/workspace.test.js",
+    "test:outbound": "node --test test/outbound.test.js"
   },
   "keywords": [],
   "author": "",

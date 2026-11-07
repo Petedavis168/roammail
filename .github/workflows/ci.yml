@@ -62,6 +62,9 @@ jobs:
       - name: Billing and groups tests
         run: npm run test:billing --prefix server
 
+      - name: Outbound spam watchdog and abuse desk tests
+        run: npm run test:outbound --prefix server
+
       - name: Browser injection tests
         working-directory: server
         run: |

@@ -35,6 +35,8 @@ export const mailcow = {
     active: 1, backupmx: 0, relay_all_recipients: 0, restart_sogo: 10,
   }),
   editDomain: (domain, attr) => call('POST', 'edit/domain', { items: [domain], attr }),
+  /** mailcow logs: rspamd-history, ratelimited, postfix, ... (newest first) */
+  logs: async (kind, count = 500) => list(await call('GET', `get/logs/${encodeURIComponent(kind)}/${Number(count)}`)),
   deleteDomain: (domain) => call('POST', 'delete/domain', [domain]),
 
   addDkim: (domain) => call('POST', 'add/dkim', { domains: domain, dkim_selector: 'dkim', key_size: 2048 }),
