@@ -148,3 +148,22 @@ test('watchdog: too many bounces pause the sender; a burst after a new-device si
   const re = await again.post('/api/login', { email: hacked, password: PW });
   assert.ok(re.data.setupRequired?.includes('password'), 'must choose a new password');
 });
+
+test('daily sending report: numbers from the mail log, a recommendation, and it can be emailed (5h)', async (t) => {
+  const admin = superAdmin;
+  if (!admin) return t.skip('needs the first test (fresh data folder)');
+  const { c: someone } = await signup(`rep${run}`);
+  assert.equal((await someone.get('/api/super/reputation')).status, 403, 'super-admins only');
+  const now = Math.floor(Date.now() / 1000); const lines = [];
+  for (let i = 0; i < 20; i++) lines.push({ time: now - 100, message: `R${run}${i}`.toUpperCase().replace(/[^0-9A-F]/g, 'D').padEnd(10, 'D') + `: to=<p${i}@gmail.com>, relay=gmail-smtp-in.l.google.com, status=sent (250 ok)` });
+  await mockLog('postfix', lines);
+  const r = (await admin.get('/api/super/reputation')).data;
+  assert.ok(r.delivery.sent >= 20, JSON.stringify(r.delivery)); assert.ok(r.delivery.byProvider.gmail.sent >= 20);
+  assert.ok(['advance', 'hold', 'roll back'].includes(r.advice)); assert.ok(r.why.length);
+  assert.ok(r.holds.length >= 1, 'pauses from the earlier tests are counted');
+  assert.equal((await admin.get('/api/super/reputation?send=1')).status, 200);
+  await sleep(1500);
+  assert.ok((await admin.get('/api/messages?folder=INBOX')).data.messages.some((m) => /sending report/.test(m.subject)), 'emailed to super-admins');
+  const fn = await admin.get('/api/super/first-name-accounts');
+  assert.equal(fn.status, 200); assert.ok(Array.isArray(fn.data));
+});
