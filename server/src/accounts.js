@@ -676,6 +676,12 @@ accounts.post('/super/staff-mailboxes', requireSuper, rateLimit({ windowMs: 3600
   res.json({ ok: true, email, password });
 }));
 
+// Free accounts that are only a first name but were created by sign-up before the rule (not staff addresses)
+accounts.get('/super/first-name-accounts', requireSuper, wrap(async (req, res) => {
+  const rows = await q.all("SELECT email, created_at FROM signups WHERE (ip IS NULL OR ip != 'staff') ORDER BY created_at");
+  res.json(rows.filter((r) => r.email.endsWith(`@${config.signup.domain}`) && isBareFirstName(r.email.split('@')[0])));
+}));
+
 accounts.patch('/super/orgs/:id', requireSuper, wrap(async (req, res) => {
   const o = await requireOrgAdmin(req, req.params.id);
   if (req.body.maxMailboxes !== undefined) {

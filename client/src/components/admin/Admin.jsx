@@ -41,6 +41,8 @@ function useQuota() { const [q, setQ] = useState({ business: 10240, businessMax:
 // Staff-only addresses: a bare first name on the free domain (e.g. pete@roammail.net). Customers can't take these.
 function StaffAddresses({ domain }) {
   const [f, setF] = useState({ localPart: '', name: '' });
+  const [older, setOlder] = useState(null);
+  useEffect(() => { api.get('/api/super/first-name-accounts').then(setOlder).catch(() => setOlder([])); }, []);
   const [made, setMade] = useState(null);
   const [err, setErr] = useState('');
   return (
@@ -57,6 +59,32 @@ function StaffAddresses({ domain }) {
       </form>
       {err && <div className="form-error">{err}</div>}
       {made && <div className="callout ok"><small>Created <b>{made.email}</b>. Temporary password: <code>{made.password}</code> (shown once; they must change it at first sign-in).</small></div>}
+      {older?.length > 0 && (
+        <>
+          <p className="small" style={{ marginTop: 12 }}><b>{older.length}</b> customer account{older.length === 1 ? '' : 's'} took a first-name address before this rule. Review them in Abuse if any look like impersonation:</p>
+          <p className="small mono">{older.map((o) => o.email).join(', ')}</p>
+        </>
+      )}
+    </div>
+  );
+}
+
+// Daily sending report (plan 5h): what goes out by email each morning, on demand
+function ReputationCard() {
+  const [r, setR] = useState(null); const [busy, setBusy] = useState(false);
+  const load = (send) => { setBusy(true); api.get('/api/super/reputation', send ? { send: 1 } : {}).then(setR).catch((e) => alert(e.message)).finally(() => setBusy(false)); };
+  const color = { advance: 'ok', hold: 'warn', 'roll back': 'bad' };
+  return (
+    <div className="card" style={{ marginTop: 16 }}>
+      <h3>Sending report</h3>
+      <p className="muted small">Emailed to super-admins and abuse@ every morning. Delivery, bounces, pauses, complaints and blocklists for the last 24 hours, with a warm-up recommendation.</p>
+      {r && (
+        <div className="small">
+          <p><span className={`pill ${color[r.advice]}`}>{r.advice}</span> {r.why.join('; ')}</p>
+          <p>Delivered {r.delivery ? r.delivery.sent : 'n/a'} · bounced {r.delivery ? `${r.delivery.bounced} (${(r.bounceRate * 100).toFixed(1)}%)` : 'n/a'} · paused {r.holds.length} · complaints {r.complaints} · listings {r.listed} · new sign-ups {r.signups}</p>
+        </div>
+      )}
+      <div className="actions"><button className="btn sm" disabled={busy} onClick={() => load(false)}>{r ? 'Refresh' : 'Show now'}</button><button className="btn sm" disabled={busy} onClick={() => load(true)}>Email it now</button></div>
     </div>
   );
 }
@@ -559,6 +587,7 @@ function Platform() {
       </div>
       <FriendlyCodes />
       <StaffAddresses domain={d.settings.signupDomain} />
+      <ReputationCard />
       <h3>Businesses</h3>
       <div className="table">
         <div className="tr th"><span>Business</span><span>Domains</span><span>User limit</span><span>Status</span><span /></div>

@@ -13,6 +13,7 @@ import { push, startPush, pushStats, notify } from './push.js';
 import { tasksApi, startReminders, setReminderNotifier } from './tasks.js';
 import { importsApi, importsPublic, startImports, setImportNotifier } from './imports.js';
 import { phoneApi } from './phone.js';
+import { reputationApi, startReputationReport } from './reputation.js';
 import { sendSystemMail } from './recovery.js';
 import { help } from './help.js';
 import { hosts, siteRouter, ID_PATH, notFound } from './hosts.js';
@@ -103,6 +104,7 @@ app.use('/api', spam);
 app.use('/api', deviceSetupApi);
 app.use('/api', privacy);
 app.use('/api', tasksApi);
+app.use('/api', reputationApi);
 app.use('/api', importsApi);
 app.use('/api', calendar);
 app.use('/api', contacts);
@@ -173,6 +175,7 @@ setImportNotifier(async (email, n) => {
   await sendSystemMail(email, n.title, `<p style="font-family:Segoe UI,Arial,sans-serif;font-size:14px">${esc(n.body)}</p>`);
 });
 startImports();
+startReputationReport();
 gauge('push_watchers', () => pushStats().watching);
 if (config.runsBackground) {
   await startJobs();
