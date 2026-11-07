@@ -8,7 +8,7 @@ import { escapeHtml } from '../util.js';
 export function prepareHtml(msg, allowRemote, disableLinks) {
   let blocked = 0;
   const cidMap = Object.fromEntries((msg.attachments || []).filter((a) => a.cid).map((a) => [a.cid, api.attachmentUrl(msg.folder, msg.uid, a.index, true)]));
-  const source = msg.html || `<pre style="white-space:pre-wrap;font-family:inherit;margin:0">${linkify(escapeHtml(msg.text || ''))}</pre>`;
+  const source = msg.html || `<pre style="white-space:pre-wrap;font-family:inherit;margin:0">${quoteText(linkify(escapeHtml(msg.text || '')))}</pre>`;
 
   DOMPurify.addHook('afterSanitizeAttributes', (node) => {
     if (node.tagName === 'A') {
@@ -40,6 +40,32 @@ export function prepareHtml(msg, allowRemote, disableLinks) {
   return { html: clean, blocked };
 }
 
+// Plain text: the trailing "On … wrote:" + "> …" block becomes a quote that starts collapsed
+function quoteText(s) {
+  const lines = s.split('\n');
+  let i = lines.length;
+  while (i > 0 && (/^&gt;/.test(lines[i - 1]) || !lines[i - 1].trim())) i--;
+  if (i > 0 && /wrote:\s*$/.test(lines[i - 1])) i--;
+  if (i >= lines.length || !lines.slice(i).some((l) => /^&gt;/.test(l))) return s;
+  return `${lines.slice(0, i).join('\n')}<blockquote type="cite">${lines.slice(i).join('\n')}</blockquote>`;
+}
+
+const QUOTE_SEL = '.gmail_quote, blockquote[type="cite"], .yahoo_quoted, #divRplyFwdMsg, #appendonsend';
+/** Hide earlier messages quoted at the end of a reply behind a "•••" button (Gmail-style). */
+function collapseQuotes(doc, onChange) {
+  const q = [...doc.querySelectorAll(QUOTE_SEL)].find((el) => !el.parentElement?.closest(QUOTE_SEL));
+  if (!q || doc.getElementById('rm-quote-toggle')) return;
+  const hide = [q];
+  if (q.id === 'divRplyFwdMsg' || q.id === 'appendonsend') for (let n = q.nextElementSibling; n; n = n.nextElementSibling) hide.push(n);
+  const btn = doc.createElement('span');
+  btn.id = 'rm-quote-toggle'; btn.textContent = '•••'; btn.title = 'Show quoted text'; btn.setAttribute('role', 'button');
+  btn.style.cssText = 'display:inline-block;margin:6px 0;padding:0 8px;border-radius:8px;background:#E6EAF0;color:#444;cursor:pointer;font:600 12px/18px sans-serif;letter-spacing:1px';
+  q.parentNode.insertBefore(btn, q);
+  const set = (show) => { for (const el of hide) el.style.display = show ? '' : 'none'; btn.title = show ? 'Hide quoted text' : 'Show quoted text'; onChange(); };
+  let open = false; set(false);
+  btn.addEventListener('click', () => { open = !open; set(open); });
+}
+
 function linkify(s) {
   return s.replace(/(https?:\/\/[^\s<]+)/g, '<a href="$1">$1</a>');
 }
@@ -68,11 +94,12 @@ export default function MessageBody({ msg, allowRemote, onBlocked, disableLinks 
     const fit = () => {
       const doc = frame.contentDocument;
       if (!doc?.documentElement) return;
-      setHeight(Math.max(60, doc.documentElement.scrollHeight + 4));
+      setHeight(Math.max(60, Math.ceil((doc.body || doc.documentElement).getBoundingClientRect().height) + 12));
     };
     const onLoad = () => {
-      fit();
       const doc = frame.contentDocument;
+      if (doc) try { collapseQuotes(doc, fit); } catch { /* never block reading */ }
+      fit();
       doc?.querySelectorAll('img').forEach((img) => img.addEventListener('load', fit));
       if (doc?.body) { ro = new ResizeObserver(fit); ro.observe(doc.body); }
     };
