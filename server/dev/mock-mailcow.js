@@ -105,7 +105,7 @@ http.createServer(async (req, res) => {
   if (verb === 'delete' && what === 'qitem') { for (const k of b) quarantine.delete(Number(k)); return send(200, ok('item_deleted')); }
   if (verb === 'delete') {
     const store = { mailbox: mailboxes, domain: domains, alias: aliases, filter: filters, syncjob: syncjobs }[what];
-    for (const k of b) store?.delete(['alias', 'filter', 'syncjob'].includes(what) ? Number(k) : k);
+    for (const k of b) { store?.delete(['alias', 'filter', 'syncjob'].includes(what) ? Number(k) : k); if (what === 'mailbox') await gmDelete(k); }
     return send(200, ok('deleted'));
   }
   send(404, { type: 'error', msg: 'route not found' });

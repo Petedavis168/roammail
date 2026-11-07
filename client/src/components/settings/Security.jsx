@@ -3,6 +3,7 @@ import { api } from '../../api.js';
 import { Icon } from '../../icons.jsx';
 import { useToast } from '../Toast.jsx';
 import { fmtDate } from '../../util.js';
+import TwoFactorSetup from '../TwoFactorSetup.jsx';
 
 function device(ua = '') {
   const b = /Edg\//.test(ua) ? 'Edge' : /Chrome\//.test(ua) ? 'Chrome' : /Firefox\//.test(ua) ? 'Firefox' : /Safari\//.test(ua) ? 'Safari' : ua.split('/')[0] || 'Unknown';
@@ -18,7 +19,11 @@ export default function Security({ me }) {
   const [codes, setCodes] = useState(null);
   const [pw, setPw] = useState({ current: '', next: '', confirm: '' });
   const [recovery, setRecovery] = useState('');
-  const load = () => api.get('/api/security').then((d) => { setS(d); setRecovery(d.recoveryEmail); });
+  const [devices, setDevices] = useState([]);
+  const load = () => {
+    api.get('/api/security/sessions').then(setDevices).catch(() => {});
+    return api.get('/api/security').then((d) => { setS(d); setRecovery(d.recoveryEmail); });
+  };
   useEffect(() => { load(); }, []);
   if (!s) return <div className="spinner" />;
 
@@ -39,24 +44,11 @@ export default function Security({ me }) {
         <div className="card">
           <p><span className="pill ok">On</span> {s.backupCodesLeft} backup codes left.</p>
           <div className="step-actions" style={{ justifyContent: 'flex-start' }}>
-            <button className="btn" onClick={async () => { const r = await run(() => api.post('/api/security/backup-codes')); if (r) setCodes(r.backupCodes); load(); }}>New backup codes</button>
+            <button className="btn" onClick={async () => { const pw = prompt('Enter your password to make new backup codes'); if (!pw) return; const r = await run(() => api.post('/api/security/backup-codes', { password: pw })); if (r) setCodes(r.backupCodes); load(); }}>New backup codes</button>
             <button className="btn" onClick={async () => { const p = prompt('Enter your password to turn off 2-step verification'); if (p && await run(() => api.post('/api/security/2fa/disable', { password: p }), '2-step verification turned off')) load(); }}>Turn off</button>
           </div>
         </div>
-      ) : !setup ? (
-        <button className="btn primary" onClick={async () => setSetup(await run(() => api.post('/api/security/2fa/setup')))}><Icon name="lock" size={16} /> Turn on 2-step verification</button>
-      ) : (
-        <div className="card twofa">
-          <img src={setup.qr} alt="QR code" width="180" height="180" />
-          <div>
-            <ol><li>Open your authenticator app and scan this code.</li><li>Can't scan? Enter this key: <code className="mono">{setup.secret.match(/.{1,4}/g).join(' ')}</code></li><li>Type the 6-digit code it shows:</li></ol>
-            <div className="pick-time">
-              <input inputMode="numeric" autoComplete="one-time-code" maxLength={6} value={code} onChange={(e) => setCode(e.target.value.replace(/\D/g, ''))} placeholder="123456" className="code-input" />
-              <button className="btn primary" onClick={async () => { const r = await run(() => api.post('/api/security/2fa/enable', { code }), '2-step verification is on'); if (r) { setCodes(r.backupCodes); setSetup(null); setCode(''); load(); } }}>Verify &amp; turn on</button>
-            </div>
-          </div>
-        </div>
-      )}
+      ) : <TwoFactorSetup email={me.email} onDone={load} />}
       {codes && (
         <div className="card backup">
           <b>Save your backup codes</b>
@@ -74,7 +66,7 @@ export default function Security({ me }) {
       <p className="muted small">If you forget your password, we'll send a reset link here.{!s.resetAvailable && ' (Password reset emails are not enabled on this server yet. Ask your administrator.)'}</p>
       <div className="pick-time">
         <input type="email" placeholder="you@another-provider.com" value={recovery} onChange={(e) => setRecovery(e.target.value)} />
-        <button className="btn" onClick={() => run(() => api.put('/api/security/recovery-email', { email: recovery }), 'Recovery email saved').then(load)}>Save</button>
+        <button className="btn" onClick={() => { const pw = prompt('Enter your password to change your recovery email'); if (pw) run(() => api.put('/api/security/recovery-email', { email: recovery, password: pw }), 'Recovery email saved').then(load); }}>Save</button>
       </div>
 
       <h3>Change password</h3>
@@ -90,6 +82,18 @@ export default function Security({ me }) {
         <small className="muted">Update the password in your phone and desktop mail apps afterwards.</small>
       </form>
 
+      <h3>Signed-in devices</h3>
+      <div className="table">
+        {devices.map((d) => (
+          <div className="tr two" key={d.id}>
+            <span><Icon name={/iPhone|Android|Mobile/.test(d.ua || '') ? 'phone' : 'mail'} size={14} /> {device(d.ua)} {d.current && <span className="badge">This device</span>}</span>
+            <span className="muted small">{d.ip} · active {fmtDate(new Date(d.lastSeen).toISOString())}</span>
+            <span className="actions">{!d.current && <button className="btn sm" onClick={() => run(() => api.del('/api/security/sessions', { id: d.id }), 'Signed out').then(load)}>Sign out</button>}</span>
+          </div>
+        ))}
+      </div>
+      <p className="muted small">You're signed out automatically after a few days without activity.</p>
+
       <h3>Recent sign-in activity</h3>
       <div className="table">
         {s.events.map((e, i) => (
@@ -101,7 +105,7 @@ export default function Security({ me }) {
         ))}
       </div>
       <p className="muted small">Don't recognize something? Change your password and sign out everywhere.</p>
-      <button className="btn" onClick={() => run(() => api.post('/api/security/signout-all'), 'Signed out of all other devices')}><Icon name="logout" size={16} /> Sign out of all other devices</button>
+      <button className="btn" onClick={() => run(() => api.post('/api/security/signout-all'), 'Signed out of all other devices').then(load)}><Icon name="logout" size={16} /> Sign out of all other devices</button>
     </div>
   );
 }

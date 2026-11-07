@@ -5,7 +5,7 @@ import rateLimit from 'express-rate-limit';
 import { config } from './config.js';
 import { q, rolesFor, audit, setting, setSetting } from './db.js';
 import { mailcow } from './mailcow.js';
-import { setSession, requireAuth } from './session.js';
+import { setSession, requireAuth, revokeSessions } from './session.js';
 import { verifyRecord, requiredRecords, checkVerification, checkRecords } from './dns.js';
 import { findZone, applyRecords } from './route53.js';
 import { saveProfile, getProfile, deleteUserData } from './signatures.js';
@@ -13,6 +13,7 @@ import { setRecoveryEmail } from './security.js';
 import { deliverWelcome } from './welcome.js';
 import { createSetupLink } from './devicesetup.js';
 import { applyDomainSpamDefaults } from './spam.js';
+import { assertNotBreached, topSenders } from './abuse.js';
 
 const wrap = (fn) => (req, res, next) => Promise.resolve(fn(req, res, next)).catch(next);
 const fail = (status, message) => Object.assign(new Error(message), { status });
@@ -67,6 +68,10 @@ publicAccounts.post('/signup', rateLimit({ windowMs: 60 * 60_000, limit: 10 }), 
   checkPassword(password);
   const today = q.get("SELECT COUNT(*) AS n FROM signups WHERE ip = ? AND created_at > datetime('now', '-1 day')", req.ip).n;
   if (today >= config.signup.perIpPerDay) throw fail(429, 'Too many accounts created from your network today');
+  if (req.body.acceptTerms !== true) throw fail(400, 'Please accept the Terms of Service and Privacy Policy');
+  const lastHour = q.get("SELECT COUNT(*) AS n FROM signups WHERE created_at > datetime('now', '-1 hour')").n;
+  if (lastHour >= config.limits.signupsPerHour) throw fail(429, 'Sign-ups are very busy right now. Please try again in a little while.');
+  await assertNotBreached(password, `${local}@x`);
   await checkCaptcha(req.body.captcha, req.ip);
 
   const email = `${local}@${config.signup.domain}`;
@@ -74,12 +79,12 @@ publicAccounts.post('/signup', rateLimit({ windowMs: 60 * 60_000, limit: 10 }), 
   await mailcow.addMailbox({ localPart: local, domain: config.signup.domain, name, password, quotaMb: config.signup.quotaMb });
   const rl = /^(\d+)\/([smhd])$/.exec(config.signup.rateLimit);
   if (rl) await mailcow.setMailboxRateLimit(email, rl[1], rl[2]).catch((e) => console.warn('rate limit not set:', e.message));
-  q.run('INSERT OR REPLACE INTO signups(email, ip, recovery_email) VALUES(?, ?, ?)', email, req.ip, String(req.body.recoveryEmail || '').slice(0, 200) || null);
+  q.run('INSERT OR REPLACE INTO signups(email, ip, recovery_email, terms_version) VALUES(?, ?, ?, ?)', email, req.ip, String(req.body.recoveryEmail || '').slice(0, 200) || null, config.legal.termsVersion);
   audit(email, null, 'signup', { ip: req.ip });
   saveProfile(email, { name });
   setRecoveryEmail(email, String(req.body.recoveryEmail || '').trim());
   deliverWelcome({ email, password, name }).catch(() => {});
-  setSession(res, { email, password, name });
+  setSession(res, { email, password, name }, req);
   res.json({ email });
 }));
 
@@ -160,6 +165,8 @@ accounts.post('/domains', rateLimit({ windowMs: 60 * 60_000, limit: 20 }), wrap(
     throw fail(400, 'That domain can\'t be added');
   }
   if (q.get('SELECT 1 FROM domains WHERE domain = ?', domain)) throw fail(409, 'That domain is already registered here');
+  const pending = q.get("SELECT COUNT(*) AS n FROM domains d JOIN orgs o ON o.id = d.org_id WHERE o.owner_email = ? AND d.status = 'pending'", req.user.email).n;
+  if (pending >= 5 && !rolesFor(req.user.email).superAdmin) throw fail(429, 'Finish verifying your other domains first (5 pending at most)');
   const superAdmin = rolesFor(req.user.email).superAdmin;
   if (!superAdmin && (await mailcow.getDomain(domain))) throw fail(409, 'That domain already exists on this mail server');
 
@@ -245,7 +252,9 @@ accounts.get('/admin/orgs/:id', wrap(async (req, res) => {
 accounts.patch('/admin/orgs/:id', wrap(async (req, res) => {
   const o = requireOrgAdmin(req, req.params.id);
   if (req.body.name) q.run('UPDATE orgs SET name = ? WHERE id = ?', String(req.body.name).slice(0, 120), o.id);
-  audit(req.user.email, o.id, 'org.update', { name: req.body.name });
+  if (req.body.require2fa !== undefined) q.run('UPDATE orgs SET require_2fa = ? WHERE id = ?', req.body.require2fa ? 1 : 0, o.id);
+  if (req.body.allowExternalForward !== undefined) q.run('UPDATE orgs SET allow_external_forward = ? WHERE id = ?', req.body.allowExternalForward ? 1 : 0, o.id);
+  audit(req.user.email, o.id, 'org.update', { name: req.body.name, require2fa: req.body.require2fa, allowExternalForward: req.body.allowExternalForward });
   res.json({ ok: true });
 }));
 
@@ -261,7 +270,8 @@ accounts.get('/admin/users', wrap(async (req, res) => {
   const admins = new Set(q.all("SELECT email FROM members WHERE org_id = ? AND role = 'admin'", d.org_id).map((m) => m.email));
   res.json((await mailcow.listMailboxes(d.domain)).map((m) => {
     const p = getProfile(m.email);
-    return { ...m, admin: admins.has(m.email.toLowerCase()), title: p.title || '', department: p.department || '', phone: p.phone || '', mobile: p.mobile || '' };
+    const tf = q.get('SELECT totp_enabled FROM user_security WHERE email = ?', m.email.toLowerCase());
+    return { ...m, admin: admins.has(m.email.toLowerCase()), twoFactor: !!tf?.totp_enabled, title: p.title || '', department: p.department || '', phone: p.phone || '', mobile: p.mobile || '' };
   }));
 }));
 
@@ -271,8 +281,9 @@ accounts.post('/admin/users', wrap(async (req, res) => {
   const local = String(req.body.localPart || '').trim().toLowerCase();
   checkLocal(local);
   checkPassword(req.body.password);
+  await assertNotBreached(req.body.password, `${local}@x`);
   if ((await orgMailboxCount(d.org_id)) >= d.max_mailboxes) throw fail(400, `Your plan allows ${d.max_mailboxes} users`);
-  const quotaMb = Math.min(Number(req.body.quotaMb) || config.business.defaultQuotaMb, config.business.maxQuotaMb);
+  const quotaMb = Math.max(256, Math.min(Number(req.body.quotaMb) || config.business.defaultQuotaMb, config.business.maxQuotaMb));
   const email = `${local}@${d.domain}`;
   await mailcow.addMailbox({ localPart: local, domain: d.domain, name: String(req.body.name || '').slice(0, 100), password: req.body.password, quotaMb });
   q.run('INSERT OR REPLACE INTO members(email, org_id, role) VALUES(?, ?, ?)', email, d.org_id, req.body.admin ? 'admin' : 'user');
@@ -291,7 +302,7 @@ accounts.patch('/admin/users', wrap(async (req, res) => {
   const attr = {};
   if (req.body.name !== undefined) attr.name = String(req.body.name).slice(0, 100);
   if (req.body.password) { checkPassword(req.body.password); attr.password = req.body.password; attr.password2 = req.body.password; }
-  if (req.body.quotaMb !== undefined) attr.quota = Math.min(Number(req.body.quotaMb), config.business.maxQuotaMb);
+  if (req.body.quotaMb !== undefined) attr.quota = Math.max(256, Math.min(Number(req.body.quotaMb) || config.business.defaultQuotaMb, config.business.maxQuotaMb));
   if (req.body.active !== undefined) {
     if (email === req.user.email && !req.body.active) throw fail(400, 'You can\'t suspend yourself');
     attr.active = req.body.active ? 1 : 0;
@@ -300,7 +311,7 @@ accounts.patch('/admin/users', wrap(async (req, res) => {
   const prof = {};
   for (const k of ['name', 'title', 'department', 'phone', 'mobile']) if (req.body[k] !== undefined) prof[k] = req.body[k];
   if (Object.keys(prof).length) saveProfile(email, prof);
-  if (attr.password) q.run('UPDATE user_security SET session_epoch = session_epoch + 1 WHERE email = ?', email); // sign the user out everywhere
+  if (attr.password || attr.active === 0) revokeSessions(email); // password reset or suspension signs the user out everywhere
   if (req.body.admin !== undefined) {
     if (email === req.user.email && !req.body.admin) throw fail(400, 'You can\'t remove your own admin rights');
     q.run('INSERT OR REPLACE INTO members(email, org_id, role) VALUES(?, ?, ?)', email, d.org_id, req.body.admin ? 'admin' : 'user');
@@ -318,6 +329,7 @@ accounts.delete('/admin/users', wrap(async (req, res) => {
   await mailcow.deleteMailbox(email);
   q.run('DELETE FROM members WHERE email = ? AND org_id = ?', email, d.org_id);
   deleteUserData(email);
+  revokeSessions(email);
   audit(req.user.email, d.org_id, 'user.delete', { email });
   res.json({ ok: true });
 }));
@@ -358,6 +370,7 @@ accounts.get('/super/overview', requireSuper, wrap(async (req, res) => {
       signupsToday: q.get("SELECT COUNT(*) AS n FROM signups WHERE created_at > datetime('now', '-1 day')").n,
     },
     recentSignups: q.all('SELECT email, ip, created_at FROM signups ORDER BY created_at DESC LIMIT 50'),
+    topSenders: topSenders(),
     recentActivity: q.all('SELECT actor, org_id, action, detail, at FROM audit ORDER BY id DESC LIMIT 50').map((a) => ({ ...a, detail: JSON.parse(a.detail || '{}') })),
   });
 }));
@@ -387,6 +400,7 @@ accounts.patch('/super/orgs/:id', requireSuper, wrap(async (req, res) => {
 accounts.post('/super/signups/suspend', requireSuper, wrap(async (req, res) => {
   const email = String(req.body.email || '').toLowerCase();
   await mailcow.editMailbox(email, { active: req.body.active ? 1 : 0 });
+  if (!req.body.active) revokeSessions(email);
   audit(req.user.email, null, req.body.active ? 'signup.unsuspend' : 'signup.suspend', { email });
   res.json({ ok: true });
 }));

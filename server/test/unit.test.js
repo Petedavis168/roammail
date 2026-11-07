@@ -1,0 +1,131 @@
+// Unit tests for security-critical pure functions.  Run: npm test
+process.env.SESSION_SECRET = 'unit-test-secret';
+process.env.DATA_DIR = process.env.DATA_DIR || `${process.env.TMPDIR || '/tmp'}/mc-unit-${process.pid}`;
+process.env.CHECK_BREACHED_PASSWORDS = 'false';
+import { test } from 'node:test';
+import assert from 'node:assert/strict';
+import dns from 'node:dns/promises';
+
+const { parseQuery } = await import('../src/search.js');
+const { buildSieve } = await import('../src/mailtools.js');
+const { cleanHtml, renderTemplate } = await import('../src/signatures.js');
+const { spamInfo } = await import('../src/spam.js');
+const { totp, base32, verifyTotp } = await import('../src/security.js');
+const { seal, unseal } = await import('../src/session.js');
+const abuse = await import('../src/abuse.js');
+
+test('search: Gmail operators map to IMAP criteria', () => {
+  const { criteria, folder } = parseQuery('from:bob is:unread has:attachment invoice -spam in:Sent');
+  assert.equal(criteria.from, 'bob');
+  assert.equal(criteria.seen, false);
+  assert.deepEqual(criteria.header, { 'Content-Type': 'multipart/mixed' });
+  assert.equal(criteria.text, 'invoice');
+  assert.deepEqual(criteria.not, { text: 'spam' });
+  assert.equal(folder, 'Sent');
+  assert.deepEqual(parseQuery('').criteria, { all: true });
+});
+
+test('sieve: spam is filed to Junk before any rule or auto-reply', () => {
+  const s = buildSieve({ vacation: { enabled: true, message: 'Away', subject: 'Out' }, rules: [{ name: 'x', match: 'any', conditions: [{ field: 'from', value: 'a@b.c' }], actions: [{ type: 'move', folder: 'F' }] }] }, 'me@d.e', ['d.e']);
+  const spam = s.indexOf('X-Spam-Flag'); const vac = s.indexOf('vacation :days'); const rule = s.indexOf('fileinto "F"');
+  assert.ok(spam > 0 && spam < vac && spam < rule);
+});
+
+test('sieve: user text cannot break out of strings or the multiline body', () => {
+  const s = buildSieve({ vacation: { enabled: true, subject: 'a" ; discard; "', message: 'line\n.\nstop;' }, rules: [{ name: 'evil\nkeep;', conditions: [{ field: 'subject', value: '"; discard; "' }], actions: [{ type: 'read' }] }] }, 'me@d.e', ['d.e']);
+  assert.ok(s.includes('"a\\" ; discard; \\""'));
+  assert.ok(s.includes('\n..\nstop;'), 'a lone "." line in the message is dot-stuffed');
+  assert.ok(s.includes('"\\"; discard; \\""'));
+  assert.ok(!/^keep;/m.test(s), 'newline in a rule name cannot inject a command');
+});
+
+test('signatures: dangerous HTML is stripped', () => {
+  const out = cleanHtml('<b onclick="x()">Hi</b><script>alert(1)</script><img src="javascript:alert(1)"><a href="javascript:alert(1)">l</a><iframe src="//e"></iframe><img src="https://ok.test/l.png" onerror="x">');
+  assert.ok(!/script|onclick|onerror|javascript:|iframe/i.test(out), out);
+  assert.ok(out.includes('https://ok.test/l.png'));
+});
+
+test('signatures: placeholder values are escaped, sections hide empty fields', () => {
+  const out = renderTemplate('<p>{{name}}{{#phone}} T: {{phone}}{{/phone}}{{^title}} (no title){{/title}}</p>', { name: '<img src=x onerror=alert(1)>', phone: '' });
+  assert.ok(!out.includes('<img'), out);
+  assert.ok(out.includes('&lt;img'));
+  assert.ok(!out.includes('T:'));
+  assert.ok(out.includes('(no title)'));
+});
+
+test('spam: rspamd header is parsed into score and human reasons', () => {
+  const i = spamInfo('default: True [11.40 / 15.00]; BAYES_SPAM(5.10)[99%]; RBL_SPAMHAUS_SBL(4.00)[x]; R_SPF_ALLOW(-0.20)[x]');
+  assert.equal(i.score, 11.4);
+  assert.equal(i.threshold, 15);
+  assert.equal(i.reasons.length, 2);
+  assert.equal(spamInfo(undefined), null);
+});
+
+test('2FA: TOTP matches RFC 6238 test vector and rejects bad codes', () => {
+  const secret = base32(Buffer.from('12345678901234567890'));
+  assert.equal(totp(secret, Math.floor(59 / 30)), '287082');
+  assert.equal(totp(secret, Math.floor(1111111109 / 30)), '081804');
+  assert.equal(verifyTotp(secret, 'abcdef'), false);
+  assert.equal(verifyTotp(secret, totp(secret, Math.floor(Date.now() / 30000))), true);
+});
+
+test('sessions: sealed data is encrypted and tamper-proof', () => {
+  const token = seal({ password: 'hunter22-secret' });
+  assert.ok(!token.includes('hunter22'));
+  assert.equal(unseal(token).password, 'hunter22-secret');
+  const raw = Buffer.from(token, 'base64url'); raw[raw.length - 1] ^= 1;
+  assert.equal(unseal(raw.toString('base64url')), null);
+  assert.equal(unseal(seal({ exp: Date.now() - 1 })), null, 'expired data is rejected');
+});
+
+test('abuse: private and metadata addresses are blocked for imports', async () => {
+  for (const ip of ['127.0.0.1', '10.1.2.3', '172.16.0.1', '192.168.1.1', '169.254.169.254', '100.64.0.1', '::1', 'fd00::1', 'fe80::1', '::ffff:10.0.0.1']) {
+    assert.equal(abuse._isPrivate(ip), true, ip);
+  }
+  assert.equal(abuse._isPrivate('142.250.1.108'), false);
+  const real = dns.lookup;
+  try {
+    dns.lookup = async () => [{ address: '127.0.0.1', family: 4 }];
+    await assert.rejects(abuse.assertPublicHost('rebind.example.com', 993), /not allowed/);
+    await assert.rejects(abuse.assertPublicHost('imap.gmail.com', 22), /ports/);
+    await assert.rejects(abuse.assertPublicHost('10.0.0.1', 993), /server name/);
+  } finally { dns.lookup = real; }
+});
+
+test('abuse: common passwords are refused, strong ones allowed', async () => {
+  for (const p of ['password123', 'Password123!', 'qwerty2026', 'Summer2026!', '11111111111', 'abcdefghijk']) {
+    await assert.rejects(abuse.assertNotBreached(p, 'x@y.z'), /common|easy/, p);
+  }
+  await assert.rejects(abuse.assertNotBreached('janedoe-2026!', 'janedoe@y.z'), /email name/);
+  await abuse.assertNotBreached('Tq9-vLm2-Zx81', 'x@y.z');
+  await abuse.assertNotBreached('correct horse battery staple', 'x@y.z');
+});
+
+test('abuse: display names cannot impersonate an address', () => {
+  assert.equal(abuse.cleanDisplayName('CEO <boss@bank.com>'), 'CEO');
+  assert.equal(abuse.cleanDisplayName('"support@paypal.com"'), '');
+  assert.equal(abuse.cleanDisplayName('Jane Smith'), 'Jane Smith');
+  assert.equal(abuse.cleanDisplayName('a\r\nBcc: x'), 'aBcc: x');
+});
+
+test('abuse: login throttling is per account+IP', () => {
+  const e = `t${Date.now()}@x.y`;
+  for (let i = 0; i < 10; i++) abuse.loginFailed(e, '6.6.6.6');
+  assert.ok(abuse.loginBlocked(e, '6.6.6.6') > 0);
+  assert.equal(abuse.loginBlocked(e, '10.0.0.9'), 0, 'the real user on another IP is not locked out');
+});
+
+test('sessions: key rotation keeps old sealed data readable', async () => {
+  const { config } = await import('../src/config.js');
+  const crypto = await import('node:crypto');
+  const old = seal({ secret: 'ABC' });
+  const prevKey = config.sealKey;
+  config.sealKeyPrevious = prevKey;
+  config.sealKey = Buffer.from(crypto.hkdfSync('sha256', Buffer.from('new-secret'), Buffer.alloc(0), 'mailclient/seal/v1', 32));
+  try {
+    assert.equal(unseal(old).secret, 'ABC');
+    const { sealedWithOldKey } = await import('../src/session.js');
+    assert.equal(sealedWithOldKey(old), true);
+    assert.equal(sealedWithOldKey(seal({ x: 1 })), false);
+  } finally { config.sealKey = prevKey; config.sealKeyPrevious = null; }
+});

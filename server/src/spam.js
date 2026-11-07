@@ -5,7 +5,8 @@
 // Moving mail into / out of Junk trains rspamd (mailcow's IMAPSieve learning).
 import express from 'express';
 import { simpleParser } from 'mailparser';
-import { q, rolesFor, userSetting, setUserSetting, audit } from './db.js';
+import { q, rolesFor, userSetting, setUserSetting, audit, twoFactorPolicy } from './db.js';
+import { config } from './config.js';
 import { requireAuth } from './session.js';
 import { mailcow } from './mailcow.js';
 
@@ -69,6 +70,7 @@ function adminDomain(req, domain) {
   if (!d) throw fail(404, 'Domain not found');
   const r = rolesFor(req.user.email);
   if (!r.superAdmin && !r.orgs.some((o) => o.id === d.org_id && o.role === 'admin')) throw fail(403, 'You are not an admin of this domain');
+  if (config.requireAdmin2fa && !twoFactorPolicy(req.user.email).enabled) throw fail(403, 'Admins must turn on 2-step verification first (Settings → Security).');
   return d;
 }
 

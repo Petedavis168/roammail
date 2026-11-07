@@ -167,6 +167,8 @@ const baseUrl = (req) => (process.env.PUBLIC_URL || `${req.protocol}://${req.get
 signatures.post('/sig-assets', imgUpload.single('image'), wrap(async (req, res) => {
   const f = req.file;
   if (!f || !TYPES[f.mimetype]) throw fail(400, 'Upload a PNG, JPG, GIF or WebP image (max 512 KB)');
+  const today = q.get("SELECT COUNT(*) AS n FROM audit WHERE actor = ? AND action = 'asset.upload' AND at > datetime('now', '-1 day')", req.user.email).n;
+  if (today >= 30) throw fail(429, 'Upload limit reached for today');
   // Check magic bytes so a renamed file can't sneak through
   const b = f.buffer;
   const ok = (b[0] === 0x89 && b[1] === 0x50) || (b[0] === 0xff && b[1] === 0xd8) || b.subarray(0, 3).toString() === 'GIF' || b.subarray(8, 12).toString() === 'WEBP';

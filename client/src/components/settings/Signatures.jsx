@@ -1,3 +1,4 @@
+import { safeHtml } from '../../safehtml.js';
 import { useEffect, useState } from 'react';
 import { api } from '../../api.js';
 import { Icon } from '../../icons.jsx';
@@ -55,7 +56,7 @@ export default function Signatures({ sigData, reloadSigs, prefs, setPrefs }) {
           <p className="muted small">{org.mode === 'enforced'
             ? `Your organization adds this to every email you send${org.onReplies ? ', including replies' : ' (not on replies)'}. It updates automatically when your details change.`
             : 'Your organization provides this signature. You can use it, or choose your own below.'}</p>
-          <div className="sig-preview" dangerouslySetInnerHTML={{ __html: org.html }} />
+          <div className="sig-preview" dangerouslySetInnerHTML={{ __html: safeHtml(org.html) }} />
           <button className="btn sm" onClick={() => copyRich(org.html)}><Icon name="copy" size={14} /> Copy for Outlook / phone</button>
         </div>
       )}
@@ -69,7 +70,7 @@ export default function Signatures({ sigData, reloadSigs, prefs, setPrefs }) {
                 <button className="btn sm" onClick={() => startEdit(s)}>Edit</button>
                 <button className="icon-btn" onClick={() => confirm(`Delete "${s.name}"?`) && save({ ...state, signatures: state.signatures.filter((x) => x.id !== s.id),
                   defaultNew: state.defaultNew === s.id ? null : state.defaultNew, defaultReply: state.defaultReply === s.id ? null : state.defaultReply })}><Icon name="trash" size={16} /></button></div>
-              <div className="sig-preview" dangerouslySetInnerHTML={{ __html: s.html }} />
+              <div className="sig-preview" dangerouslySetInnerHTML={{ __html: safeHtml(s.html) }} />
             </div>
           )
         ))}

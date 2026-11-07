@@ -1,3 +1,4 @@
+import { safeHtml } from '../../safehtml.js';
 import { useEffect, useRef, useState } from 'react';
 import { api } from '../../api.js';
 import { Icon } from '../../icons.jsx';
@@ -76,7 +77,7 @@ export default function OrgSignature({ org, users }) {
             {users.map((u) => <option key={u.email} value={u.email}>{u.name || u.email}</option>)}
           </select>
         </div>
-        <div className="sig-preview big" dangerouslySetInnerHTML={{ __html: preview || '<span style="color:#999">Your signature preview appears here</span>' }} />
+        <div className="sig-preview big" dangerouslySetInnerHTML={{ __html: preview ? safeHtml(preview) : '<span style="color:#999">Your signature preview appears here</span>' }} />
         <p className="muted small">Signatures are added to mail sent from this webmail. For Outlook desktop or phone apps, each person can copy their filled-in signature from <b>Settings → Signatures</b>.</p>
       </div>
       <div className="step-actions sticky-save"><button className="btn primary" onClick={save}>Save company signature</button></div>

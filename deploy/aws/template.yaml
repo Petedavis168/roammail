@@ -342,6 +342,50 @@ Resources:
       ComparisonOperator: GreaterThanThreshold
       AlarmActions: [!Ref AlertTopic]
 
+  # Log-based alarms (need AlertEmail)
+  ErrorMetric:
+    Type: AWS::Logs::MetricFilter
+    Properties:
+      LogGroupName: !Ref LogGroup
+      FilterPattern: '"APP_ERROR"'
+      MetricTransformations: [{ MetricNamespace: !Sub '${AWS::StackName}', MetricName: AppErrors, MetricValue: '1', DefaultValue: 0 }]
+  LockoutMetric:
+    Type: AWS::Logs::MetricFilter
+    Properties:
+      LogGroupName: !Ref LogGroup
+      FilterPattern: '"SECURITY_LOCKOUT"'
+      MetricTransformations: [{ MetricNamespace: !Sub '${AWS::StackName}', MetricName: LoginLockouts, MetricValue: '1', DefaultValue: 0 }]
+  ErrorAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Condition: HasAlertEmail
+    DependsOn: ErrorMetric
+    Properties:
+      AlarmDescription: The app logged 5+ unexpected errors in 5 minutes
+      Namespace: !Sub '${AWS::StackName}'
+      MetricName: AppErrors
+      Statistic: Sum
+      Period: 300
+      EvaluationPeriods: 1
+      Threshold: 5
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      TreatMissingData: notBreaching
+      AlarmActions: [!Ref AlertTopic]
+  LockoutAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Condition: HasAlertEmail
+    DependsOn: LockoutMetric
+    Properties:
+      AlarmDescription: Possible password-guessing attack - 10+ sign-in lockouts in 15 minutes
+      Namespace: !Sub '${AWS::StackName}'
+      MetricName: LoginLockouts
+      Statistic: Sum
+      Period: 900
+      EvaluationPeriods: 1
+      Threshold: 10
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      TreatMissingData: notBreaching
+      AlarmActions: [!Ref AlertTopic]
+
 Outputs:
   AppUrl:
     Value: !Sub 'https://${AppDomain}'

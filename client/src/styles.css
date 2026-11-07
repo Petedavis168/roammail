@@ -557,3 +557,16 @@ kbd { font: 12px ui-monospace, monospace; background: var(--panel-2); border: 1p
 .small-seg { width: auto; }
 .small-seg button { padding: 5px 14px; }
 @media (max-width: 900px) { .q-list { width: 100%; } .quarantine .q-reading { display: none; } .why-junk { margin-left: 14px; } }
+.gate { min-height: 100%; display: grid; place-items: center; background: linear-gradient(135deg, #0f6cbd, #0a4a85 60%, #062f57); padding: 20px; }
+.gate-card { background: var(--panel); border-radius: 14px; box-shadow: var(--shadow); padding: 28px; width: min(640px, 96vw); display: flex; flex-direction: column; gap: 12px; align-items: flex-start; }
+.gate-card.inline { margin: 40px auto; border: 1px solid var(--border); box-shadow: none; }
+.gate-card h1 { margin: 0; font-size: 24px; }
+.gate-card p { margin: 0; }
+.gate-icon { width: 56px; height: 56px; border-radius: 14px; background: var(--brand-soft); color: var(--brand); display: grid; place-items: center; }
+.btn.danger { background: var(--danger); border-color: var(--danger); color: #fff; }
+.btn.danger:hover:not(:disabled) { background: #a4262c; }
+.danger-zone { border-color: var(--danger) !important; }
+.privacy-points { margin: 0; padding-left: 20px; line-height: 1.8; font-size: 13.5px; }
+.check.terms { align-items: flex-start !important; font-size: 13px; }
+.check.terms input { margin-top: 3px; }
+.legal-links a { color: var(--muted); }

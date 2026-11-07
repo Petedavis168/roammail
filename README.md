@@ -129,6 +129,12 @@ Sign up as `owner` (it's the super-admin in `dev/test.env`).
   `dns.js` (record checks via public resolvers), `route53.js`, `db.js` (SQLite via `node:sqlite`).
 - `client/` — React + Vite, no UI framework. Email HTML is rendered with DOMPurify in a sandboxed iframe.
 
+## Security
+
+See **[SECURITY.md](SECURITY.md)** for the full threat model, known limitations and the operator checklist.
+Automated tests: `npm test` (unit), `npm run test:api` and `npm run test:e2e` (against a running stack) in `server/`;
+GitHub Actions runs all of them plus a dependency audit, CodeQL and a hardened-container check on every change.
+
 ## Account security
 
 - **2-step verification** (authenticator app, TOTP) with 10 single-use backup codes

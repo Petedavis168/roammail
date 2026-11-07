@@ -49,6 +49,15 @@ CREATE TABLE IF NOT EXISTS user_security (
   failed_count INTEGER NOT NULL DEFAULT 0,
   locked_until INTEGER NOT NULL DEFAULT 0
 );
+CREATE TABLE IF NOT EXISTS sessions (
+  id TEXT PRIMARY KEY,               -- sha256 of the cookie token (the token itself is never stored)
+  email TEXT NOT NULL,
+  creds TEXT NOT NULL,               -- sealed (AES-256-GCM) mailbox password
+  name TEXT,
+  ip TEXT, ua TEXT,
+  created INTEGER NOT NULL, last_seen INTEGER NOT NULL, expires INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS sessions_email ON sessions(email);
 CREATE TABLE IF NOT EXISTS login_events (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   email TEXT NOT NULL, ip TEXT, ua TEXT, ok INTEGER NOT NULL, reason TEXT,
@@ -107,6 +116,12 @@ CREATE TABLE IF NOT EXISTS audit (
 );
 `);
 
+// Migrations for columns added after first release
+for (const [table, col, def] of [['orgs', 'require_2fa', 'INTEGER NOT NULL DEFAULT 0'], ['orgs', 'allow_external_forward', 'INTEGER NOT NULL DEFAULT 0'], ['signups', 'terms_version', 'TEXT']]) {
+  const cols = db.prepare(`PRAGMA table_info(${table})`).all().map((c) => c.name);
+  if (!cols.includes(col)) db.exec(`ALTER TABLE ${table} ADD COLUMN ${col} ${def}`);
+}
+
 export const q = {
   get: (sql, ...a) => db.prepare(sql).get(...a),
   all: (sql, ...a) => db.prepare(sql).all(...a),
@@ -150,4 +165,12 @@ export function security(email) {
   let r = q.get('SELECT * FROM user_security WHERE email = ?', e);
   if (!r) { q.run('INSERT OR IGNORE INTO user_security(email) VALUES(?)', e); r = q.get('SELECT * FROM user_security WHERE email = ?', e); }
   return r;
+}
+
+/** 2-step verification policy for a user: is it on, and is it required for them? */
+export function twoFactorPolicy(email) {
+  const e = email.toLowerCase();
+  const sec = q.get('SELECT totp_enabled FROM user_security WHERE email = ?', e);
+  const org = q.get("SELECT o.require_2fa FROM domains d JOIN orgs o ON o.id = d.org_id WHERE d.domain = ? AND d.status = 'active'", e.split('@')[1]);
+  return { enabled: !!sec?.totp_enabled, requiredByOrg: !!org?.require_2fa };
 }

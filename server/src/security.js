@@ -7,9 +7,10 @@ import QRCode from 'qrcode';
 import rateLimit from 'express-rate-limit';
 import { config } from './config.js';
 import { q, security, audit } from './db.js';
-import { seal, unseal, setSession, requireAuth } from './session.js';
+import { seal, unseal, sealedWithOldKey, setSession, requireAuth, revokeSessions, updateSessionPassword, sessionPublicId } from './session.js';
 import { makeClient, closeClient } from './imap.js';
 import { mailcow } from './mailcow.js';
+import { loginBlocked, loginFailed, loginSucceeded, assertNotBreached } from './abuse.js';
 
 const wrap = (fn) => (req, res, next) => Promise.resolve(fn(req, res, next)).catch(next);
 const fail = (status, message) => Object.assign(new Error(message), { status });
@@ -19,7 +20,7 @@ const LOCK_MS = 15 * 60 * 1000;
 
 // ---------------------------------------------------------------- TOTP (RFC 6238)
 const B32 = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567';
-function base32(buf) {
+export function base32(buf) {
   let bits = 0, value = 0, out = '';
   for (const b of buf) { value = (value << 8) | b; bits += 8; while (bits >= 5) { out += B32[(value >>> (bits - 5)) & 31]; bits -= 5; } }
   if (bits > 0) out += B32[(value << (5 - bits)) & 31];
@@ -34,7 +35,7 @@ function unbase32(s) {
   }
   return Buffer.from(out);
 }
-function totp(secret, counter) {
+export function totp(secret, counter) {
   const buf = Buffer.alloc(8); buf.writeBigUInt64BE(BigInt(counter));
   const h = crypto.createHmac('sha1', unbase32(secret)).update(buf).digest();
   const o = h[h.length - 1] & 15;
@@ -51,9 +52,8 @@ export function verifyTotp(secret, code) {
 function logEvent(req, email, ok, reason) {
   q.run('INSERT INTO login_events(email, ip, ua, ok, reason) VALUES(?, ?, ?, ?, ?)', email, req.ip, String(req.get('user-agent') || '').slice(0, 300), ok ? 1 : 0, reason || null);
 }
-function bumpEpoch(email) {
-  security(email);
-  q.run('UPDATE user_security SET session_epoch = session_epoch + 1 WHERE email = ?', email.toLowerCase());
+function bumpEpoch(email, keepId) {
+  revokeSessions(email, keepId);
 }
 function checkPassword(pw) {
   if (typeof pw !== 'string' || pw.length < 10) throw fail(400, 'Password must be at least 10 characters');
@@ -86,13 +86,13 @@ publicSecurity.post('/login', loginLimiter, wrap(async (req, res) => {
   if (config.allowedDomains.length && !config.allowedDomains.includes(domain)) throw fail(403, 'This email domain is not allowed on this server');
 
   const sec = security(email);
-  if (sec.locked_until > Date.now()) {
+  const wait = loginBlocked(email, req.ip);
+  if (wait) {
     logEvent(req, email, false, 'locked');
-    throw fail(429, `Too many failed attempts. Try again in ${Math.ceil((sec.locked_until - Date.now()) / 60000)} minutes, or reset your password.`);
+    throw fail(429, `Too many failed attempts. Try again in ${wait} minutes, or reset your password.`);
   }
   if (!(await imapLogin(email, password))) {
-    const n = sec.failed_count + 1;
-    q.run('UPDATE user_security SET failed_count = ?, locked_until = ? WHERE email = ?', n >= MAX_FAILS ? 0 : n, n >= MAX_FAILS ? Date.now() + LOCK_MS : 0, email);
+    loginFailed(email, req.ip);
     logEvent(req, email, false, 'password');
     throw fail(401, 'Wrong email or password');
   }
@@ -101,9 +101,10 @@ publicSecurity.post('/login', loginLimiter, wrap(async (req, res) => {
     const ticket = seal({ email, password, exp: Date.now() + 5 * 60 * 1000, t: '2fa' });
     return res.json({ twoFactor: true, ticket });
   }
-  q.run('UPDATE user_security SET failed_count = 0 WHERE email = ?', email);
+  loginSucceeded(email, req.ip);
   logEvent(req, email, true);
-  setSession(res, { email, password, name: '' });
+  setSession(res, { email, password, name: '' }, req);
+  newDeviceCheck(req, email, password);
   res.json({ email });
 }));
 
@@ -111,11 +112,14 @@ publicSecurity.post('/login/2fa', loginLimiter, wrap(async (req, res) => {
   const t = unseal(String(req.body.ticket || ''));
   if (!t || t.t !== '2fa') throw fail(401, 'Your sign-in expired. Please start again.');
   const sec = security(t.email);
-  if (sec.locked_until > Date.now()) throw fail(429, 'Too many failed attempts. Try again later.');
+  if (loginBlocked(t.email, req.ip)) throw fail(429, 'Too many failed attempts. Try again later.');
   const code = String(req.body.code || '').trim();
   let ok = false;
   const secret = sec.totp_secret && unseal(sec.totp_secret)?.secret;
-  if (secret && verifyTotp(secret, code)) ok = true;
+  if (secret && verifyTotp(secret, code)) {
+    ok = true;
+    if (sealedWithOldKey(sec.totp_secret)) q.run('UPDATE user_security SET totp_secret = ? WHERE email = ?', seal({ secret }), t.email); // finish key rotation
+  }
   else {
     // Backup codes are single use
     const codes = JSON.parse(sec.backup_codes || '[]');
@@ -127,14 +131,14 @@ publicSecurity.post('/login/2fa', loginLimiter, wrap(async (req, res) => {
     }
   }
   if (!ok) {
-    const n = sec.failed_count + 1;
-    q.run('UPDATE user_security SET failed_count = ?, locked_until = ? WHERE email = ?', n >= MAX_FAILS ? 0 : n, n >= MAX_FAILS ? Date.now() + LOCK_MS : 0, t.email);
+    loginFailed(t.email, req.ip);
     logEvent(req, t.email, false, '2fa');
     throw fail(401, 'That code isn\'t right. Check your authenticator app and try again.');
   }
-  q.run('UPDATE user_security SET failed_count = 0 WHERE email = ?', t.email);
+  loginSucceeded(t.email, req.ip);
   logEvent(req, t.email, true, '2fa');
-  setSession(res, { email: t.email, password: t.password, name: '' });
+  setSession(res, { email: t.email, password: t.password, name: '' }, req);
+  newDeviceCheck(req, t.email, t.password);
   res.json({ email: t.email });
 }));
 
@@ -164,6 +168,7 @@ publicSecurity.post('/password/reset', resetLimiter, wrap(async (req, res) => {
   const row = q.get('SELECT * FROM password_resets WHERE token_hash = ?', sha(String(req.body.token || '')));
   if (!row || row.expires < Date.now()) throw fail(400, 'This reset link has expired. Please request a new one.');
   checkPassword(req.body.password);
+  await assertNotBreached(req.body.password, row.email);
   await mailcow.editMailbox(row.email, { password: req.body.password, password2: req.body.password });
   q.run('DELETE FROM password_resets WHERE email = ?', row.email);
   q.run('UPDATE user_security SET failed_count = 0, locked_until = 0 WHERE email = ?', row.email);
@@ -171,6 +176,37 @@ publicSecurity.post('/password/reset', resetLimiter, wrap(async (req, res) => {
   audit(row.email, null, 'security.password_reset', { ip: req.ip });
   res.json({ ok: true, email: row.email });
 }));
+
+// ---------------------------------------------------------------- new-device alerts
+// A sign-in from a browser/network not seen in the last 90 days puts a warning in the user's own inbox.
+function deviceKey(ip, ua) {
+  const net = String(ip || '').includes(':') ? String(ip).split(':').slice(0, 4).join(':') : String(ip || '').split('.').slice(0, 3).join('.');
+  const b = /Edg\//.test(ua) ? 'Edge' : /Chrome\//.test(ua) ? 'Chrome' : /Firefox\//.test(ua) ? 'Firefox' : /Safari\//.test(ua) ? 'Safari' : 'Other';
+  const os = /Windows/.test(ua) ? 'Windows' : /iPhone|iPad/.test(ua) ? 'iOS' : /Mac OS/.test(ua) ? 'macOS' : /Android/.test(ua) ? 'Android' : /Linux/.test(ua) ? 'Linux' : 'Other';
+  return { net, label: `${b} on ${os}`, b, os };
+}
+function newDeviceCheck(req, email, password) {
+  const ua = String(req.get('user-agent') || '');
+  const me = deviceKey(req.ip, ua);
+  const prior = q.all("SELECT ip, ua FROM login_events WHERE email = ? AND ok = 1 AND at > datetime('now', '-90 days') ORDER BY id DESC LIMIT 200 OFFSET 1", email);
+  if (!prior.length) return; // first ever sign-in (new account)
+  const seen = prior.some((e) => { const d = deviceKey(e.ip, e.ua || ''); return d.label === me.label && d.net === me.net; });
+  if (seen) return;
+  const when = new Date().toUTCString();
+  const html = `<div style="font-family:Segoe UI,Arial,sans-serif;font-size:14px;color:#242424;max-width:560px">
+<h2 style="margin:0 0 8px">New sign-in to your account</h2>
+<p>Your account <b>${email}</b> was just used to sign in from a new device or location.</p>
+<table cellpadding="4" style="font-size:13px"><tr><td style="color:#666">Device</td><td>${me.label}</td></tr><tr><td style="color:#666">IP address</td><td>${String(req.ip).replace(/[<>&]/g, '')}</td></tr><tr><td style="color:#666">Time</td><td>${when}</td></tr></table>
+<p><b>Was this you?</b> Then you don't need to do anything.</p>
+<p><b>Not you?</b> Open <b>Settings → Security</b> now: change your password, choose <b>Sign out of all other devices</b>, and turn on 2-step verification.</p></div>`;
+  import('nodemailer/lib/mail-composer/index.js').then(({ default: MailComposer }) => new Promise((resolve, reject) => new MailComposer({
+    from: { name: `${config.appName} Security`, address: `no-reply@${email.split('@')[1]}` }, to: email, subject: 'New sign-in to your account', html,
+  }).compile().build((e, m) => (e ? reject(e) : resolve(m))))).then(async (raw) => {
+    const c = makeClient({ email, password });
+    await c.connect(); await c.append('INBOX', raw, []); await c.logout();
+  }).catch(() => {});
+  audit(email, null, 'security.new_device', { device: me.label, ip: req.ip });
+}
 
 // ---------------------------------------------------------------- signed-in: security settings
 export const securityApi = express.Router();
@@ -188,6 +224,21 @@ securityApi.get('/security', wrap(async (req, res) => {
 }));
 
 // Step 1: create a secret + QR code (not active until confirmed)
+// Signed-in devices
+securityApi.get('/security/sessions', (req, res) => {
+  res.json(q.all('SELECT id, ip, ua, created, last_seen FROM sessions WHERE email = ? ORDER BY last_seen DESC', req.user.email)
+    .map((s) => ({ id: sessionPublicId(s.id), ip: s.ip, ua: s.ua, created: s.created, lastSeen: s.last_seen, current: s.id === req.user.sid })));
+});
+securityApi.delete('/security/sessions', wrap(async (req, res) => {
+  const pub = String(req.query.id || '');
+  const s = q.all('SELECT id FROM sessions WHERE email = ?', req.user.email).find((x) => sessionPublicId(x.id) === pub);
+  if (!s) throw fail(404, 'That device is already signed out');
+  q.run('DELETE FROM sessions WHERE id = ?', s.id);
+  await closeClient(s.id);
+  audit(req.user.email, null, 'security.signout_device', { ip: req.ip });
+  res.json({ ok: true });
+}));
+
 securityApi.post('/security/2fa/setup', wrap(async (req, res) => {
   const secret = base32(crypto.randomBytes(20));
   q.run('UPDATE user_security SET totp_secret = ? WHERE email = ? AND totp_enabled = 0', seal({ secret, exp: Date.now() + 1e13 }), req.user.email);
@@ -219,6 +270,7 @@ securityApi.post('/security/2fa/disable', wrap(async (req, res) => {
 
 securityApi.post('/security/backup-codes', wrap(async (req, res) => {
   if (!security(req.user.email).totp_enabled) throw fail(400, 'Turn on 2-step verification first');
+  if (!(await imapLogin(req.user.email, String(req.body.password || '')))) throw fail(401, 'Enter your current password to make new backup codes');
   const codes = newBackupCodes();
   q.run('UPDATE user_security SET backup_codes = ? WHERE email = ?', JSON.stringify(codes.map((c) => sha(c.replace('-', '')))), req.user.email);
   res.json({ backupCodes: codes });
@@ -228,28 +280,31 @@ securityApi.post('/security/password', wrap(async (req, res) => {
   const { current, next } = req.body;
   if (!(await imapLogin(req.user.email, String(current || '')))) throw fail(401, 'Your current password is wrong');
   checkPassword(next);
+  await assertNotBreached(next, req.user.email);
   if (next === current) throw fail(400, 'Choose a password you haven\'t used here before');
   await mailcow.editMailbox(req.user.email, { password: next, password2: next });
   await closeClient(req.user.sid);
-  bumpEpoch(req.user.email);                // signs out every other device
-  setSession(res, { ...req.user, password: next, sid: undefined });
+  bumpEpoch(req.user.email, req.user.sid);  // signs out every other device
+  updateSessionPassword(req.user.sid, next);
   audit(req.user.email, null, 'security.password_change', { ip: req.ip });
   res.json({ ok: true });
 }));
 
 securityApi.post('/security/signout-all', wrap(async (req, res) => {
-  bumpEpoch(req.user.email);
-  setSession(res, { ...req.user, sid: undefined }); // keep this device signed in
+  bumpEpoch(req.user.email, req.user.sid); // keep this device signed in
   audit(req.user.email, null, 'security.signout_all', { ip: req.ip });
   res.json({ ok: true });
 }));
 
 securityApi.put('/security/recovery-email', wrap(async (req, res) => {
+  // Re-authenticate: a stolen session must not be able to plant its own recovery address
+  if (!(await imapLogin(req.user.email, String(req.body.password || '')))) throw fail(401, 'Enter your current password to change the recovery email');
   const v = String(req.body.email || '').trim().toLowerCase();
   if (v && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v)) throw fail(400, 'Enter a valid email address');
   if (v === req.user.email) throw fail(400, 'Use a different address than this account');
   security(req.user.email);
   q.run('UPDATE user_security SET recovery_email = ? WHERE email = ?', v || null, req.user.email);
+  audit(req.user.email, null, 'security.recovery_email', { set: !!v, ip: req.ip });
   res.json({ ok: true });
 }));
 

@@ -31,7 +31,12 @@ export function prepareHtml(msg, allowRemote, disableLinks) {
   });
   let clean = DOMPurify.sanitize(source, { WHOLE_DOCUMENT: true, ADD_TAGS: ['style'], FORBID_TAGS: ['form', 'input', 'button', 'textarea', 'select'], ADD_ATTR: ['target'] });
   DOMPurify.removeHook('afterSanitizeAttributes');
-  if (!allowRemote) clean = clean.replace(/url\(\s*['"]?https?:[^)]*\)/gi, () => { blocked++; return 'none'; });
+  if (!allowRemote) {
+    clean = clean.replace(/url\(\s*['"]?https?:[^)]*\)/gi, () => { blocked++; return 'none'; });
+    // Catch CSS that fetches without url(), e.g. image-set("http://...") or @import "http://..."
+    clean = clean.replace(/(<style[^>]*>)([\s\S]*?)(<\/style>)/gi, (m, a, css, c) => a + css.replace(/(["'])\s*(?:https?:)?\/\/[^"']*\1/gi, () => { blocked++; return '""'; }) + c);
+    clean = clean.replace(/style="([^"]*)"/gi, (m, css) => `style="${css.replace(/(&quot;|')\s*(?:https?:)?\/\/.*?\1/gi, () => { blocked++; return "''"; })}"`);
+  }
   return { html: clean, blocked };
 }
 

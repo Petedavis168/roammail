@@ -5,6 +5,13 @@ services:
     build: .
     restart: unless-stopped
     env_file: .env
+    # Hardening: read-only filesystem (data only in /data), no Linux capabilities, no privilege escalation
+    read_only: true
+    tmpfs: ["/tmp:size=64m"]
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    pids_limit: 512
+    mem_limit: 1g
     volumes:
       - appdata:/data
     expose:
@@ -14,6 +21,9 @@ services:
     image: public.ecr.aws/docker/library/caddy:2-alpine
     restart: unless-stopped
     depends_on: [app]
+    cap_drop: [ALL]
+    cap_add: [NET_BIND_SERVICE]
+    security_opt: ["no-new-privileges:true"]
     ports:
       - "80:80"
       - "443:443"

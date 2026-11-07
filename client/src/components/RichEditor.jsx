@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { api } from '../api.js';
 import { Icon } from '../icons.jsx';
 import { useToast } from './Toast.jsx';
+import { safeHtml, onSafePaste } from '../safehtml.js';
 
 /** Small WYSIWYG editor used for signatures and templates. Uncontrolled: reads initial `value`, reports changes. */
 export default function RichEditor({ value, onChange, placeholders, minHeight = 120, editorRef }) {
@@ -9,16 +10,17 @@ export default function RichEditor({ value, onChange, placeholders, minHeight = 
   const ref = useRef();
   const file = useRef();
   const [showPh, setShowPh] = useState(false);
-  useEffect(() => { if (ref.current && ref.current.innerHTML !== value) ref.current.innerHTML = value || ''; }, [value === undefined]);
+  useEffect(() => { if (ref.current && ref.current.innerHTML !== value) ref.current.innerHTML = safeHtml(value || ''); }, [value === undefined]);
   useEffect(() => { if (editorRef) editorRef.current = ref.current; });
 
   const emit = () => onChange?.(ref.current.innerHTML);
+  const onPaste = (e) => onSafePaste(e, emit);
   const exec = (cmd, val) => { ref.current.focus(); document.execCommand(cmd, false, val); emit(); };
   const link = () => { const u = prompt('Link address (https://…, mailto:…, tel:…)'); if (u) exec('createLink', /^(https?|mailto|tel):/i.test(u) ? u : `https://${u}`); };
   const upload = async (f) => {
     if (!f) return;
     const fd = new FormData(); fd.append('image', f);
-    try { const r = await api.form('/api/sig-assets', fd); exec('insertHTML', `<img src="${r.url}" alt="" width="140" style="max-width:140px;height:auto">`); }
+    try { const r = await api.form('/api/sig-assets', fd); exec('insertHTML', safeHtml(`<img src="${encodeURI(r.url)}" alt="" width="140" style="max-width:140px;height:auto">`)); }
     catch (e) { toast(e.message, { error: true }); }
   };
   const btn = (title, icon, fn, label) => (
@@ -55,7 +57,7 @@ export default function RichEditor({ value, onChange, placeholders, minHeight = 
           </div>
         )}
       </div>
-      <div ref={ref} className="rich-area" contentEditable suppressContentEditableWarning onInput={emit} onBlur={emit} style={{ minHeight }} />
+      <div ref={ref} className="rich-area" contentEditable suppressContentEditableWarning onInput={emit} onBlur={emit} onPaste={onPaste} style={{ minHeight }} />
     </div>
   );
 }

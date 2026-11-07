@@ -1,3 +1,4 @@
+import { safeHtml } from '../../safehtml.js';
 import { useEffect, useState } from 'react';
 import { api } from '../../api.js';
 import { Icon } from '../../icons.jsx';
@@ -6,6 +7,7 @@ import { DomainWizard, DomainStatus, Copy, setSuper } from './DomainSetup.jsx';
 import { avatarColor, initials, fmtDate } from '../../util.js';
 import OrgSignature from './Signature.jsx';
 import SpamAdmin from './SpamAdmin.jsx';
+import TwoFactorSetup from '../TwoFactorSetup.jsx';
 
 const genPassword = () => {
   const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnpqrstuvwxyz23456789';
@@ -71,7 +73,8 @@ function Users({ org, domains }) {
             </span>
             <span><div className="meter"><div style={{ width: `${Math.min(100, (u.usedMb / Math.max(1, u.quotaMb)) * 100)}%` }} /></div>
               <small className="muted">{u.usedMb >= 1024 ? `${(u.usedMb / 1024).toFixed(1)} GB` : `${u.usedMb} MB`} of {u.quotaMb >= 1024 ? `${(u.quotaMb / 1024).toFixed(0)} GB` : `${u.quotaMb} MB`}</small></span>
-            <span>{u.active ? <span className="pill ok">Active</span> : <span className="pill bad">Suspended</span>}</span>
+            <span>{u.active ? <span className="pill ok">Active</span> : <span className="pill bad">Suspended</span>}
+              <small className={u.twoFactor ? 'ok' : 'muted'} title="2-step verification">{u.twoFactor ? ' 🔒 2FA' : ' no 2FA'}</small></span>
             <span className="muted small">{u.lastLogin ? fmtDate(new Date(u.lastLogin).toISOString()) : 'Never'}</span>
             <span className="actions">
               <button className="btn sm" onClick={() => setEdit(u)}>Edit</button>
@@ -114,7 +117,7 @@ function SigPreview({ orgId, email }) {
       ? api.post(`/api/admin/orgs/${orgId}/signature/preview`, { html: s.html, email }).then((r) => setHtml(r.html)) : null)).catch(() => {});
   }, [orgId, email]);
   if (!html) return null;
-  return <div className="new-sig"><small className="muted">Their company signature is ready:</small><div className="sig-preview" dangerouslySetInnerHTML={{ __html: html }} /></div>;
+  return <div className="new-sig"><small className="muted">Their company signature is ready:</small><div className="sig-preview" dangerouslySetInnerHTML={{ __html: safeHtml(html) }} /></div>;
 }
 
 function ProfileFields({ f, setF }) {
@@ -181,6 +184,35 @@ function SignatureTab({ org }) {
       .then((r) => setUsers(r.flat()));
   }, [org.id]);
   return <OrgSignature org={org} users={users} />;
+}
+
+function OrgSecurity({ org, reload }) {
+  const toast = useToast();
+  const [users, setUsers] = useState(null);
+  useEffect(() => {
+    Promise.all(org.domains.filter((d) => d.status === 'active').map((d) => api.get('/api/admin/users', { domain: d.domain }).catch(() => [])))
+      .then((r) => setUsers(r.flat()));
+  }, [org.id]);
+  const set = async (patch, msg) => { try { await api.patch(`/api/admin/orgs/${org.id}`, patch); toast(msg); reload(); } catch (e) { toast(e.message, { error: true }); } };
+  const without = (users || []).filter((u) => !u.twoFactor);
+  return (
+    <div className="org-sig-admin">
+      <div className="card">
+        <h3>2-step verification</h3>
+        <p className="muted small">{users ? `${users.length - without.length} of ${users.length} people have it on.` : 'Loading…'}</p>
+        <label className="check big"><input type="checkbox" checked={!!org.require_2fa} onChange={(e) => set({ require2fa: e.target.checked }, e.target.checked ? 'Everyone must now set up 2-step verification at their next action' : 'No longer required')} />
+          Require 2-step verification for everyone in {org.name}</label>
+        <small className="muted">People without it are guided through setup the next time they use the app. Strongly recommended: it stops almost all account takeovers.</small>
+        {without.length > 0 && <div className="chips-wrap">{without.map((u) => <span key={u.email} className="rchip locked">{u.email}</span>)}</div>}
+      </div>
+      <div className="card">
+        <h3>Automatic forwarding</h3>
+        <label className="check big"><input type="checkbox" checked={!!org.allow_external_forward} onChange={(e) => set({ allowExternalForward: e.target.checked }, 'Saved')} />
+          Allow people to auto-forward mail to addresses outside {org.name}</label>
+        <small className="muted">Off by default. Attackers who break into an account often set up a silent forward to copy all future mail. Forwarding inside the company is always allowed.</small>
+      </div>
+    </div>
+  );
 }
 
 // ------------------------------------------------------------------ aliases
@@ -301,6 +333,11 @@ function Platform() {
           </div>
         ))}
       </div>
+      <h3>Most active senders today (webmail)</h3>
+      <div className="table">
+        {(d.topSenders || []).length === 0 && <div className="list-msg muted">No mail sent today.</div>}
+        {(d.topSenders || []).map((t) => <div className="tr two" key={t.email}><span className="mono">{t.email}</span><span>{t.count} messages</span><span /></div>)}
+      </div>
       <h3>Recent free sign-ups</h3>
       <div className="table">
         {d.recentSignups.map((s) => (
@@ -320,8 +357,21 @@ export default function Admin({ me, refreshMe, onExit }) {
   setSuper(!!me.superAdmin);
 
   const load = () => api.get('/api/admin/orgs').then((o) => { setOrgs(o); setOrgId((cur) => cur && o.some((x) => x.id === cur) ? cur : o[0]?.id ?? null); }).catch(() => setOrgs([]));
+  useEffect(() => { if (me.twoFactor?.enabled) load(); }, [me.twoFactor?.enabled]);
   useEffect(() => { load(); }, []);
 
+  const isAdminUser = me.superAdmin || me.orgs?.some((o) => o.role === 'admin');
+  if (isAdminUser && me.adminRequires2fa && !me.twoFactor?.enabled) {
+    return (
+      <div className="admin"><div className="gate-card inline">
+        <div className="gate-icon"><Icon name="shield" size={34} /></div>
+        <h1>Protect your admin account first</h1>
+        <p>Admins can create and delete users and read company settings, so the admin portal requires 2-step verification.</p>
+        <TwoFactorSetup email={me.email} onDone={refreshMe} startLabel="Set up 2-step verification" />
+        <button className="link" onClick={onExit}>Back to mail</button>
+      </div></div>
+    );
+  }
   if (!orgs) return <div className="admin"><div className="list-msg"><div className="spinner" /></div></div>;
 
   const org = orgs.find((o) => o.id === orgId);
@@ -338,7 +388,7 @@ export default function Admin({ me, refreshMe, onExit }) {
   }
 
   const tabs = [
-    ...(org ? [['users', 'Users', 'users'], ['signature', 'Signature', 'pen'], ['spam', 'Spam filter', 'junk'], ['aliases', 'Aliases', 'mail'], ['domains', 'Domains', 'globe'], ['activity', 'Activity', 'refresh']] : []),
+    ...(org ? [['users', 'Users', 'users'], ['signature', 'Signature', 'pen'], ['spam', 'Spam filter', 'junk'], ['orgsecurity', 'Security', 'lock'], ['aliases', 'Aliases', 'mail'], ['domains', 'Domains', 'globe'], ['activity', 'Activity', 'refresh']] : []),
     ...(me.superAdmin ? [['platform', 'Platform (super-admin)', 'shield'], ['new', 'New business', 'plus']] : []),
   ];
   const current = tabs.some((t) => t[0] === tab) ? tab : tabs[0][0];
@@ -360,6 +410,7 @@ export default function Admin({ me, refreshMe, onExit }) {
         <h1>{current === 'platform' ? 'Platform' : current === 'new' ? 'Add a business' : org?.name} <small className="muted">{tabs.find((t) => t[0] === current)?.[1]}</small></h1>
         {current === 'users' && org && <Users key={org.id} org={org} domains={org.domains} />}
         {current === 'signature' && org && <SignatureTab key={org.id} org={org} />}
+        {current === 'orgsecurity' && org && <OrgSecurity key={org.id} org={org} reload={load} />}
         {current === 'spam' && org && <SpamAdmin key={org.id} org={org} />}
         {current === 'aliases' && org && <Aliases key={org.id} domains={org.domains} />}
         {current === 'domains' && org && <Domains key={org.id} org={org} reload={load} refreshMe={refreshMe} goUsers={() => setTab('users')} />}

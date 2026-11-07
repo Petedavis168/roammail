@@ -11,6 +11,8 @@ async function request(method, url, body, { form } = {}) {
     const err = new Error(data?.error || `Request failed (${res.status})`);
     err.status = res.status;
     if (res.status === 401 && !/\/login(\/2fa)?$/.test(url)) window.dispatchEvent(new Event('auth:expired'));
+    if (res.status === 403 && data?.code === '2fa_required') window.dispatchEvent(new Event('auth:2fa'));
+    err.code = data?.code;
     throw err;
   }
   return data;

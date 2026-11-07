@@ -9,7 +9,7 @@ export default function Login({ onLogin }) {
   const [code, setCode] = useState('');
   const [info, setInfo] = useState('');
   const [cfg, setCfg] = useState({ enabled: false, domain: '' });
-  const [form, setForm] = useState({ email: '', password: '', name: '', username: '', confirm: '', recoveryEmail: '' });
+  const [form, setForm] = useState({ email: '', password: '', name: '', username: '', confirm: '', recoveryEmail: '', terms: false });
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
   const [avail, setAvail] = useState(null);
@@ -57,7 +57,7 @@ export default function Login({ onLogin }) {
         const r = await api.post('/api/password/reset', { token: resetToken, password: form.password });
         history.replaceState(null, '', '/');
         setForm((f) => ({ ...f, email: r.email, password: '' })); setMode('login'); setInfo('Password changed. Sign in with your new password.'); return;
-      } else await api.signup({ name: form.name, username: form.username.toLowerCase(), password: form.password, captcha, recoveryEmail: form.recoveryEmail });
+      } else await api.signup({ name: form.name, username: form.username.toLowerCase(), password: form.password, captcha, recoveryEmail: form.recoveryEmail, acceptTerms: form.terms });
       await onLogin();
     } catch (err) {
       setError(err.message);
@@ -127,10 +127,13 @@ export default function Login({ onLogin }) {
             <label>Confirm password<input type="password" required value={form.confirm} onChange={set('confirm')} autoComplete="new-password" /></label>
             <label>Recovery email <small>(recommended, so you can reset a forgotten password)</small><input type="email" value={form.recoveryEmail} onChange={set('recoveryEmail')} placeholder="you@another-provider.com" /></label>
             {cfg.turnstileSiteKey && <div ref={captchaRef} />}
+            <label className="check terms"><input type="checkbox" required checked={form.terms} onChange={(e) => setForm((f) => ({ ...f, terms: e.target.checked }))} />
+              <span>I agree to the <a href="/legal/terms" target="_blank">Terms</a>, <a href="/legal/acceptable-use" target="_blank">Acceptable Use Policy</a> and <a href="/legal/privacy" target="_blank">Privacy Policy</a>.</span></label>
           </>
         )}
         {error && <div className="form-error">{error}</div>}
         <button className="btn primary wide" disabled={busy}>{busy ? 'Please wait…' : { login: 'Sign in', signup: 'Create account', '2fa': 'Verify', forgot: 'Send reset link', reset: 'Change password' }[mode]}</button>
+        <p className="fine legal-links"><a href="/legal/terms">Terms</a> · <a href="/legal/privacy">Privacy</a> · <a href="/legal/acceptable-use">Acceptable use</a> · <a href="/legal/security">Security</a></p>
         {mode === 'signup' && <p className="fine">Want email on your own domain? Create an account, then choose <b>Set up business email</b>.</p>}
       </form>
     </div>

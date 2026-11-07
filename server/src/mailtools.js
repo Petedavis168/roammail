@@ -4,6 +4,7 @@ import { config } from './config.js';
 import { q, userSetting, setUserSetting, audit } from './db.js';
 import { requireAuth } from './session.js';
 import { mailcow } from './mailcow.js';
+import { assertPublicHost, accountKind } from './abuse.js';
 
 const wrap = (fn) => (req, res, next) => Promise.resolve(fn(req, res, next)).catch(next);
 const fail = (status, message) => Object.assign(new Error(message), { status });
@@ -89,6 +90,34 @@ mailtools.put('/vacation', wrap(async (req, res) => {
   res.json(v);
 }));
 
+/** Free accounts can't auto-forward; business users only inside the company unless an admin allows external. */
+function assertForwardAllowed(email, targets) {
+  const k = accountKind(email);
+  if (!k.business) throw fail(403, 'Automatic forwarding is available on business accounts');
+  const org = q.get('SELECT allow_external_forward FROM orgs WHERE id = ?', k.orgId);
+  if (org?.allow_external_forward) return;
+  const internal = new Set(q.all("SELECT domain FROM domains WHERE org_id = ? AND status = 'active'", k.orgId).map((d) => d.domain));
+  for (const t of targets) {
+    const d = String(t || '').toLowerCase().split('@')[1];
+    if (!d || !internal.has(d)) throw fail(403, 'Your organization only allows forwarding to addresses inside the company. Ask an admin to allow external forwarding.');
+  }
+}
+
+/** Raw Sieve uploaded by users: apply the same forwarding policy and block side channels. */
+function assertSafeSieve(email, script) {
+  if (/\b(notify|enotify|extlists|vnd\.)/i.test(script)) throw fail(400, 'This script uses a Sieve feature that is not allowed here');
+  const redirects = [...script.matchAll(/\bredirect\b([^;]*);/gi)].map((m) => m[1]);
+  if (!redirects.length) return;
+  const targets = [];
+  for (const r of redirects) {
+    const quoted = [...r.matchAll(/"([^"]*)"/g)].map((x) => x[1]);
+    if (!quoted.length || quoted.some((v) => v.includes('${'))) throw fail(400, 'Forwarding addresses must be written out in full');
+    targets.push(...quoted.filter((v) => v.includes('@')));
+    if (!quoted.some((v) => v.includes('@'))) throw fail(400, 'Forwarding addresses must be written out in full');
+  }
+  assertForwardAllowed(email, targets);
+}
+
 const cleanRule = (r, i) => ({
   id: String(r.id || `r${Date.now()}${i}`).slice(0, 40), name: String(r.name || 'Rule').slice(0, 80), enabled: r.enabled !== false,
   match: r.match === 'all' ? 'all' : 'any', stop: r.stop !== false,
@@ -99,9 +128,8 @@ const cleanRule = (r, i) => ({
 mailtools.get('/rules', (req, res) => res.json(userSetting(req.user.email, 'rules', [])));
 mailtools.put('/rules', wrap(async (req, res) => {
   const rules = (Array.isArray(req.body.rules) ? req.body.rules : []).slice(0, 100).map(cleanRule);
-  // Forwarding everything out is a classic account-takeover trick: only allow it for business accounts
-  const isOrg = !!q.get("SELECT 1 FROM domains WHERE domain = ? AND status = 'active'", req.user.email.split('@')[1]);
-  if (!isOrg && rules.some((r) => r.actions.some((a) => a.type === 'forward'))) throw fail(403, 'Forwarding rules are available on business accounts');
+  // Forwarding everything out is a classic account-takeover trick
+  for (const r of rules) for (const a of r.actions.filter((x) => x.type === 'forward')) assertForwardAllowed(req.user.email, [a.value]);
   setUserSetting(req.user.email, 'rules', rules);
   await sync(req.user);
   audit(req.user.email, null, 'rules.update', { count: rules.length, forwards: rules.filter((r) => r.actions.some((a) => a.type === 'forward')).length });
@@ -128,7 +156,7 @@ mailtools.post('/imports', wrap(async (req, res) => {
   const p = PROVIDERS[req.body.provider] || PROVIDERS.other;
   const host = String(p.host || req.body.host || '').trim().toLowerCase();
   if (!/^[a-z0-9.-]+\.[a-z]{2,}$/.test(host)) throw fail(400, 'Enter the IMAP server name');
-  if (host === config.imap.host.toLowerCase()) throw fail(400, 'That is this server');
+  await assertPublicHost(host, Number(req.body.port || p.port || 993));
   const user = String(req.body.user || '').trim();
   const password = String(req.body.password || '');
   if (!user || !password) throw fail(400, 'Enter the email address and password of the old account');
@@ -164,6 +192,7 @@ mailtools.post('/filters/server', wrap(async (req, res) => {
   if (!desc || !script.trim()) throw fail(400, 'Give the filter a name and a script');
   if (desc === SCRIPT_DESC) throw fail(400, 'That name is reserved');
   if (script.length > 50000) throw fail(400, 'Script too long');
+  assertSafeSieve(req.user.email, script);
   await mailcow.addFilter(req.user.email, desc, script, req.body.type === 'postfilter' ? 'postfilter' : 'prefilter');
   audit(req.user.email, null, 'filter.raw_add', { desc });
   res.json({ ok: true });
@@ -173,7 +202,7 @@ mailtools.patch('/filters/server', wrap(async (req, res) => {
   if (!f) throw fail(404, 'Filter not found');
   const attr = {};
   if (req.body.active !== undefined) attr.active = req.body.active ? 1 : 0;
-  if (req.body.script !== undefined && f.script_desc !== SCRIPT_DESC) attr.script_data = String(req.body.script);
+  if (req.body.script !== undefined && f.script_desc !== SCRIPT_DESC) { assertSafeSieve(req.user.email, String(req.body.script)); attr.script_data = String(req.body.script); }
   await mailcow.editFilter(f.id, attr);
   res.json({ ok: true });
 }));

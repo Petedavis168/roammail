@@ -1,0 +1,93 @@
+name: CI
+on:
+  push:
+  pull_request:
+  schedule:
+    - cron: '17 6 * * 1'   # weekly, catches newly published vulnerabilities
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    services:
+      greenmail:
+        image: greenmail/standalone:2.1.2
+        env:
+          GREENMAIL_OPTS: -Dgreenmail.setup.test.all -Dgreenmail.hostname=0.0.0.0 -Dgreenmail.users.login=email
+        ports: ['3025:3025', '3143:3143', '8080:8080']
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: |
+            server/package-lock.json
+            client/package-lock.json
+
+      - name: Install
+        run: |
+          npm ci --prefix server
+          npm ci --prefix client
+
+      - name: Dependency audit (fails on high/critical)
+        run: |
+          npm audit --prefix server --omit=dev --audit-level=high
+          npm audit --prefix client --audit-level=high
+
+      - name: Build web app
+        run: npm run build --prefix client
+
+      - name: Unit tests
+        run: npm test --prefix server
+
+      - name: Start test stack (mock mailcow + app)
+        working-directory: server
+        run: |
+          node dev/mock-mailcow.js > mock.log 2>&1 &
+          DATA_DIR=$RUNNER_TEMP/mc-data node --env-file=dev/test.env --disable-warning=ExperimentalWarning src/index.js > app.log 2>&1 &
+          for _ in $(seq 1 30); do curl -sf localhost:3000/healthz && break; sleep 1; done
+          curl -sf localhost:3000/healthz
+
+      - name: API security tests
+        run: npm run test:api --prefix server
+
+      - name: Browser injection tests
+        working-directory: server
+        run: |
+          npm i --no-save playwright@1
+          npx playwright install --with-deps chromium
+          npm run test:e2e
+
+      - name: Logs on failure
+        if: failure()
+        run: tail -n 100 server/app.log server/mock.log
+
+  docker:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build production image
+        run: docker build -t mail-client:ci .
+      - name: Image runs as non-root on a read-only filesystem
+        run: |
+          docker run -d --name app --read-only --tmpfs /tmp --cap-drop ALL --security-opt no-new-privileges:true \
+            -e SESSION_SECRET=ci -e DATA_DIR=/data -v appdata:/data -p 3000:3000 mail-client:ci
+          for _ in $(seq 1 20); do curl -sf localhost:3000/healthz && break; sleep 1; done
+          curl -sf localhost:3000/healthz
+          test "$(docker exec app id -u)" = "1000"
+
+  infrastructure:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: '3.12' }
+      - name: Lint CloudFormation and deploy script
+        run: |
+          pip install cfn-lint shellcheck-py
+          cfn-lint deploy/aws/template.yaml
+          shellcheck -S warning deploy/aws/deploy.sh deploy/aws/user-data.sh

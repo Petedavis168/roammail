@@ -8,10 +8,11 @@ import { config } from './config.js';
 import { clearSession, requireAuth } from './session.js';
 import { getClient, closeClient, withMailbox, specialFolder, makeClient } from './imap.js';
 import { parseQuery } from './search.js';
-import { rolesFor, q } from './db.js';
+import { rolesFor, q, twoFactorPolicy } from './db.js';
 import { applyEnforcedSignature } from './signatures.js';
 import { spamInfo } from './spam.js';
 import { addJob, listJobs, getJob, deleteJob } from './jobs.js';
+import { checkSendQuota, cleanDisplayName } from './abuse.js';
 import { config as appConfig } from './config.js';
 
 export const api = express.Router();
@@ -92,12 +93,13 @@ api.use(requireAuth);
 
 api.post('/logout', wrap(async (req, res) => {
   await closeClient(req.user.sid);
-  clearSession(res);
+  clearSession(req, res);
   res.json({ ok: true });
 }));
 
 api.get('/me', (req, res) => res.json({
   email: req.user.email, name: req.user.name, ...rolesFor(req.user.email),
+  twoFactor: twoFactorPolicy(req.user.email), adminRequires2fa: appConfig.requireAdmin2fa,
   orgDomains: q.all("SELECT d.domain FROM domains d WHERE d.status = 'active' AND d.org_id = (SELECT org_id FROM domains WHERE domain = ?)", req.user.email.split('@')[1]).map((d) => d.domain),
   clientSettings: { imapHost: appConfig.imap.host, imapPort: appConfig.imap.port, smtpHost: appConfig.smtp.host, smtpPort: appConfig.smtp.port, smtpSecure: appConfig.smtp.secure, davEnabled: appConfig.davEnabled, davHost: appConfig.davHost },
 }));
@@ -360,7 +362,9 @@ api.post('/mark-all-read', wrap(async (req, res) => {
 
 // ---------- compose / send ----------
 function buildMail(user, body, files) {
-  const from = body.fromName ? { name: body.fromName, address: user.email } : user.email;
+  // Display names can't contain addresses or brackets (stops "CEO <boss@bank.com>"-style spoofing)
+  const fromName = cleanDisplayName(body.fromName);
+  const from = fromName ? { name: fromName, address: user.email } : user.email;
   const mail = {
     from,
     to: body.to || undefined,
@@ -395,6 +399,8 @@ api.post('/send', upload.array('attachments'), wrap(async (req, res) => {
   const files = [...(req.files || []), ...(await forwardedAttachments(req.user, req.body))];
   let mail = buildMail(req.user, req.body, files);
   if (!mail.to && !mail.cc && !mail.bcc) return res.status(400).json({ error: 'Add at least one recipient' });
+  const rcptCount = [mail.to, mail.cc, mail.bcc].filter(Boolean).flatMap((v) => addressparser(v)).filter((a) => a.address).length;
+  checkSendQuota(req.user.email, rcptCount);
   mail = await applyEnforcedSignature(req.user, mail, !!(req.body.inReplyTo || req.body.forwardUid));
 
   // Schedule send: store the finished message and send it later from the job worker
@@ -445,6 +451,7 @@ api.post('/drafts', upload.array('attachments'), wrap(async (req, res) => {
 
 // ---------- contacts (autocomplete from people you've emailed) ----------
 const contactCache = new Map();
+setInterval(() => { const now = Date.now(); for (const [k, v] of contactCache) if (now - v.at > 30 * 60 * 1000) contactCache.delete(k); }, 10 * 60 * 1000).unref();
 api.get('/contacts', wrap(async (req, res) => {
   const key = req.user.sid;
   let cached = contactCache.get(key);
@@ -481,7 +488,12 @@ api.get('/contacts', wrap(async (req, res) => {
 }));
 
 // ---------- live updates (Server-Sent Events + IMAP IDLE) ----------
+const liveStreams = new Map(); // email -> open count (each holds an IMAP connection)
 api.get('/events', wrap(async (req, res) => {
+  const open = liveStreams.get(req.user.email) || 0;
+  if (open >= 5) return res.status(429).json({ error: 'Too many open tabs' });
+  liveStreams.set(req.user.email, open + 1);
+  req.on('close', () => liveStreams.set(req.user.email, Math.max(0, (liveStreams.get(req.user.email) || 1) - 1)));
   res.writeHead(200, { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache', Connection: 'keep-alive', 'X-Accel-Buffering': 'no' });
   const send = (event, data) => res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
   const client = makeClient(req.user); // dedicated connection that sits in IDLE

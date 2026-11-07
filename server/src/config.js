@@ -72,3 +72,34 @@ config.davEnabled = (env.DAV_ENABLED ?? 'true') === 'true';
 config.davHost = env.DAV_HOST || config.mailHostname;
 // Optional: sign .mobileconfig profiles so iOS shows "Verified" (PEM files, e.g. your mail server's TLS cert)
 config.profileSign = { cert: env.PROFILE_SIGN_CERT || '', key: env.PROFILE_SIGN_KEY || '', chain: env.PROFILE_SIGN_CHAIN || '' };
+// Sessions: absolute lifetime (SESSION_HOURS above) and inactivity timeout
+config.sessionIdleHours = Number(env.SESSION_IDLE_HOURS || 72);
+// Separate keys derived from SESSION_SECRET for each purpose
+config.sealKey = Buffer.from(crypto.hkdfSync('sha256', config.sessionSecret, Buffer.alloc(0), 'mailclient/seal/v1', 32));
+// Key rotation: set the old value here when changing SESSION_SECRET; data sealed with it keeps working
+// (2-step secrets are re-encrypted with the new key the next time each user signs in).
+config.sealKeyPrevious = env.SESSION_SECRET_PREVIOUS
+  ? Buffer.from(crypto.hkdfSync('sha256', crypto.createHash('sha256').update(env.SESSION_SECRET_PREVIOUS).digest(), Buffer.alloc(0), 'mailclient/seal/v1', 32))
+  : null;
+// Admins (business admins and super-admins) must turn on 2-step verification before using the admin portal
+config.requireAdmin2fa = (env.REQUIRE_ADMIN_2FA ?? 'true') === 'true';
+// ---------- abuse limits (webmail; SMTP from other apps is limited by mailcow's rate limit) ----------
+config.limits = {
+  freePerDay: Number(env.FREE_SENDS_PER_DAY || 150),
+  newAccountPerDay: Number(env.NEW_ACCOUNT_SENDS_PER_DAY || 25),   // free accounts younger than 48 hours
+  businessPerDay: Number(env.BUSINESS_SENDS_PER_DAY || 2000),
+  freeRecipientsPerMessage: Number(env.FREE_MAX_RECIPIENTS || 20),
+  businessRecipientsPerMessage: Number(env.BUSINESS_MAX_RECIPIENTS || 100),
+  signupsPerHour: Number(env.SIGNUPS_PER_HOUR || 60),
+  checkBreachedPasswords: (env.CHECK_BREACHED_PASSWORDS ?? 'true') === 'true',
+};
+// ---------- legal & contacts ----------
+config.legal = {
+  company: env.LEGAL_COMPANY_NAME || env.APP_NAME || 'Mail',
+  country: env.LEGAL_COUNTRY || 'the United States',
+  contact: env.LEGAL_CONTACT_EMAIL || (env.SIGNUP_DOMAIN ? `support@${env.SIGNUP_DOMAIN}` : ''),
+  abuse: env.ABUSE_EMAIL || (env.SIGNUP_DOMAIN ? `abuse@${env.SIGNUP_DOMAIN}` : ''),
+  security: env.SECURITY_CONTACT_EMAIL || (env.SIGNUP_DOMAIN ? `security@${env.SIGNUP_DOMAIN}` : ''),
+  termsVersion: env.TERMS_VERSION || '2026-11-07',
+  retentionDays: Number(env.LOG_RETENTION_DAYS || 180),
+};

@@ -5,9 +5,10 @@ import { fmtAddr, fmtDate, fmtSize, escapeHtml } from '../util.js';
 import RecipientInput from './RecipientInput.jsx';
 import { useToast } from './Toast.jsx';
 import { signatureHtml, defaultChoice } from '../signatures.js';
+import { safeHtml, onSafePaste } from '../safehtml.js';
 import { presets, fmtWhen, localInputValue } from '../snooze.js';
 
-const sigBlock = (html) => (html ? `<div class="signature" data-sig="1"><br>${html}</div>` : '');
+const sigBlock = (html) => (html ? `<div class="signature" data-sig="1"><br>${safeHtml(html)}</div>` : '');
 
 const prefix = (p, s = '') => (new RegExp(`^${p}:`, 'i').test(s.trim()) ? s : `${p}: ${s}`);
 
@@ -27,9 +28,9 @@ export function replyDraft(msg, mode, myEmail) {
   return { ...base, to, cc, subject: prefix('Re', msg.subject) };
 }
 
-function quoteHtml(msg, mode) {
+function quoteHtml(msg, mode, allowRemote) {
   const body = msg.html || `<div style="white-space:pre-wrap">${escapeHtml(msg.text || '')}</div>`;
-  const inner = body.replace(/^[\s\S]*<body[^>]*>/i, '').replace(/<\/body>[\s\S]*$/i, '').replace(/<script[\s\S]*?<\/script>/gi, '');
+  const inner = safeHtml(body.replace(/^[\s\S]*<body[^>]*>/i, '').replace(/<\/body>[\s\S]*$/i, ''), { blockRemote: !allowRemote });
   if (mode === 'forward') {
     return `<br><br><div>---------- Forwarded message ----------<br>From: ${escapeHtml((msg.from || []).map(fmtAddr).join(', '))}<br>Date: ${escapeHtml(fmtDate(msg.date, true))}<br>Subject: ${escapeHtml(msg.subject || '')}<br>To: ${escapeHtml((msg.to || []).map(fmtAddr).join(', '))}<br>${msg.cc?.length ? `Cc: ${escapeHtml(msg.cc.map(fmtAddr).join(', '))}<br>` : ''}<br>${inner}</div>`;
   }
@@ -81,7 +82,9 @@ function Composer({ c, me, prefs, sigData, onClose, onSend, focusIndex, setFocus
     let cancelled = false;
     const fill = (quote) => {
       if (cancelled || !editor.current) return;
-      editor.current.innerHTML = init.html ?? `<div><br></div>${sig}${quote ? quoteHtml(quote, init.mode) : ''}`;
+      const sender = quote?.from?.[0]?.address?.toLowerCase();
+      const allowRemote = prefs.showImages === 'always' || (sender && prefs.trustedSenders?.includes(sender));
+      editor.current.innerHTML = init.html != null ? safeHtml(init.html) : `<div><br></div>${sig}${quote ? quoteHtml(quote, init.mode, allowRemote) : ''}`;
       setReady(true);
       if (to.length || init.mode === 'forward') {
         const r = document.createRange(); r.setStart(editor.current, 0); r.collapse(true);
@@ -172,14 +175,15 @@ function Composer({ c, me, prefs, sigData, onClose, onSend, focusIndex, setFocus
           <div ref={editor} className="editor" contentEditable suppressContentEditableWarning onInput={markDirty} aria-label="Message body" role="textbox" aria-multiline="true"
             onPaste={(e) => {
               const imgs = [...e.clipboardData.files].filter((f) => f.type.startsWith('image/'));
-              if (imgs.length) { e.preventDefault(); addFiles(imgs); }
+              if (imgs.length) { e.preventDefault(); addFiles(imgs); return; }
+              onSafePaste(e, markDirty);
             }} />
           {dragging && <div className="drop-zone">Drop files to attach</div>}
         </div>
         {enforced && (
           <div className="enforced-sig" title="Your organization adds this signature to every email">
             <small className="muted">Added automatically by {enforced.company || 'your organization'}</small>
-            <div dangerouslySetInnerHTML={{ __html: enforced.html }} />
+            <div dangerouslySetInnerHTML={{ __html: safeHtml(enforced.html) }} />
           </div>
         )}
         {files.length > 0 && (
