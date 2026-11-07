@@ -37,7 +37,7 @@ function quoteHtml(msg, mode, allowRemote) {
   return `<br><br><div>On ${escapeHtml(fmtDate(msg.date, true))}, ${escapeHtml((msg.from || []).map(fmtAddr).join(', '))} wrote:</div><blockquote style="margin:0 0 0 .8ex;border-left:2px solid #ccc;padding-left:1ex">${inner}</blockquote>`;
 }
 
-function Composer({ c, me, prefs, sigData, onClose, onSend, focusIndex, setFocus, count }) {
+function Composer({ c, me, prefs, sigData, identities, onClose, onSend, focusIndex, setFocus, count }) {
   const toast = useToast();
   const init = c.initial;
   const [to, setTo] = useState(init.to || []);
@@ -56,6 +56,12 @@ function Composer({ c, me, prefs, sigData, onClose, onSend, focusIndex, setFocus
   const fileInput = useRef();
   const dirty = useRef(false);
   const isReply = !!init.mode;
+  // Reply from the group address when the original was sent to a group you can send as
+  const [fromAddress, setFromAddress] = useState(() => {
+    if (init.fromAddress) return init.fromAddress;
+    const rcpts = [...(init.quote?.to || []), ...(init.quote?.cc || [])].map((a) => a.address?.toLowerCase());
+    return (identities || []).find((i) => i.group && rcpts.includes(i.address))?.address || me.email;
+  });
   const [sigChoice, setSigChoice] = useState(() => defaultChoice(sigData, isReply));
   const [sigMenu, setSigMenu] = useState(false);
   const [sendMenu, setSendMenu] = useState(false);
@@ -103,7 +109,8 @@ function Composer({ c, me, prefs, sigData, onClose, onSend, focusIndex, setFocus
     to, cc, bcc, subject, files, html: editor.current?.innerHTML || '', text: editor.current?.innerText || '',
     inReplyTo: init.inReplyTo, references: init.references, replyFolder: init.replyFolder, replyUid: init.replyUid,
     forwardFolder: init.forwardFolder, forwardUid: init.forwardUid, draftUid: draft.uid, draftFolder: draft.folder,
-    priority: important ? 'high' : 'normal', fromName: prefs.displayName || me.name || '',
+    priority: important ? 'high' : 'normal', fromAddress,
+    fromName: fromAddress !== me.email ? ((identities || []).find((i) => i.address === fromAddress)?.name || '') : (prefs.displayName || me.name || ''),
   });
 
   const saveDraft = async () => {
@@ -165,6 +172,12 @@ function Composer({ c, me, prefs, sigData, onClose, onSend, focusIndex, setFocus
         <button className="icon-btn on-dark xs" title="Save & close" onClick={(e) => { e.stopPropagation(); close(); }}><Icon name="close" size={14} /></button>
       </div>
       <div className="composer-body" style={{ display: state === 'min' ? 'none' : undefined }}>
+        {(identities || []).length > 1 && (
+          <div className="rcpt from-row"><span className="rcpt-label">From</span>
+            <select value={fromAddress} onChange={(e) => { setFromAddress(e.target.value); markDirty(); }}>
+              {identities.map((i) => <option key={i.address} value={i.address}>{i.group ? `${i.name} <${i.address}>` : i.address}</option>)}
+            </select></div>
+        )}
         <RecipientInput label="To" value={to} onChange={setTo} autoFocus={!to.length}
           right={!showCc && <button type="button" className="link small" onClick={() => setShowCc(true)}>Cc Bcc</button>} />
         {showCc && <RecipientInput label="Cc" value={cc} onChange={setCc} />}
@@ -252,7 +265,7 @@ function toForm(p) {
   fd.append('to', list(p.to)); fd.append('cc', list(p.cc)); fd.append('bcc', list(p.bcc));
   fd.append('subject', p.subject);
   fd.append('html', p.html); fd.append('text', p.text);
-  for (const k of ['inReplyTo', 'references', 'replyFolder', 'replyUid', 'forwardFolder', 'forwardUid', 'draftUid', 'priority', 'fromName', 'sendAt']) {
+  for (const k of ['inReplyTo', 'references', 'replyFolder', 'replyUid', 'forwardFolder', 'forwardUid', 'draftUid', 'priority', 'fromName', 'fromAddress', 'sendAt']) {
     if (p[k]) fd.append(k, p[k]);
   }
   for (const f of p.files) fd.append('attachments', f, f.name);
@@ -260,6 +273,8 @@ function toForm(p) {
 }
 
 export default function ComposeManager({ composers, setComposers, me, prefs, sigData, onSent }) {
+  const [identities, setIdentities] = useState(null);
+  useEffect(() => { api.get('/api/identities').then(setIdentities).catch(() => setIdentities([])); }, []);
   const toast = useToast();
   const [focused, setFocused] = useState(null);
   const remove = (id) => setComposers((cs) => cs.filter((c) => c.id !== id));
@@ -299,7 +314,7 @@ export default function ComposeManager({ composers, setComposers, me, prefs, sig
   return (
     <div className="composers">
       {composers.map((c, i) => (
-        <Composer key={c.id} c={c} me={me} prefs={prefs} sigData={sigData} count={composers.length} focusIndex={i}
+        <Composer key={c.id} c={c} me={me} prefs={prefs} sigData={sigData} identities={identities} count={composers.length} focusIndex={i}
           setFocus={() => setFocused(c.id)} onClose={() => remove(c.id)} onSend={(p) => onSend(c, p)} />
       ))}
     </div>

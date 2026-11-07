@@ -17,6 +17,8 @@ import { fmtWhen } from '../snooze.js';
 import ScheduledList from './ScheduledList.jsx';
 import SnoozeMenu from './SnoozeMenu.jsx';
 import QuarantineList from './QuarantineList.jsx';
+import Calendar from './calendar/Calendar.jsx';
+import Contacts from './contacts/Contacts.jsx';
 
 export default function Mail({ me, refreshMe, theme, setTheme, onLogout }) {
   const toast = useToast();
@@ -36,6 +38,7 @@ export default function Mail({ me, refreshMe, theme, setTheme, onLogout }) {
   const [sidebarOpen, setSidebarOpen] = useState(window.innerWidth > 900);
   const [userMenu, setUserMenu] = useState(false);
   const searchRef = useRef();
+  const goPending = useRef(0);
   const [sigData, reloadSigs] = useSignatures();
   const [snoozeMap, setSnoozeMap] = useState({});
   const [snoozeFor, setSnoozeFor] = useState(null); // uids awaiting a snooze time
@@ -246,6 +249,13 @@ export default function Mail({ me, refreshMe, theme, setTheme, onLogout }) {
     const onKey = (e) => {
       if (view !== 'mail') return;
       const t = e.target;
+      if (!(t.isContentEditable || /INPUT|TEXTAREA|SELECT/.test(t.tagName)) && e.key === 'g') { goPending.current = Date.now(); return; }
+      if (goPending.current && Date.now() - goPending.current < 1500 && !e.ctrlKey && !e.metaKey) {
+        goPending.current = 0;
+        if (e.key === 'c') { e.preventDefault(); setView('calendar'); return; }
+        if (e.key === 'p') { e.preventDefault(); setView('contacts'); return; }
+        if (e.key === 'i') { e.preventDefault(); setFolder('INBOX'); return; }
+      }
       if (t.isContentEditable || /INPUT|TEXTAREA|SELECT/.test(t.tagName)) {
         if (e.key === 'Escape') t.blur();
         return;
@@ -281,15 +291,15 @@ export default function Mail({ me, refreshMe, theme, setTheme, onLogout }) {
     <div className={`app density-${prefs.density}`}>
       <header className="topbar">
         <button className="icon-btn on-dark" onClick={() => setSidebarOpen((o) => !o)} aria-label="Toggle navigation"><Icon name="menu" /></button>
-        <div className="brand" onClick={() => { setView('mail'); setFolder('INBOX'); clearSearch(); }}><Icon name="mail" size={20} /> <span>Mail</span></div>
-        {view === 'mail' && (
+        <div className="brand" onClick={() => { setView('mail'); setFolder('INBOX'); clearSearch(); }}><img src="/roammail-mark-white.png" alt="" /> <span>Roammail</span></div>
+        {view === 'mail' ? (
           <form className="search" onSubmit={(e) => { e.preventDefault(); runSearch(searchInput); }}>
             <Icon name="search" />
             <input ref={searchRef} value={searchInput} onChange={(e) => setSearchInput(e.target.value)}
               placeholder="Search mail  (from:  to:  subject:  has:attachment  is:unread  newer_than:7d)" aria-label="Search mail" />
             {search && <button type="button" className="icon-btn" onClick={clearSearch} aria-label="Clear search"><Icon name="close" /></button>}
           </form>
-        )}
+        ) : <div className="spacer" />}
         <div className="topbar-right">
           {(isAdmin || !inOrg) && (
             <button className={`top-btn ${view === 'admin' ? 'on' : ''}`} onClick={() => setView(view === 'admin' ? 'mail' : 'admin')} title="Admin & business email">
@@ -315,8 +325,18 @@ export default function Mail({ me, refreshMe, theme, setTheme, onLogout }) {
         </div>
       </header>
 
+      <div className="shell">
+      <nav className="app-rail" aria-label="Apps">
+        {[['mail', 'mail', 'Mail'], ['calendar', 'calendar', 'Calendar'], ['contacts', 'users', 'Contacts']].map(([v, i, l]) => (
+          <button key={v} className={view === v ? 'on' : ''} onClick={() => setView(v)} title={l} aria-label={l}><Icon name={i} size={20} /><small>{l}</small></button>
+        ))}
+      </nav>
       {view === 'admin' ? (
         <Admin me={me} refreshMe={refreshMe} onExit={() => setView('mail')} />
+      ) : view === 'calendar' ? (
+        <Calendar me={me} />
+      ) : view === 'contacts' ? (
+        <Contacts me={me} onEmail={(c) => { compose({ to: [{ name: c.name, address: c.email }] }); setView('mail'); }} />
       ) : (
         <div className="body">
           {sidebarOpen && (
@@ -355,6 +375,7 @@ export default function Mail({ me, refreshMe, theme, setTheme, onLogout }) {
           </main>
         </div>
       )}
+      </div>
 
       {snoozeFor && <SnoozeMenu onPick={act.doSnooze} onClose={() => setSnoozeFor(null)} />}
       <ComposeManager composers={composers} setComposers={setComposers} me={me} prefs={prefs} sigData={sigData}

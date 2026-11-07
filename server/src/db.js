@@ -91,6 +91,24 @@ CREATE TABLE IF NOT EXISTS setup_tokens (
   expires INTEGER NOT NULL,
   used_at INTEGER
 );
+CREATE TABLE IF NOT EXISTS groups (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  org_id INTEGER NOT NULL REFERENCES orgs(id) ON DELETE CASCADE,
+  address TEXT NOT NULL UNIQUE,
+  name TEXT NOT NULL,
+  description TEXT,
+  kind TEXT NOT NULL DEFAULT 'static',   -- static | department | everyone
+  department TEXT,
+  members TEXT NOT NULL DEFAULT '[]',    -- JSON list of addresses (static groups)
+  internal INTEGER NOT NULL DEFAULT 1,   -- only people in the organization can email the group
+  send_as INTEGER NOT NULL DEFAULT 1,    -- members can send as the group address
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE TABLE IF NOT EXISTS departments (
+  org_id INTEGER NOT NULL REFERENCES orgs(id) ON DELETE CASCADE,
+  name TEXT NOT NULL,
+  PRIMARY KEY (org_id, name)
+);
 CREATE TABLE IF NOT EXISTS profiles (
   email TEXT PRIMARY KEY,
   name TEXT, title TEXT, department TEXT, phone TEXT, mobile TEXT,

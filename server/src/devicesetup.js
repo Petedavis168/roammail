@@ -166,26 +166,26 @@ function page(req, { email, profileUrl, passwordIncluded, expired }) {
     <p>Just add an account with your email and password. Outlook and Thunderbird detect the settings automatically. If an app asks, use:</p>${settings}</section>`;
   const order = dev === 'android' ? [android, web, apple, desktop] : dev === 'windows' ? [desktop, web, apple, android] : dev === 'other' ? [web, android, apple, desktop] : [apple, web, android, desktop];
   return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<meta name="robots" content="noindex"><title>Set up your email</title><link rel="icon" href="/favicon.svg">
+<meta name="robots" content="noindex"><title>Set up your email</title><link rel="icon" href="/favicon.png">
 <style>
 body{margin:0;font:16px/1.5 -apple-system,Segoe UI,Roboto,Arial,sans-serif;background:#f3f5f8;color:#242424}
-header{background:linear-gradient(135deg,#0f6cbd,#0a4a85);color:#fff;padding:28px 20px 34px;text-align:center}
+header{background:linear-gradient(135deg,#244960,#0a1e2e);color:#fff;padding:28px 20px 34px;text-align:center}
 header h1{margin:6px 0 4px;font-size:24px}header p{margin:0;opacity:.9}
 main{max-width:560px;margin:-18px auto 30px;padding:0 14px}
 .card{background:#fff;border-radius:14px;padding:18px 20px;margin-bottom:14px;box-shadow:0 1px 4px rgba(0,0,0,.08)}
-.card.primary{border:2px solid #0f6cbd}
+.card.primary{border:2px solid #244960}
 .card h2{margin:0 0 10px;font-size:19px}
-.btn{display:inline-block;background:#0f6cbd;color:#fff;text-decoration:none;font-weight:600;padding:12px 22px;border-radius:10px;margin:2px 6px 8px 0}
-.btn.ghost{background:#e8f1fb;color:#0f6cbd}
+.btn{display:inline-block;background:#244960;color:#fff;text-decoration:none;font-weight:600;padding:12px 22px;border-radius:10px;margin:2px 6px 8px 0}
+.btn.ghost{background:#e9f0f5;color:#244960}
 ol{padding-left:22px;margin:8px 0}li{margin:4px 0}
 .ok{color:#107c10;font-weight:600}.muted{color:#666;font-size:14px}.warn{background:#fff4ce;padding:12px;border-radius:10px}
 table.set{width:100%;border-collapse:collapse;font-size:14px;margin-top:8px}
 table.set td{padding:6px 4px;border-bottom:1px solid #eee;vertical-align:top}table.set td:first-child{color:#666;width:42%}
 code{font-size:14px;word-break:break-all}
 .copy{border:1px solid #ccd;background:#fff;border-radius:6px;font-size:12px;padding:1px 8px;margin-left:4px}
-summary{cursor:pointer;color:#0f6cbd;font-weight:600;margin-top:6px}
+summary{cursor:pointer;color:#244960;font-weight:600;margin-top:6px}
 </style></head><body>
-<header><div style="font-size:34px">✉️</div><h1>Set up your email</h1><p>${esc(email)}${company ? ` · ${esc(company)}` : ''}</p></header>
+<header><img src="/roammail-mark-white.png" alt="" style="width:64px;height:auto"><h1>Set up your Roammail</h1><p>${esc(email)}${company ? ` · ${esc(company)}` : ''}</p></header>
 <main>${expired ? `<div class="card warn">This setup link has already been used or has expired, so your password isn't included. Everything below still works; you'll just type your password once.</div>` : ''}
 ${order.join('\n')}
 <p class="muted" style="text-align:center">Never share this page. We will never ask for your password by email or phone.</p></main>

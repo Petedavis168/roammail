@@ -45,6 +45,7 @@ const P = {
   link: 'M10 14a5 5 0 0 0 7 0l3-3a5 5 0 0 0-7-7l-1 1M14 10a5 5 0 0 0-7 0l-3 3a5 5 0 0 0 7 7l1-1',
   key: 'M15 7a4 4 0 1 1-3.9 5H9v2H7v2H4v-3l6.1-6.1A4 4 0 0 1 15 7z',
   external: 'M14 3h7v7M21 3l-9 9M19 14v7H3V5h7',
+  calendar: 'M4 6h16v14H4zM4 10h16M8 3v4M16 3v4',
   clock: 'M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18zM12 7v5l3 2',
   lock: 'M6 11h12v10H6zM8 11V7a4 4 0 0 1 8 0v4',
   alert: 'M12 3l9 16H3zM12 10v4M12 17v.5',

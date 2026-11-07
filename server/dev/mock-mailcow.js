@@ -81,7 +81,8 @@ http.createServer(async (req, res) => {
     if (what === 'syncjob' && !b.source_id && !b.host1) return send(200, bad('source_id missing'));
     if (what === 'filter') { const id = nextId++; filters.set(id, { id, ...b }); return send(200, ok('filter_added')); }
     if (what === 'syncjob') { const id = nextId++; syncjobs.set(id, { id, user2: b.username, ...b, is_running: 0, last_run: null, success: null }); return send(200, ok('syncjob_added')); }
-    if (what === 'alias') { const id = aliasId++; aliases.set(id, { id, address: b.address, goto: b.goto, active: 1, domain: b.address.split('@')[1] }); return send(200, ok('alias_added')); }
+    if (what === 'alias') { const id = aliasId++; if ([...aliases.values()].some((a) => a.address === b.address)) return send(200, bad('alias_exists'));
+      aliases.set(id, { id, address: b.address, goto: b.goto, active: 1, internal: b.internal || 0, sender_allowed: b.sender_allowed || 0, public_comment: b.public_comment || '', domain: b.address.split('@')[1] }); return send(200, ok('alias_added')); }
   }
   if (verb === 'edit' && what === 'spam-score') { for (const k of b.items) b.attr.spam_score === 'default' ? spamScores.delete(k) : spamScores.set(k, b.attr.spam_score); return send(200, ok('mailbox_modified')); }
   if (verb === 'edit' && (what === 'quarantine_notification' || what === 'quarantine_category')) { for (const k of b.items) notify.set(`${what}:${k}`, Object.values(b.attr)[0]); return send(200, ok('mailbox_modified')); }
@@ -90,9 +91,9 @@ http.createServer(async (req, res) => {
     return send(200, ok(b.attr.action === 'release' ? 'item_released' : 'item_learned'));
   }
   if (verb === 'edit') {
-    const store = { mailbox: mailboxes, filter: filters, syncjob: syncjobs }[what] || domains;
+    const store = { mailbox: mailboxes, filter: filters, syncjob: syncjobs, alias: aliases }[what] || domains;
     for (const k of b.items) {
-      const key = store === filters || store === syncjobs ? Number(k) : k;
+      const key = store === filters || store === syncjobs || store === aliases ? Number(k) : k;
       Object.assign(store.get(key) || {}, b.attr);
       if (what === 'mailbox' && b.attr.password) { await gmDelete(k); await gmUser(k, b.attr.password); }
     }

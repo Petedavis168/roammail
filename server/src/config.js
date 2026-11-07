@@ -65,7 +65,7 @@ config.turnstile = { siteKey: env.TURNSTILE_SITE_KEY || '', secret: env.TURNSTIL
 // System mailbox used to send password-reset emails (create e.g. no-reply@yourdomain.com in mailcow)
 config.systemMail = { user: env.SYSTEM_MAIL_USER || '', pass: env.SYSTEM_MAIL_PASS || '', from: env.SYSTEM_MAIL_FROM || env.SYSTEM_MAIL_USER || '' };
 config.publicUrl = (env.PUBLIC_URL || (env.APP_DOMAIN ? `https://${env.APP_DOMAIN}` : '')).replace(/\/$/, '');
-config.appName = env.APP_NAME || 'Mail';
+config.appName = env.APP_NAME || 'Roammail';
 // ---------- device setup ----------
 // Include calendar & contacts (mailcow SOGo CalDAV/CardDAV) in iPhone/Mac profiles
 config.davEnabled = (env.DAV_ENABLED ?? 'true') === 'true';
@@ -95,7 +95,7 @@ config.limits = {
 };
 // ---------- legal & contacts ----------
 config.legal = {
-  company: env.LEGAL_COMPANY_NAME || env.APP_NAME || 'Mail',
+  company: env.LEGAL_COMPANY_NAME || 'Friendly Web Services',
   country: env.LEGAL_COUNTRY || 'the United States',
   contact: env.LEGAL_CONTACT_EMAIL || (env.SIGNUP_DOMAIN ? `support@${env.SIGNUP_DOMAIN}` : ''),
   abuse: env.ABUSE_EMAIL || (env.SIGNUP_DOMAIN ? `abuse@${env.SIGNUP_DOMAIN}` : ''),
@@ -103,3 +103,8 @@ config.legal = {
   termsVersion: env.TERMS_VERSION || '2026-11-07',
   retentionDays: Number(env.LOG_RETENTION_DAYS || 180),
 };
+// ---------- calendar & contacts (mailcow SOGo CalDAV/CardDAV) ----------
+// Root of the DAV server. Discovery (current-user-principal → calendar/addressbook home) starts here.
+config.davUrl = (env.DAV_URL || `https://${config.davHost}/SOGo/dav/`).replace(/\/?$/, '/');
+// Who emails meeting invitations: "app" (this app sends iMIP emails) or "server" (SOGo sends them itself)
+config.calendarInvites = env.CALENDAR_INVITES === 'server' ? 'server' : 'app';

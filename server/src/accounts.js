@@ -14,6 +14,7 @@ import { deliverWelcome } from './welcome.js';
 import { createSetupLink } from './devicesetup.js';
 import { applyDomainSpamDefaults } from './spam.js';
 import { assertNotBreached, topSenders } from './abuse.js';
+import { syncOrgGroups } from './groups.js';
 
 const wrap = (fn) => (req, res, next) => Promise.resolve(fn(req, res, next)).catch(next);
 const fail = (status, message) => Object.assign(new Error(message), { status });
@@ -291,6 +292,7 @@ accounts.post('/admin/users', wrap(async (req, res) => {
   if (req.body.welcome !== false) deliverWelcome({ email, password: req.body.password, name: req.body.name, company: d.org_name }).catch(() => {});
   audit(req.user.email, d.org_id, 'user.create', { email, admin: !!req.body.admin });
   applyDomainSpamDefaults(email).catch(() => {});
+  syncOrgGroups(d.org_id).catch(() => {});
   // QR code the admin can show the new hire: scan → phone set up, password included (single use, 2 hours)
   const setup = await createSetupLink(req, email, req.body.password, 120);
   res.json({ ok: true, email, setup });
@@ -312,6 +314,7 @@ accounts.patch('/admin/users', wrap(async (req, res) => {
   for (const k of ['name', 'title', 'department', 'phone', 'mobile']) if (req.body[k] !== undefined) prof[k] = req.body[k];
   if (Object.keys(prof).length) saveProfile(email, prof);
   if (attr.password || attr.active === 0) revokeSessions(email); // password reset or suspension signs the user out everywhere
+  if (prof.department !== undefined || attr.active !== undefined || prof.name !== undefined) syncOrgGroups(d.org_id).catch(() => {});
   if (req.body.admin !== undefined) {
     if (email === req.user.email && !req.body.admin) throw fail(400, 'You can\'t remove your own admin rights');
     q.run('INSERT OR REPLACE INTO members(email, org_id, role) VALUES(?, ?, ?)', email, d.org_id, req.body.admin ? 'admin' : 'user');
@@ -330,13 +333,20 @@ accounts.delete('/admin/users', wrap(async (req, res) => {
   q.run('DELETE FROM members WHERE email = ? AND org_id = ?', email, d.org_id);
   deleteUserData(email);
   revokeSessions(email);
+  syncOrgGroups(d.org_id).catch(() => {});
+  // remove the person from static groups too
+  for (const g of q.all("SELECT * FROM groups WHERE org_id = ? AND kind = 'static'", d.org_id)) {
+    const m = JSON.parse(g.members || '[]');
+    if (m.includes(email)) q.run('UPDATE groups SET members = ? WHERE id = ?', JSON.stringify(m.filter((x) => x !== email)), g.id);
+  }
   audit(req.user.email, d.org_id, 'user.delete', { email });
   res.json({ ok: true });
 }));
 
 accounts.get('/admin/aliases', wrap(async (req, res) => {
   const d = requireDomainAdmin(req, req.query.domain);
-  res.json(d.status === 'active' ? await mailcow.listAliases(d.domain) : []);
+  const groupAddrs = new Set(q.all('SELECT address FROM groups WHERE org_id = ?', d.org_id).map((g) => g.address));
+  res.json(d.status === 'active' ? (await mailcow.listAliases(d.domain)).filter((a) => !groupAddrs.has(a.address.toLowerCase())) : []);
 }));
 
 accounts.post('/admin/aliases', wrap(async (req, res) => {

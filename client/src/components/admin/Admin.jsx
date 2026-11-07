@@ -7,6 +7,7 @@ import { DomainWizard, DomainStatus, Copy, setSuper } from './DomainSetup.jsx';
 import { avatarColor, initials, fmtDate } from '../../util.js';
 import OrgSignature from './Signature.jsx';
 import SpamAdmin from './SpamAdmin.jsx';
+import Groups from './Groups.jsx';
 import TwoFactorSetup from '../TwoFactorSetup.jsx';
 
 const genPassword = () => {
@@ -85,6 +86,7 @@ function Users({ org, domains }) {
           </div>
         ))}
       </div>
+      <datalist id="org-departments">{[...new Set((users || []).map((u) => u.department).filter(Boolean))].map((d) => <option key={d} value={d} />)}</datalist>
       {adding && <AddUser domain={domain} onClose={() => setAdding(false)} onCreated={(c) => { setAdding(false); setCreated(c); load(); }} />}
       {edit && <EditUser u={edit} onClose={() => setEdit(null)} onSave={async (patch) => { await update(edit.email, patch, 'User updated'); setEdit(null); }} />}
       {created && (
@@ -124,7 +126,7 @@ function ProfileFields({ f, setF }) {
   return (
     <div className="two-col">
       <label>Job title<input value={f.title || ''} onChange={(e) => setF({ ...f, title: e.target.value })} placeholder="Sales Manager" /></label>
-      <label>Department<input value={f.department || ''} onChange={(e) => setF({ ...f, department: e.target.value })} placeholder="Sales" /></label>
+      <label>Department<input list="org-departments" value={f.department || ''} onChange={(e) => setF({ ...f, department: e.target.value })} placeholder="Sales" /></label>
       <label>Phone<input value={f.phone || ''} onChange={(e) => setF({ ...f, phone: e.target.value })} /></label>
       <label>Mobile<input value={f.mobile || ''} onChange={(e) => setF({ ...f, mobile: e.target.value })} /></label>
     </div>
@@ -388,7 +390,7 @@ export default function Admin({ me, refreshMe, onExit }) {
   }
 
   const tabs = [
-    ...(org ? [['users', 'Users', 'users'], ['signature', 'Signature', 'pen'], ['spam', 'Spam filter', 'junk'], ['orgsecurity', 'Security', 'lock'], ['aliases', 'Aliases', 'mail'], ['domains', 'Domains', 'globe'], ['activity', 'Activity', 'refresh']] : []),
+    ...(org ? [['users', 'Users', 'users'], ['groups', 'Groups', 'users'], ['signature', 'Signature', 'pen'], ['spam', 'Spam filter', 'junk'], ['orgsecurity', 'Security', 'lock'], ['aliases', 'Aliases', 'mail'], ['domains', 'Domains', 'globe'], ['activity', 'Activity', 'refresh']] : []),
     ...(me.superAdmin ? [['platform', 'Platform (super-admin)', 'shield'], ['new', 'New business', 'plus']] : []),
   ];
   const current = tabs.some((t) => t[0] === tab) ? tab : tabs[0][0];
@@ -411,6 +413,7 @@ export default function Admin({ me, refreshMe, onExit }) {
         {current === 'users' && org && <Users key={org.id} org={org} domains={org.domains} />}
         {current === 'signature' && org && <SignatureTab key={org.id} org={org} />}
         {current === 'orgsecurity' && org && <OrgSecurity key={org.id} org={org} reload={load} />}
+        {current === 'groups' && org && <Groups key={org.id} org={org} />}
         {current === 'spam' && org && <SpamAdmin key={org.id} org={org} />}
         {current === 'aliases' && org && <Aliases key={org.id} domains={org.domains} />}
         {current === 'domains' && org && <Domains key={org.id} org={org} reload={load} refreshMe={refreshMe} goUsers={() => setTab('users')} />}

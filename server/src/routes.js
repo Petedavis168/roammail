@@ -11,6 +11,9 @@ import { parseQuery } from './search.js';
 import { rolesFor, q, twoFactorPolicy } from './db.js';
 import { applyEnforcedSignature } from './signatures.js';
 import { spamInfo } from './spam.js';
+import { parseInvite } from './calendar.js';
+import { allContacts, directory } from './contacts.js';
+import { identitiesFor } from './groups.js';
 import { addJob, listJobs, getJob, deleteJob } from './jobs.js';
 import { checkSendQuota, cleanDisplayName } from './abuse.js';
 import { config as appConfig } from './config.js';
@@ -226,6 +229,10 @@ function fullMessage(folder, msg, parsed) {
     listUnsubscribe: parsed.headers.get('list-unsubscribe') || null,
     security: senderSecurity(parsed),
     spam: spamInfo(parsed.headers.get('x-spamd-result')),
+    invite: (() => {
+      const a = (parsed.attachments || []).find((x) => /text\/calendar|application\/ics/i.test(x.contentType));
+      return a ? parseInvite(a.content.toString('utf8')) : null;
+    })(),
     attachments: (parsed.attachments || []).map((a, i) => ({
       index: i,
       filename: a.filename || `attachment-${i + 1}`,
@@ -364,7 +371,8 @@ api.post('/mark-all-read', wrap(async (req, res) => {
 function buildMail(user, body, files) {
   // Display names can't contain addresses or brackets (stops "CEO <boss@bank.com>"-style spoofing)
   const fromName = cleanDisplayName(body.fromName);
-  const from = fromName ? { name: fromName, address: user.email } : user.email;
+  const address = body._fromAddress || user.email; // validated in the route against identitiesFor()
+  const from = fromName ? { name: fromName, address } : address;
   const mail = {
     from,
     to: body.to || undefined,
@@ -395,7 +403,16 @@ async function forwardedAttachments(user, body) {
   }));
 }
 
+async function resolveFrom(req) {
+  const want = String(req.body.fromAddress || '').trim().toLowerCase();
+  if (!want || want === req.user.email) return;
+  const ids = await identitiesFor(req.user);
+  if (!ids.some((i) => i.address === want)) throw Object.assign(new Error('You are not allowed to send from that address'), { status: 403 });
+  req.body._fromAddress = want;
+}
+
 api.post('/send', upload.array('attachments'), wrap(async (req, res) => {
+  await resolveFrom(req);
   const files = [...(req.files || []), ...(await forwardedAttachments(req.user, req.body))];
   let mail = buildMail(req.user, req.body, files);
   if (!mail.to && !mail.cc && !mail.bcc) return res.status(400).json({ error: 'Add at least one recipient' });
@@ -439,6 +456,7 @@ api.post('/send', upload.array('attachments'), wrap(async (req, res) => {
 }));
 
 api.post('/drafts', upload.array('attachments'), wrap(async (req, res) => {
+  await resolveFrom(req);
   const drafts = await specialFolder(req.user, '\\Drafts', { create: true });
   const raw = await compile(buildMail(req.user, req.body, req.files));
   const client = await getClient(req.user);
@@ -451,6 +469,12 @@ api.post('/drafts', upload.array('attachments'), wrap(async (req, res) => {
 
 // ---------- contacts (autocomplete from people you've emailed) ----------
 const contactCache = new Map();
+const dirCache = new Map();
+async function directoryCached(email) {
+  const domain = email.split('@')[1]; const c = dirCache.get(domain);
+  if (c && Date.now() - c.at < 5 * 60 * 1000) return c.list;
+  const list = await directory(email); dirCache.set(domain, { at: Date.now(), list }); return list;
+}
 setInterval(() => { const now = Date.now(); for (const [k, v] of contactCache) if (now - v.at > 30 * 60 * 1000) contactCache.delete(k); }, 10 * 60 * 1000).unref();
 api.get('/contacts', wrap(async (req, res) => {
   const key = req.user.sid;
@@ -484,7 +508,17 @@ api.get('/contacts', wrap(async (req, res) => {
     contactCache.set(key, cached);
   }
   const q = String(req.query.q || '').toLowerCase();
-  res.json(cached.list.filter((p) => !q || p.address.toLowerCase().includes(q) || p.name.toLowerCase().includes(q)).slice(0, 10));
+  // Saved contacts and coworkers rank above people you've only emailed
+  const merged = new Map();
+  const add = (address, name, score) => {
+    if (!address) return; const k = address.toLowerCase(); if (k === req.user.email) return;
+    const cur = merged.get(k); if (!cur || cur.score < score) merged.set(k, { name: name || cur?.name || '', address, score });
+  };
+  for (const p of cached.list) add(p.address, p.name, p.score);
+  try { for (const c of await allContacts(req.user)) for (const e of c.emails) add(e.value, c.name, 1000); } catch { /* calendar server unavailable */ }
+  try { for (const p of await directoryCached(req.user.email)) add(p.email, p.name, 900); } catch { /* not a business */ }
+  const match = (p) => !q || p.address.toLowerCase().includes(q) || p.name.toLowerCase().includes(q);
+  res.json([...merged.values()].filter(match).sort((a, b) => b.score - a.score).slice(0, 10));
 }));
 
 // ---------- live updates (Server-Sent Events + IMAP IDLE) ----------

@@ -159,7 +159,7 @@ publicSecurity.post('/password/forgot', resetLimiter, wrap(async (req, res) => {
     from: { name: config.appName, address: config.systemMail.from }, to: sec.recovery_email,
     subject: `Reset your ${config.appName} password`,
     text: `Someone asked to reset the password for ${email}.\n\nReset it here (valid for 30 minutes):\n${link}\n\nIf this wasn't you, ignore this email - your password won't change.`,
-    html: `<p>Someone asked to reset the password for <b>${email}</b>.</p><p><a href="${link}" style="background:#0f6cbd;color:#fff;padding:10px 18px;border-radius:6px;text-decoration:none">Reset password</a></p><p style="color:#666">The link is valid for 30 minutes. If this wasn't you, ignore this email - your password won't change.</p>`,
+    html: `<p>Someone asked to reset the password for <b>${email}</b>.</p><p><a href="${link}" style="background:#244960;color:#fff;padding:10px 18px;border-radius:6px;text-decoration:none">Reset password</a></p><p style="color:#666">The link is valid for 30 minutes. If this wasn't you, ignore this email - your password won't change.</p>`,
   }).catch((e) => console.warn('reset mail failed:', e.message));
   audit(email, null, 'security.reset_requested', { ip: req.ip });
 }));

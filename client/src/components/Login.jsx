@@ -69,16 +69,21 @@ export default function Login({ onLogin }) {
   return (
     <div className="login-page">
       <div className="login-brand">
-        <div className="logo-big"><Icon name="mail" size={36} /></div>
-        <h1>Mail</h1>
-        <p>Fast, private email for you and your business.</p>
+        <img className="mark" src="/roammail-mark-white.png" alt="" />
+        <h1>Roammail</h1>
+        <p className="tagline">Your business. Delivered.</p>
+        <p>Email, calendar and contacts for you and your team, on your own domain.</p>
         <ul className="login-points">
           <li><Icon name="check" /> Conversations, search and smart folders</li>
           <li><Icon name="check" /> Use your own business domain</li>
+          <li><Icon name="check" /> Calendar and contacts that sync to your phone</li>
           <li><Icon name="check" /> Admin portal to manage your team</li>
+          <li><Icon name="check" /> 2-step verification and spam protection built in</li>
         </ul>
+        <p className="powered">Powered by Friendly Web Services</p>
       </div>
       <form className="login-card" onSubmit={submit}>
+        <img className="login-logo" src="/roammail-logo.png" alt="Roammail" />
         {cfg.enabled && (mode === 'login' || mode === 'signup') && (
           <div className="seg">
             <button type="button" className={mode === 'login' ? 'on' : ''} onClick={() => setMode('login')}>Sign in</button>

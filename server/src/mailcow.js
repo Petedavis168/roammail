@@ -127,7 +127,11 @@ export const mailcow = {
 
   listAliases: async (domain) => list(await call('GET', 'get/alias/all'))
     .filter((a) => a.domain === domain || String(a.address).endsWith(`@${domain}`))
-    .map((a) => ({ id: a.id, address: a.address, goto: a.goto, active: Number(a.active) === 1 })),
-  addAlias: (address, goto) => call('POST', 'add/alias', { address, goto, active: 1 }),
+    .map((a) => ({ id: a.id, address: a.address, goto: a.goto, active: Number(a.active) === 1, internal: Number(a.internal) === 1, senderAllowed: Number(a.sender_allowed) === 1 })),
+  addAlias: (address, goto, opts = {}) => call('POST', 'add/alias', {
+    address, goto, active: 1, internal: opts.internal ? 1 : 0, sender_allowed: opts.senderAllowed ? 1 : 0,
+    ...(opts.comment ? { public_comment: opts.comment } : {}),
+  }),
+  editAlias: (id, attr) => call('POST', 'edit/alias', { items: [String(id)], attr }),
   deleteAlias: (id) => call('POST', 'delete/alias', [String(id)]),
 };

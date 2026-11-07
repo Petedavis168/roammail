@@ -41,7 +41,48 @@ function WhyJunk({ m }) {
   );
 }
 
-function ThreadMessage({ m, expanded, onToggle, onReply, prefs, setPrefs, last, orgDomains, onBlock, isJunk }) {
+function InviteCard({ m, me }) {
+  const inv = m.invite;
+  const [state, setState] = useState('');
+  const [busy, setBusy] = useState(false);
+  useEffect(() => {
+    if (inv?.method === 'REPLY') api.post('/api/calendar/apply-reply', { folder: m.folder, uid: m.uid }).then((r) => r.ok && setState(r.partstat)).catch(() => {});
+  }, [m.uid]);
+  if (!inv || !inv.start) return null;
+  const mine = inv.attendees?.find((a) => a.email === me.email)?.partstat;
+  const start = inv.allDay ? new Date(`${inv.start}T00:00:00`) : new Date(inv.start);
+  const end = inv.end ? (inv.allDay ? new Date(`${inv.end}T00:00:00`) : new Date(inv.end)) : null;
+  const when = inv.allDay ? start.toLocaleDateString([], { weekday: 'long', month: 'long', day: 'numeric' })
+    : `${start.toLocaleString([], { weekday: 'short', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })}${end ? ` – ${end.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}` : ''}`;
+  const respond = async (response) => {
+    setBusy(true);
+    try { const r = await api.post('/api/calendar/rsvp', { folder: m.folder, uid: m.uid, response }); setState(r.response); }
+    catch (e) { alert(e.message); } finally { setBusy(false); }
+  };
+  const label = { ACCEPTED: 'You accepted', TENTATIVE: 'You said maybe', DECLINED: 'You declined' };
+  return (
+    <div className="invite-card">
+      <div className="inv-date"><small>{start.toLocaleDateString([], { month: 'short' })}</small><b>{start.getDate()}</b><small>{start.toLocaleDateString([], { weekday: 'short' })}</small></div>
+      <div className="inv-body">
+        <b>{inv.method === 'CANCEL' ? 'Canceled: ' : inv.method === 'REPLY' ? 'Reply: ' : ''}{inv.title}</b>
+        <div className="small">{when}{inv.repeat && inv.repeat !== 'none' ? ` · repeats ${inv.repeat}` : ''}</div>
+        {inv.location && <div className="small muted">{inv.location}</div>}
+        {inv.organizer && inv.method === 'REQUEST' && <div className="small muted">Organizer: {inv.organizer.name || inv.organizer.email}</div>}
+        {inv.method === 'REQUEST' && (
+          <div className="inv-actions">
+            {state || mine && mine !== 'NEEDS-ACTION' ? <span className="pill ok">{label[state || mine]}</span> : <span className="small">Going?</span>}
+            <button className="btn sm" disabled={busy} onClick={() => respond('accept')}>Yes</button>
+            <button className="btn sm" disabled={busy} onClick={() => respond('tentative')}>Maybe</button>
+            <button className="btn sm" disabled={busy} onClick={() => respond('decline')}>No</button>
+          </div>
+        )}
+        {inv.method === 'REPLY' && state && <div className="small ok">Your calendar was updated.</div>}
+      </div>
+    </div>
+  );
+}
+
+function ThreadMessage({ m, expanded, onToggle, onReply, prefs, setPrefs, last, orgDomains, onBlock, isJunk, me }) {
   const sender = m.from?.[0] || {};
   const trusted = prefs.showImages === 'always' || prefs.trustedSenders.includes(sender.address?.toLowerCase());
   const [allow, setAllow] = useState(trusted);
@@ -91,6 +132,12 @@ function ThreadMessage({ m, expanded, onToggle, onReply, prefs, setPrefs, last, 
             <button className="icon-btn" onClick={() => setMenu((x) => !x)} title="More"><Icon name="more" /></button>
             {menu && (
               <div className="menu right">
+                {sender.address && <button onClick={async () => {
+                  setMenu(false);
+                  const parts = (sender.name || '').trim().split(/\s+/);
+                  try { await api.post('/api/address-contacts', { first: parts[0] || '', last: parts.slice(1).join(' '), name: sender.name || '', emails: [{ value: sender.address, type: 'work' }] }); alert(`${sender.name || sender.address} was added to your contacts`); }
+                  catch (e) { alert(e.message); }
+                }}><Icon name="users" /> Add to contacts</button>}
                 {sender.address && <button onClick={() => { setMenu(false); onBlock(sender.address); }}><Icon name="block" /> Block {sender.address}</button>}
                 <button onClick={() => window.open(`/api/raw?folder=${encodeURIComponent(m.folder)}&uid=${m.uid}`, '_blank')}><Icon name="external" /> View source</button>
                 <button onClick={() => { const f = document.querySelector(`[data-msg="${m.folder}:${m.uid}"] iframe`); f?.contentWindow?.print(); }}><Icon name="print" /> Print</button>
@@ -100,6 +147,7 @@ function ThreadMessage({ m, expanded, onToggle, onReply, prefs, setPrefs, last, 
         </div>
       </header>
       {isJunk && <WhyJunk m={m} />}
+      {!isJunk && <InviteCard m={m} me={me} />}
       <SecurityBanner m={m} sender={sender} orgDomains={orgDomains} />
       {isJunk && <div className="img-banner"><Icon name="shield" size={16} /> Links and pictures are turned off in Junk. Mark it as not junk to use them.</div>}
       {blocked > 0 && !allow && !isJunk && (
@@ -180,7 +228,7 @@ export default function ReadingPane({ folder, msg, me, prefs, setPrefs, conversa
           return (
             <ThreadMessage key={k} m={m} last={i === thread.messages.length - 1} expanded={expanded.has(k)} prefs={prefs} setPrefs={setPrefs}
               onToggle={() => setExpanded((s) => { const n = new Set(s); n.has(k) ? n.delete(k) : n.add(k); return n; })}
-              onReply={onReply} orgDomains={orgDomains} onBlock={act.block} isJunk={isJunk} />
+              onReply={onReply} orgDomains={orgDomains} onBlock={act.block} isJunk={isJunk} me={me} />
           );
         })}
         {thread && (

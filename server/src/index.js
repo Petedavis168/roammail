@@ -15,6 +15,9 @@ import { spam } from './spam.js';
 import { startJobs } from './jobs.js';
 import { deviceSetup, deviceSetupApi } from './devicesetup.js';
 import { legalPages, privacy, startRetention } from './privacy.js';
+import { calendar } from './calendar.js';
+import { contacts } from './contacts.js';
+import { groups } from './groups.js';
 
 const app = express();
 // Number of reverse proxies in front of the app (Caddy = 1). Wrong values let clients fake their IP.
@@ -65,6 +68,9 @@ app.use('/api', mailtools);
 app.use('/api', spam);
 app.use('/api', deviceSetupApi);
 app.use('/api', privacy);
+app.use('/api', calendar);
+app.use('/api', contacts);
+app.use('/api', groups);
 app.use('/api', (req, res) => res.status(404).json({ error: 'Not found' }));
 app.use('/api', (err, req, res, _next) => {
   const status = err.status || (err.code === 'LIMIT_FILE_SIZE' ? 413 : err.authenticationFailed ? 401 : 500);
