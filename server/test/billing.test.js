@@ -149,3 +149,44 @@ test('groups: department lists stay in sync, send-as is limited to members', asy
   assert.equal((await send(ann, `owner@${D}`)).status, 403, 'nobody can send as an unrelated address');
   assert.equal((await ann.get(`/api/admin/orgs/${orgId}/groups`)).status, 403, 'employees cannot manage groups');
 });
+
+test('bulk import: preview, problems reported, extra seats confirmed and billed', async () => {
+  const a = await newAdmin(`imp${run}`);
+  const domain = `import${run}.test`;
+  const { orgId } = (await a.post('/api/domains', { domain, orgName: `Import ${run}` })).data;
+  await a.post(`/api/domains/${domain}/verify`);
+  const { url } = (await a.post(`/api/billing/${orgId}/checkout`, { interval: 'month', seats: 1 })).data;
+  const sid = new URL((await fetch(url, { method: 'POST', redirect: 'manual' })).headers.get('location')).searchParams.get('session_id');
+  await a.post('/api/billing/confirm', { sessionId: sid });
+  const csv = [
+    'Name,Email,Job title,Department,Admin',
+    '"Lee, Ann",ann,Sales lead,Sales,yes',
+    `Bob Stone,bob@${domain},Engineer,"R&D",no`,
+    'Cara Diaz,cara,,Support,',
+    'Bad Domain,dan@elsewhere.test,,,',
+    'Duplicate,ann,,,',
+    'Bad Name,bad name!,,,',
+  ].join('\r\n');
+  const dry = await a.post('/api/admin/users/import', { domain, csv, dryRun: true });
+  assert.equal(dry.status, 200, JSON.stringify(dry.data));
+  assert.equal(dry.data.preview.valid, 3);
+  assert.equal(dry.data.preview.extraSeats, 2, 'one seat already paid');
+  assert.deepEqual(dry.data.preview.problems.map((p) => p.row), [5, 6, 7]);
+  assert.ok(!dry.data.people.some((p) => 'password' in p), 'passwords are not sent in the preview');
+
+  const needConfirm = await a.post('/api/admin/users/import', { domain, csv, welcome: false });
+  assert.equal(needConfirm.status, 402); assert.equal(needConfirm.data.code, 'seat_required');
+
+  const done = await a.post('/api/admin/users/import', { domain, csv, welcome: false, confirmSeats: true });
+  assert.equal(done.status, 200, JSON.stringify(done.data));
+  assert.deepEqual(done.data.results.map((r) => [r.email, r.ok]), [[`ann@${domain}`, true], [`bob@${domain}`, true], [`cara@${domain}`, true]]);
+  assert.ok(done.data.results.every((r) => r.password && r.password.length >= 12), 'passwords generated for the admin to hand out');
+  assert.equal((await a.get(`/api/billing/${orgId}`)).data.paidSeats, 3);
+  const users = (await a.get(`/api/admin/users?domain=${domain}`)).data;
+  const ann = users.find((u) => u.email === `ann@${domain}`);
+  assert.equal(ann.admin, true); assert.equal(ann.title, 'Sales lead'); assert.equal(ann.name, 'Lee, Ann');
+  assert.equal(users.find((u) => u.email === `bob@${domain}`).department, 'R&D');
+  // another business's admin can't import into this domain
+  const other = await newAdmin(`imo${run}`);
+  assert.equal((await other.post('/api/admin/users/import', { domain, csv, dryRun: true })).status, 403);
+});

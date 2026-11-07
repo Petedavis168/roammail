@@ -17,7 +17,7 @@ import { applyDomainSpamDefaults } from './spam.js';
 import { assertNotBreached, topSenders } from './abuse.js';
 import { resetTwoFactor } from './recovery.js';
 import { syncOrgGroups } from './groups.js';
-import { needsPaymentToActivate, seatCheck, shrinkSeats, onPaid, startBillingChecks, orgBilling } from './billing.js';
+import { needsPaymentToActivate, seatCheck, shrinkSeats, onPaid, startBillingChecks, orgBilling, setSeats } from './billing.js';
 
 const wrap = (fn) => (req, res, next) => Promise.resolve(fn(req, res, next)).catch(next);
 const fail = (status, message) => Object.assign(new Error(message), { status });
@@ -332,31 +332,115 @@ accounts.get('/admin/users', wrap(async (req, res) => {
   })));
 }));
 
+/** Create one mailbox in a business (no seat check: callers do that). */
+async function createUser(req, d, body) {
+  const local = String(body.localPart || '').trim().toLowerCase();
+  checkLocal(local);
+  checkPassword(body.password);
+  await assertNotBreached(body.password, `${local}@x`);
+  const quotaMb = Math.max(256, Math.min(Number(body.quotaMb) || config.business.defaultQuotaMb, config.business.maxQuotaMb));
+  const email = `${local}@${d.domain}`;
+  await mailcow.addMailbox({ localPart: local, domain: d.domain, name: String(body.name || '').slice(0, 100), password: body.password, quotaMb });
+  await q.run('INSERT INTO members(email, org_id, role) VALUES(?, ?, ?) ON CONFLICT(email, org_id) DO UPDATE SET role = excluded.role', email, d.org_id, body.admin ? 'admin' : 'user');
+  await saveProfile(email, { name: body.name || '', title: body.title, department: body.department, phone: body.phone, mobile: body.mobile });
+  if (body.welcome !== false) deliverWelcome({ email, password: body.password, name: body.name, company: d.org_name }).catch(() => {});
+  await audit(req.user.email, d.org_id, 'user.create', { email, admin: !!body.admin, bulk: !!body.bulk });
+  applyDomainSpamDefaults(email).catch(() => {});
+  return email;
+}
+
 accounts.post('/admin/users', wrap(async (req, res) => {
   const d = await requireDomainAdmin(req, req.body.domain);
   if (d.status !== 'active') throw fail(400, 'Verify the domain before adding users');
-  const local = String(req.body.localPart || '').trim().toLowerCase();
-  checkLocal(local);
-  checkPassword(req.body.password);
-  await assertNotBreached(req.body.password, `${local}@x`);
   if ((await orgMailboxCount(d.org_id)) >= d.max_mailboxes) throw fail(400, `Your plan allows ${d.max_mailboxes} users`);
+  checkLocal(String(req.body.localPart || '').trim().toLowerCase());
+  checkPassword(req.body.password);
   const seat = await seatCheck(d.org_id);
   if (!seat.ok) {
     return res.status(402).json({ error: seat.hasSubscription ? 'Adding this person needs one more paid user.' : 'Choose a plan to add this person.',
       code: seat.hasSubscription ? 'seat_required' : 'checkout_required', perUser: seat.perUser, interval: seat.interval, orgId: d.org_id });
   }
-  const quotaMb = Math.max(256, Math.min(Number(req.body.quotaMb) || config.business.defaultQuotaMb, config.business.maxQuotaMb));
-  const email = `${local}@${d.domain}`;
-  await mailcow.addMailbox({ localPart: local, domain: d.domain, name: String(req.body.name || '').slice(0, 100), password: req.body.password, quotaMb });
-  await q.run('INSERT INTO members(email, org_id, role) VALUES(?, ?, ?) ON CONFLICT(email, org_id) DO UPDATE SET role = excluded.role', email, d.org_id, req.body.admin ? 'admin' : 'user');
-  await saveProfile(email, { name: req.body.name || '', title: req.body.title, department: req.body.department, phone: req.body.phone, mobile: req.body.mobile });
-  if (req.body.welcome !== false) deliverWelcome({ email, password: req.body.password, name: req.body.name, company: d.org_name }).catch(() => {});
-  await audit(req.user.email, d.org_id, 'user.create', { email, admin: !!req.body.admin });
-  applyDomainSpamDefaults(email).catch(() => {});
+  const email = await createUser(req, d, req.body);
   syncOrgGroups(d.org_id).catch(() => {});
   // QR code the admin can show the new hire: scan → phone set up, password included (single use, 2 hours)
   const setup = await createSetupLink(req, email, req.body.password, 120);
   res.json({ ok: true, email, setup });
+}));
+
+// ---------------------------------------------------------------- bulk import from a spreadsheet (CSV)
+/** Minimal RFC 4180 CSV parser (quotes, commas and line breaks inside quotes). */
+export function parseCsv(text) {
+  const rows = []; let row = []; let field = ''; let quoted = false;
+  const s = String(text || '').replace(/^\uFEFF/, '');
+  for (let i = 0; i < s.length; i++) {
+    const c = s[i];
+    if (quoted) {
+      if (c === '"' && s[i + 1] === '"') { field += '"'; i++; } else if (c === '"') quoted = false; else field += c;
+    } else if (c === '"') quoted = true;
+    else if (c === ',') { row.push(field); field = ''; } else if (c === '\n' || c === '\r') {
+      if (c === '\r' && s[i + 1] === '\n') i++;
+      row.push(field); field = ''; if (row.some((x) => x.trim())) rows.push(row); row = [];
+    } else field += c;
+  }
+  row.push(field); if (row.some((x) => x.trim())) rows.push(row);
+  return rows;
+}
+const COLS = { name: ['name', 'full name', 'display name'], email: ['email', 'email address', 'username', 'user', 'address'], title: ['title', 'job title'],
+  department: ['department', 'dept', 'team'], phone: ['phone', 'work phone'], mobile: ['mobile', 'cell', 'mobile phone'], admin: ['admin', 'is admin', 'role'], password: ['password'] };
+const genPassword = () => `${crypto.randomBytes(9).toString('base64url')}-${crypto.randomInt(10, 99)}`;
+
+accounts.post('/admin/users/import', rateLimit({ windowMs: 3600e3, limit: 20 }), wrap(async (req, res) => {
+  const d = await requireDomainAdmin(req, req.body.domain);
+  if (d.status !== 'active') throw fail(400, 'Verify the domain before adding users');
+  const rows = parseCsv(req.body.csv);
+  if (rows.length < 2) throw fail(400, 'The file needs a header row (name, email, ...) and at least one person');
+  if (rows.length > 501) throw fail(400, 'Import up to 500 people at a time');
+  const header = rows[0].map((h) => h.trim().toLowerCase());
+  const col = Object.fromEntries(Object.entries(COLS).map(([k, names]) => [k, header.findIndex((h) => names.includes(h))]));
+  if (col.email < 0) throw fail(400, 'Add an "email" column (the address, or just the part before the @)');
+  const existing = new Set((await mailcow.listMailboxes(d.domain)).map((m) => m.email.toLowerCase()));
+  const seen = new Set();
+  const people = rows.slice(1).map((r, i) => {
+    const get = (k) => (col[k] >= 0 ? String(r[col[k]] ?? '').trim() : '');
+    let local = get('email').toLowerCase();
+    let error = '';
+    if (local.includes('@')) { const [l, dom] = local.split('@'); if (dom !== d.domain) error = `Address must end in @${d.domain}`; local = l; }
+    try { checkLocal(local); } catch (e) { error ||= e.message; }
+    const email = `${local}@${d.domain}`;
+    if (!error && existing.has(email)) error = 'Already exists';
+    if (!error && seen.has(email)) error = 'Listed twice';
+    seen.add(email);
+    const password = get('password') || genPassword();
+    if (!error && get('password')) { try { checkPassword(password); } catch (e) { error = e.message; } }
+    return { row: i + 2, email, localPart: local, name: get('name').slice(0, 100), title: get('title'), department: get('department'), phone: get('phone'), mobile: get('mobile'),
+      admin: /^(yes|y|true|1|admin)$/i.test(get('admin')), password, generated: !get('password'), error };
+  });
+  const valid = people.filter((p) => !p.error);
+  const current = await orgMailboxCount(d.org_id);
+  if (current + valid.length > d.max_mailboxes) throw fail(400, `Your plan allows ${d.max_mailboxes} users (you have ${current})`);
+  // Seats: everyone counts after the free allowance
+  const b = config.billing.enabled ? await orgBilling(d.org_id) : null;
+  const seatsNeeded = b ? Math.max(0, current + valid.length - b.free) : 0;
+  const extraSeats = b ? Math.max(0, seatsNeeded - b.paid_seats) : 0;
+  const preview = { total: people.length, valid: valid.length, problems: people.filter((p) => p.error).map(({ row, email, error }) => ({ row, email, error })), extraSeats,
+    perUser: b ? (b.billing_interval === 'year' ? config.billing.perUserYearly : config.billing.perUserMonthly) : 0, interval: b?.billing_interval || 'month',
+    hasSubscription: !!(b?.stripe_subscription && b.billing_status !== 'canceled') };
+  if (req.body.dryRun) return res.json({ preview, people: people.map(({ password, ...p }) => p) });
+  if (extraSeats > 0) {
+    if (!preview.hasSubscription) return res.status(402).json({ error: 'Choose a plan first, then import.', code: 'checkout_required', orgId: d.org_id, preview });
+    if (!req.body.confirmSeats) return res.status(402).json({ error: `This adds ${extraSeats} paid user(s). Confirm to continue.`, code: 'seat_required', preview });
+    await setSeats(d.org_id, b.paid_seats + extraSeats, 'bulk import');
+  }
+  const results = [];
+  for (const p of valid) {
+    try {
+      await createUser(req, d, { ...p, welcome: req.body.welcome !== false, bulk: true });
+      results.push({ email: p.email, name: p.name, password: p.password, ok: true });
+    } catch (e) { results.push({ email: p.email, name: p.name, ok: false, error: e.message }); }
+  }
+  syncOrgGroups(d.org_id).catch(() => {});
+  await audit(req.user.email, d.org_id, 'user.bulk_import', { created: results.filter((r) => r.ok).length, failed: results.filter((r) => !r.ok).length });
+  res.json({ ok: true, results, problems: preview.problems });
 }));
 
 accounts.patch('/admin/users', wrap(async (req, res) => {

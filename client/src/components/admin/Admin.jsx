@@ -32,12 +32,71 @@ function Modal({ title, onClose, children }) {
 }
 
 // ------------------------------------------------------------------ users
+function ImportUsers({ domain, onClose }) {
+  const toast = useToast();
+  const [csv, setCsv] = useState('');
+  const [preview, setPreview] = useState(null);
+  const [results, setResults] = useState(null);
+  const [welcome, setWelcome] = useState(true);
+  const [busy, setBusy] = useState(false);
+  const read = (file) => { const r = new FileReader(); r.onload = async () => { setCsv(String(r.result)); await check(String(r.result)); }; r.readAsText(file); };
+  const check = async (text) => {
+    setBusy(true);
+    try { setPreview((await api.post('/api/admin/users/import', { domain, csv: text, dryRun: true })).preview); } catch (e) { toast(e.message, { error: true }); } finally { setBusy(false); }
+  };
+  const run = async () => {
+    setBusy(true);
+    try { setResults((await api.post('/api/admin/users/import', { domain, csv, welcome, confirmSeats: true })).results); } catch (e) { toast(e.message, { error: true }); } finally { setBusy(false); }
+  };
+  const download = () => {
+    const rows = [['Name', 'Email', 'Temporary password'], ...results.filter((r) => r.ok).map((r) => [r.name, r.email, r.password])];
+    const blob = new Blob([rows.map((r) => r.map((x) => `"${String(x || '').replace(/"/g, '""')}"`).join(',')).join('\r\n')], { type: 'text/csv' });
+    const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = `new-users-${domain}.csv`; a.click();
+  };
+  const template = () => {
+    const blob = new Blob(['Name,Email,Job title,Department,Phone,Mobile,Admin\r\nJane Smith,jane,Office manager,Operations,,,yes\r\n'], { type: 'text/csv' });
+    const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = 'roammail-users-template.csv'; a.click();
+  };
+  return (
+    <Modal title={`Import people to @${domain}`} onClose={onClose}>
+      {!results && (
+        <>
+          <p className="small">Upload a spreadsheet saved as <b>CSV</b>, one person per row. Columns: <b>Name, Email</b> (or just the part before the @), and optionally Job title, Department, Phone, Mobile, Admin (yes/no), Password.
+            Leave Password out and we'll make a strong one for each person. <button className="link" onClick={template}>Download a template</button></p>
+          <input type="file" accept=".csv,text/csv" onChange={(e) => e.target.files[0] && read(e.target.files[0])} />
+          {busy && <div className="spinner" />}
+          {preview && (
+            <div className="card" style={{ marginTop: 12 }}>
+              <p><b>{preview.valid}</b> of {preview.total} people are ready to add.</p>
+              {preview.problems.length > 0 && <><p className="bad small">These rows will be skipped:</p><ul className="small">{preview.problems.map((p) => <li key={p.row}>Row {p.row}{p.email ? ` (${p.email})` : ''}: {p.error}</li>)}</ul></>}
+              {preview.extraSeats > 0 && (preview.hasSubscription
+                ? <p className="small">This adds <b>{preview.extraSeats}</b> paid user(s) at ${preview.perUser}/{preview.interval} each. You'll be charged the prorated amount today.</p>
+                : <p className="bad small">Choose a plan in Admin → Billing before importing more than your free users.</p>)}
+              <label className="check"><input type="checkbox" checked={welcome} onChange={(e) => setWelcome(e.target.checked)} /> Put a welcome email with setup steps in each new inbox</label>
+              <div className="actions"><button className="btn primary" disabled={busy || !preview.valid || (preview.extraSeats > 0 && !preview.hasSubscription)} onClick={run}>Add {preview.valid} people</button></div>
+            </div>
+          )}
+        </>
+      )}
+      {results && (
+        <>
+          <p><b>{results.filter((r) => r.ok).length}</b> people added.{results.some((r) => !r.ok) && ` ${results.filter((r) => !r.ok).length} failed.`}</p>
+          <p className="small">Download their temporary passwords now: this is the only time they're shown. Share each one privately; people can change it in Settings → Security.</p>
+          <div className="actions"><button className="btn primary" onClick={download}>Download passwords (CSV)</button><button className="btn" onClick={onClose}>Done</button></div>
+          {results.filter((r) => !r.ok).map((r) => <div key={r.email} className="bad small">{r.email}: {r.error}</div>)}
+        </>
+      )}
+    </Modal>
+  );
+}
+
 function Users({ org, domains }) {
   const toast = useToast();
   const active = domains.filter((d) => d.status === 'active');
   const [domain, setDomain] = useState(active[0]?.domain || '');
   const [users, setUsers] = useState(null);
   const [adding, setAdding] = useState(false);
+  const [importing, setImporting] = useState(false);
   const [created, setCreated] = useState(null);
   const [edit, setEdit] = useState(null);
   const [q, setQ] = useState('');
@@ -63,6 +122,7 @@ function Users({ org, domains }) {
         <input className="filter-input" placeholder="Search users" value={q} onChange={(e) => setQ(e.target.value)} />
         <div className="spacer" />
         <span className="muted small">{users?.length ?? '…'} of {org.max_mailboxes} users</span>
+        <button className="btn" onClick={() => setImporting(true)}><Icon name="users" size={16} /> Import from spreadsheet</button>
         <button className="btn primary" onClick={() => setAdding(true)}><Icon name="plus" size={16} /> Add user</button>
       </div>
       <div className="table">
@@ -92,6 +152,7 @@ function Users({ org, domains }) {
         ))}
       </div>
       <datalist id="org-departments">{[...new Set((users || []).map((u) => u.department).filter(Boolean))].map((d) => <option key={d} value={d} />)}</datalist>
+      {importing && <ImportUsers domain={domain} onClose={() => { setImporting(false); load(); }} />}
       {adding && <AddUser domain={domain} orgId={org.id} onClose={() => setAdding(false)} onCreated={(c) => { setAdding(false); setCreated(c); load(); }} />}
       {edit && <EditUser u={edit} onClose={() => setEdit(null)} onSave={async (patch) => { await update(edit.email, patch, 'User updated'); setEdit(null); }} />}
       {created && (

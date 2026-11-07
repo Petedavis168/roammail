@@ -165,3 +165,8 @@ test('SQL translation to PostgreSQL', async () => {
   assert.equal(toPg('INSERT OR IGNORE INTO d(a) VALUES(?)'), 'INSERT INTO d(a) VALUES($1) ON CONFLICT DO NOTHING');
   assert.match(toPgSchema('id INTEGER PRIMARY KEY AUTOINCREMENT, n INTEGER'), /BIGSERIAL PRIMARY KEY, n BIGINT/);
 });
+
+test('CSV parser: quotes, commas, line breaks, BOM', async () => {
+  const { parseCsv } = await import('../src/accounts.js');
+  assert.deepEqual(parseCsv('﻿a,b\r\n"x, y","say ""hi"""\n\n"multi\nline",z'), [['a', 'b'], ['x, y', 'say "hi"'], ['multi\nline', 'z']]);
+});
