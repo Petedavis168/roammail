@@ -31,7 +31,11 @@ export async function markChosen(email) {
 /** A mailbox signing in for the first time that the app didn't create (e.g. made directly in mailcow): treat its password as temporary. */
 export async function ensureSetupRow(email) {
   const e = String(email).toLowerCase();
-  if (!(await row(e))) await q.run("INSERT INTO account_setup(email, must_change_password, source, created_at) VALUES(?, 1, 'external', ?) ON CONFLICT(email) DO NOTHING", e, Date.now());
+  if (await row(e)) return;
+  // Signed up through the app before setup tracking existed: the person chose this password
+  const selfSignup = await q.get('SELECT 1 FROM signups WHERE email = ?', e);
+  await q.run('INSERT INTO account_setup(email, must_change_password, source, created_at) VALUES(?, ?, ?, ?) ON CONFLICT(email) DO NOTHING',
+    e, selfSignup ? 0 : 1, selfSignup ? 'self' : 'external', Date.now());
 }
 
 async function twoFactorRequired(email) {
