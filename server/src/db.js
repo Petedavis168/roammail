@@ -203,6 +203,12 @@ CREATE TABLE IF NOT EXISTS followups (
   created_at INTEGER NOT NULL
 );
 CREATE INDEX IF NOT EXISTS followups_due ON followups(status, remind_at);
+CREATE TABLE IF NOT EXISTS import_records (
+  id INTEGER PRIMARY KEY AUTOINCREMENT, email TEXT NOT NULL, kind TEXT NOT NULL, provider TEXT, remote_user TEXT, remote_host TEXT,
+  syncjob_id TEXT, creds TEXT, state TEXT, status TEXT NOT NULL DEFAULT 'active', messages_found INTEGER, messages_copied INTEGER,
+  last_error TEXT, first_done_at INTEGER, next_run INTEGER, created_at INTEGER NOT NULL, stop_at INTEGER NOT NULL, created_by TEXT
+);
+CREATE INDEX IF NOT EXISTS import_records_email ON import_records(email, status);
 `;
 
 // Columns added after the first release: [table, column, definition]

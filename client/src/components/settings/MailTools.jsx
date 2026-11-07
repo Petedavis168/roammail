@@ -138,40 +138,121 @@ function ServerFilters() {
   );
 }
 
-export function ImportMail() {
+const IMPORT_MSG = { started: 'Signed in to Microsoft. Your Outlook mail is being copied now.', cancelled: 'Microsoft sign-in was cancelled.', expired: 'That sign-in took too long. Please try again.', failed: "Microsoft sign-in didn't work. Try again, or upload an export file instead.", 'no-email': "Microsoft didn't tell us which mailbox to import." };
+const when = (v) => (v ? fmtDate(new Date(typeof v === 'number' ? v : String(v).replace(' ', 'T')).toISOString()) : '');
+
+function ImportRow({ r, onChange }) {
+  const pct = r.found ? Math.min(100, Math.round((100 * (r.copied || 0)) / r.found)) : null;
+  const state = r.status === 'failed' ? `Problem: ${r.error || 'the import stopped'}`
+    : r.status === 'finished' ? (r.kind === 'upload' ? `Done: ${r.copied} messages copied` : `Finished. Copying stopped on ${when(r.stopsAt)}.`)
+    : r.status === 'paused' ? 'Paused'
+    : r.kind === 'upload' ? `Copying… ${r.copied || 0} messages so far`
+    : r.kind === 'oauth' ? (r.error ? `Problem: ${r.error}` : `${r.copied || 0} of about ${r.found ?? '?'} messages copied`)
+    : r.running ? 'Copying now…' : r.lastRun ? `Last copied ${when(r.lastRun)}${r.success === false ? ' · problem: check the app password' : ''}` : `Starting within 20 minutes · about ${r.found ?? '?'} messages`;
+  return (
+    <div className="import-row">
+      <Icon name={r.status === 'failed' ? 'alert' : r.status === 'finished' ? 'check' : 'import'} />
+      <div className="rule-text">
+        <b>{r.user}</b> <span className="muted small">{r.label}</span>
+        <small className="muted">{state}</small>
+        {pct !== null && r.status === 'active' && r.kind !== 'syncjob' && <div className="meter"><div style={{ width: `${pct}%` }} /></div>}
+        {r.status === 'active' && r.kind !== 'upload' && <small className="muted">Keeps copying new mail until {when(r.stopsAt)}, so nothing is lost while you switch.</small>}
+      </div>
+      {r.kind !== 'upload' && ['active', 'paused'].includes(r.status) && <button className="btn sm" onClick={async () => { await api.patch('/api/imports', { recordId: r.id, active: r.status !== 'active' }); onChange(); }}>{r.status === 'active' ? 'Pause' : 'Resume'}</button>}
+      {['active', 'paused'].includes(r.status) && r.kind !== 'upload' && <button className="icon-btn" title="Stop" aria-label="Stop import" onClick={async () => { if (confirm('Stop importing from this account? Mail already copied stays.')) { await api.del('/api/imports', { recordId: r.id }); onChange(); } }}><Icon name="close" size={16} /></button>}
+    </div>
+  );
+}
+
+function ReadyToSwitch({ me }) {
+  const business = (me?.orgs || []).length > 0;
+  return (
+    <div className="callout ok">
+      <Icon name="check" size={16} />
+      <div><b>Ready to switch</b>
+        {business
+          ? <small>Your mail is here. Now point your domain to Roammail: in <b>Admin → Domains</b>, copy the MX record into your DNS and press <b>Check records</b>. New mail arrives here within an hour; the import keeps catching anything sent to the old account meanwhile.</small>
+          : <small>Your mail is here. Tell people your new address, and in your old account turn on forwarding to it. The import keeps catching anything that still arrives there for the next few days.</small>}
+      </div>
+    </div>
+  );
+}
+
+export function ImportMail({ me, importMsg }) {
   const toast = useToast();
   const [d, setD] = useState(null);
   const [f, setF] = useState({ provider: 'gmail', user: '', password: '', host: '' });
-  const [busy, setBusy] = useState(false);
+  const [found, setFound] = useState(null);
+  const [busy, setBusy] = useState('');
   const load = () => api.get('/api/imports').then(setD).catch((e) => toast(e.message, { error: true }));
-  useEffect(() => { load(); const t = setInterval(load, 30000); return () => clearInterval(t); }, []);
+  useEffect(() => {
+    load(); const t = setInterval(load, 15000);
+    if (importMsg && IMPORT_MSG[importMsg]) toast(IMPORT_MSG[importMsg], { error: importMsg !== 'started' });
+    return () => clearInterval(t);
+  }, []);
   if (!d) return <div className="spinner" />;
   const p = d.providers[f.provider];
+  const set = (k) => (e) => { setFound(null); setF({ ...f, [k]: e.target.value }); };
+  const test = async () => {
+    setBusy('test');
+    try { const r = await api.post('/api/imports/test', f); setFound(r); } catch (err) { toast(err.message, { error: true }); } finally { setBusy(''); }
+  };
+  const start = async (e) => {
+    e.preventDefault(); setBusy('start');
+    try { await api.post('/api/imports', f); toast('Import started. Mail appears within 20 minutes.'); setF({ ...f, user: '', password: '' }); setFound(null); load(); }
+    catch (err) { toast(err.message, { error: true }); } finally { setBusy(''); }
+  };
+  const upload = (url, done) => async (e) => {
+    const file = e.target.files?.[0]; e.target.value = '';
+    if (!file) return;
+    const fd = new FormData(); fd.append('file', file);
+    setBusy(url);
+    try { const r = await api.form(url, fd); toast(done(r)); load(); } catch (err) { toast(err.message, { error: true }); } finally { setBusy(''); }
+  };
+  const ready = d.imports.some((r) => r.readyToSwitch);
   return (
-    <div className="settings-section">
-      <p className="muted small">Copy all your email and folders from your old account. It keeps checking for new mail every 20 minutes until you stop it, so you can switch over gradually.</p>
-      {d.jobs.map((j) => (
-        <div key={j.id} className="rule-item">
-          <Icon name="import" />
-          <div className="rule-text"><b>{j.user}</b><small className="muted">{j.host} · {j.running ? 'Importing now…' : j.lastRun ? `Last run ${fmtDate(new Date(j.lastRun.replace(' ', 'T')).toISOString())}${j.success === false ? ' · problem: check the password' : ''}` : 'Waiting to start (within 20 minutes)'}</small></div>
-          <button className="btn sm" onClick={async () => { await api.patch('/api/imports', { id: j.id, active: !j.active }); load(); }}>{j.active ? 'Pause' : 'Resume'}</button>
-          <button className="icon-btn" title="Stop & remove" onClick={async () => { if (confirm('Stop importing from this account? Mail already copied stays.')) { await api.del('/api/imports', { id: j.id }); load(); } }}><Icon name="trash" size={16} /></button>
+    <div className="settings-section import">
+      <p className="muted small">Bring your mail, folders, contacts and calendar from your old account. Mail keeps syncing for {d.syncDays} days, so you can switch over at your own pace.</p>
+      {ready && <ReadyToSwitch me={me} />}
+      {d.imports.map((r) => <ImportRow key={r.id} r={r} onChange={load} />)}
+      {d.jobs.map((j) => <ImportRow key={`j${j.id}`} r={{ id: null, user: j.user, label: j.host, kind: 'syncjob', status: j.active ? 'active' : 'paused', running: j.running, lastRun: j.lastRun, success: j.success }} onChange={load} />)}
+
+      <h3>1. Copy your email</h3>
+      <div className="provider-pick">
+        {Object.entries(d.providers).map(([k, v]) => <button type="button" key={k} className={`chip ${f.provider === k ? 'on' : ''}`} onClick={() => { setFound(null); setF({ ...f, provider: k }); }}>{v.label}</button>)}
+      </div>
+      {p.oauth ? (
+        <div className="card form">
+          <div className="callout info"><Icon name="lock" size={16} /><small>{p.help}</small></div>
+          {p.oauthReady
+            ? <button className="btn primary" disabled={!!busy} onClick={async () => { setBusy('ms'); try { location.assign((await api.get('/api/imports/outlook/start')).url); } catch (err) { toast(err.message, { error: true }); setBusy(''); } }}>Sign in with Microsoft</button>
+            : <small className="muted">Microsoft sign-in isn't switched on for this server yet. Use the file upload below for now.</small>}
         </div>
-      ))}
-      <form className="card form" onSubmit={async (e) => {
-        e.preventDefault(); setBusy(true);
-        try { await api.post('/api/imports', f); toast('Import started. Your mail will start appearing within 20 minutes.'); setF({ ...f, user: '', password: '' }); load(); }
-        catch (err) { toast(err.message, { error: true }); } finally { setBusy(false); }
-      }}>
-        <div className="provider-pick">
-          {Object.entries(d.providers).map(([k, v]) => <button type="button" key={k} className={`chip ${f.provider === k ? 'on' : ''}`} onClick={() => setF({ ...f, provider: k })}>{v.label}</button>)}
-        </div>
-        {f.provider === 'other' && <label>IMAP server<input value={f.host} placeholder="imap.example.com" onChange={(e) => setF({ ...f, host: e.target.value })} required /></label>}
-        <label>Old email address<input type="email" value={f.user} onChange={(e) => setF({ ...f, user: e.target.value })} required /></label>
-        <label>{f.provider === 'other' ? 'Password' : 'App password'}<input type="password" value={f.password} onChange={(e) => setF({ ...f, password: e.target.value })} required autoComplete="off" /></label>
-        <div className="callout info"><Icon name="lock" size={16} /><small>{p.help} An app password only allows mail access and can be revoked any time. Your main password is never needed.</small></div>
-        <button className="btn primary" disabled={busy}>{busy ? 'Starting…' : 'Start import'}</button>
-      </form>
+      ) : (
+        <form className="card form" onSubmit={start}>
+          {f.provider === 'other' && <label>IMAP server<input value={f.host} placeholder="imap.example.com" onChange={set('host')} required /></label>}
+          <label>Old email address<input type="email" value={f.user} onChange={set('user')} required autoComplete="off" /></label>
+          <label>{f.provider === 'other' ? 'Password' : 'App password'}<input type="password" value={f.password} onChange={set('password')} required autoComplete="new-password" /></label>
+          <div className="callout info"><Icon name="lock" size={16} /><small>{p.help} {p.appPasswordUrl && <a href={p.appPasswordUrl} target="_blank" rel="noreferrer">Open the app password page</a>} An app password only allows mail access and can be revoked any time. We never see or keep your main password.</small></div>
+          {found && <div className="callout ok"><Icon name="check" size={16} /><small>Connected. Found about <b>{found.messages.toLocaleString()}</b> messages in {found.folders} folders.</small></div>}
+          <div className="row-btns">
+            <button type="button" className="btn" disabled={!!busy || !f.user || !f.password} onClick={test}>{busy === 'test' ? 'Checking…' : 'Test connection'}</button>
+            <button className="btn primary" disabled={!!busy}>{busy === 'start' ? 'Starting…' : 'Start import'}</button>
+          </div>
+        </form>
+      )}
+      <details className="card">
+        <summary><b>Or upload an export file</b> <span className="muted small">(.mbox: Google Takeout, Apple Mail, Thunderbird; Outlook .pst converted to .mbox)</span></summary>
+        <p className="muted small">Messages go into a folder called <b>Imported</b>. Outlook desktop can't save .mbox directly: open the .pst in Thunderbird (free) with the ImportExportTools add-on and export the folders as .mbox.</p>
+        <label className="btn">{busy === '/api/imports/upload' ? 'Uploading…' : 'Choose .mbox file'}<input type="file" accept=".mbox,.mbx,application/mbox" hidden onChange={upload('/api/imports/upload', (r) => `Uploaded. Copying into ${r.folder}…`)} /></label>
+      </details>
+
+      <h3>2. Contacts and calendar</h3>
+      <div className="row-btns left">
+        <label className="btn">{busy === '/api/address-contacts/import' ? 'Importing…' : 'Import contacts (.vcf)'}<input type="file" accept=".vcf,text/vcard" hidden onChange={upload('/api/address-contacts/import', (r) => `Imported ${r.imported ?? r.count ?? ''} contacts`)} /></label>
+        <label className="btn">{busy === '/api/calendar/import' ? 'Importing…' : 'Import calendar (.ics)'}<input type="file" accept=".ics,text/calendar" hidden onChange={upload('/api/calendar/import', (r) => `Imported ${r.imported} events${r.existing ? ` (${r.existing} were already here)` : ''}`)} /></label>
+      </div>
+      <p className="muted small">Gmail: contacts.google.com → Export → vCard; calendar.google.com → Settings → Import & export → Export. Outlook: People → Manage → Export contacts; Calendar → Shared calendars → Publish → ICS.</p>
     </div>
   );
 }

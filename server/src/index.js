@@ -11,6 +11,7 @@ import { sharedboxes } from './sharedboxes.js';
 import { archive } from './archive.js';
 import { push, startPush, pushStats, notify } from './push.js';
 import { tasksApi, startReminders, setReminderNotifier } from './tasks.js';
+import { importsApi, importsPublic, startImports, setImportNotifier } from './imports.js';
 import { sendSystemMail } from './recovery.js';
 import { help } from './help.js';
 import { hosts, siteRouter } from './hosts.js';
@@ -85,6 +86,7 @@ app.use(publicAssets);
 app.use(deviceSetup);
 app.use(legalPages);
 app.use('/api', publicSecurity);
+app.use('/api', importsPublic); // Microsoft sign-in callback for imports (no session: sealed state)
 app.use('/api', publicRecovery);
 app.use('/api', requireSetupApi); // server tool may call with a signed request (no session)
 app.use('/api/setup', requireAuth);
@@ -99,6 +101,7 @@ app.use('/api', spam);
 app.use('/api', deviceSetupApi);
 app.use('/api', privacy);
 app.use('/api', tasksApi);
+app.use('/api', importsApi);
 app.use('/api', calendar);
 app.use('/api', contacts);
 app.use('/api', groups);
@@ -136,6 +139,12 @@ setReminderNotifier(async (email, n) => {
   await sendSystemMail(email, n.title, `<p style="font-family:Segoe UI,Arial,sans-serif;font-size:14px">${esc(n.body)}</p><p><a href="${esc(config.publicUrl || '')}${n.url}">Open ${esc(config.appName)}</a></p>`);
 });
 startReminders();
+setImportNotifier(async (email, n) => {
+  if (await notify(email, { title: n.title, body: n.body, tag: `import-${Date.now()}`, url: n.url })) return;
+  const esc = (x) => String(x).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]);
+  await sendSystemMail(email, n.title, `<p style="font-family:Segoe UI,Arial,sans-serif;font-size:14px">${esc(n.body)}</p>`);
+});
+startImports();
 gauge('push_watchers', () => pushStats().watching);
 if (config.runsBackground) {
   await startJobs();

@@ -1008,3 +1008,14 @@ input, select, textarea { border-radius: 8px; }
   .tmsg-body { padding-left: 16px; }
   .img-banner, .unsub, .attachments { margin-left: 16px; padding-left: 0; }
 }
+
+/* Item 6: importing old mail */
+.settings-section.import h3 { margin: 24px 0 8px; font-size: var(--fs-md); }
+.import-row { display: flex; align-items: flex-start; gap: 12px; padding: 12px 0; border-bottom: 1px solid var(--border); }
+.import-row .rule-text { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.import-row .meter { margin-top: 4px; }
+.row-btns { display: flex; gap: 8px; justify-content: flex-end; flex-wrap: wrap; }
+.row-btns.left { justify-content: flex-start; }
+details.card { padding: 12px 16px; margin-top: 12px; }
+details.card summary { cursor: pointer; }
+.callout.ok { background: color-mix(in srgb, var(--ok) 10%, transparent); color: var(--text); }
