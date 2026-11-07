@@ -95,7 +95,9 @@ reputationApi.get('/super/reputation', requireAuth, wrap(async (req, res) => {
 }));
 
 async function sendReport(r) {
-  const to = [...new Set([...config.superAdmins, config.legal.abuse].filter(Boolean))];
+  // REPORT_EMAILS overrides who gets it (comma-separated); default: super-admins and abuse@
+  const custom = String(process.env.REPORT_EMAILS || '').split(',').map((x) => x.trim()).filter(Boolean);
+  const to = [...new Set(custom.length ? custom : [...config.superAdmins, config.legal.abuse].filter(Boolean))];
   if (!to.length) return false;
   return sendSystemMail(to, `${config.appName} sending report: ${r.advice}`, reportHtml(r)).catch(() => false);
 }
