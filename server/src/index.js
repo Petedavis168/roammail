@@ -12,6 +12,8 @@ import { archive } from './archive.js';
 import { push, startPush, pushStats } from './push.js';
 import { help } from './help.js';
 import { hosts, siteRouter } from './hosts.js';
+import { requireAuth } from './session.js';
+import { setupApi, requireSetupApi } from './setup.js';
 import { abuseDesk, outboundAdmin, startOutboundChecks } from './outbound.js';
 import { ops, metricsMiddleware, startMetricsLog, gauge, startDbBackups } from './ops.js';
 import { q } from './db.js';
@@ -49,7 +51,7 @@ app.use(helmet({
 app.use(metricsMiddleware);
 app.use(billingWebhook); // Stripe → raw body, verified by signature
 app.use(cookieParser());
-app.use(express.json({ limit: '2mb' }));
+app.use(express.json({ limit: '2mb', verify: (req, res, buf) => { req.rawBody = buf; } }));
 app.use((req, res, next) => {
   res.setHeader('Permissions-Policy', 'camera=(), microphone=(), geolocation=(), payment=(), usb=(), interest-cohort=()');
   res.setHeader('Cross-Origin-Opener-Policy', 'same-origin');
@@ -82,6 +84,9 @@ app.use(deviceSetup);
 app.use(legalPages);
 app.use('/api', publicSecurity);
 app.use('/api', publicRecovery);
+app.use('/api', requireSetupApi); // server tool may call with a signed request (no session)
+app.use('/api/setup', requireAuth);
+app.use('/api', setupApi);
 app.use('/api', publicAccounts);
 app.use('/api', api);
 app.use('/api', accounts);

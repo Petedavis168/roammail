@@ -1,14 +1,16 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { api } from '../api.js';
 import { Icon } from '../icons.jsx';
 import { useToast } from './Toast.jsx';
 
 /** QR → code → backup codes. Calls onDone() once 2-step verification is on and codes are saved. */
-export default function TwoFactorSetup({ email, onDone, startLabel = 'Turn on 2-step verification' }) {
+export default function TwoFactorSetup({ email, onDone, startLabel = 'Turn on 2-step verification', autoStart = false }) {
   const toast = useToast();
   const [setup, setSetup] = useState(null);
   const [code, setCode] = useState('');
   const [codes, setCodes] = useState(null);
+  const [saved, setSaved] = useState(false);
+  useEffect(() => { if (autoStart && !setup) run(() => api.post('/api/security/2fa/setup')).then((r) => r && setSetup(r)); }, []);
   const run = async (fn) => { try { return await fn(); } catch (e) { toast(e.message, { error: true }); return null; } };
 
   if (codes) {
@@ -20,7 +22,10 @@ export default function TwoFactorSetup({ email, onDone, startLabel = 'Turn on 2-
         <div className="step-actions" style={{ justifyContent: 'flex-start' }}>
           <button className="btn" onClick={() => { navigator.clipboard?.writeText(codes.join('\n')); toast('Copied'); }}><Icon name="copy" size={14} /> Copy</button>
           <button className="btn" onClick={() => { const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([`Backup codes for ${email}\n\n${codes.join('\n')}\n`])); a.download = 'backup-codes.txt'; a.click(); }}>Download</button>
-          <button className="btn primary" onClick={() => { setCodes(null); onDone?.(); }}>I've saved them</button>
+        </div>
+        <label className="check"><input type="checkbox" checked={saved} onChange={(e) => setSaved(e.target.checked)} /> I saved my backup codes somewhere safe</label>
+        <div className="step-actions">
+          <button className="btn primary" disabled={!saved} onClick={() => { setCodes(null); onDone?.(); }}>Continue</button>
         </div>
       </div>
     );

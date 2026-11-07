@@ -1,5 +1,6 @@
 // Outbound spam watchdog, abuse desk and sending holds. Needs the dev stack (dev/start-stack.sh) on a fresh data folder.
 import { test } from 'node:test';
+import { finishSetup } from './setup-helper.js';
 import assert from 'node:assert/strict';
 import crypto from 'node:crypto';
 
@@ -22,6 +23,7 @@ class Client {
     const res = await fetch(BASE + path, { method, headers, body: payload, redirect: 'manual' });
     for (const c of res.headers.getSetCookie?.() || []) if (c.startsWith('mc_session=')) this.cookie = c.split(';')[0];
     const text = await res.text(); let data; try { data = JSON.parse(text); } catch { data = text; }
+    if (this.autoSetup !== false && method === 'POST' && /^\/api\/(login|login\/2fa|signup|password\/reset)$/.test(path) && res.status === 200 && data?.setupRequired?.length) this.password = await finishSetup((m, p, b) => this.req(m, p, b), data, body?.password);
     return { status: res.status, data };
   }
   get(p) { return this.req('GET', p); }

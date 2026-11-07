@@ -29,6 +29,8 @@ const PAYLOADS = {
 test('malicious email content cannot run code or overlay the app (reading, reply, forward)', async () => {
   const { cookie } = await api('/api/signup', { name: 'E2E', username: user, password: PW, acceptTerms: true });
   assert.ok(cookie, 'signed up');
+  // first sign-in setup: postpone 2-step verification and finish the welcome wizard (tested in setup.test.js)
+  await api('/api/setup/2fa/remind', {}, cookie); await api('/api/setup/step', { step: 'done' }, cookie);
   await new Promise((r) => setTimeout(r, 1500));
   for (const [subject, html] of Object.entries(PAYLOADS)) {
     const fd = new FormData(); fd.append('to', `${user}@${D}`); fd.append('subject', subject); fd.append('html', html);

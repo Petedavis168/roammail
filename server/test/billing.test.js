@@ -1,5 +1,6 @@
 // Billing integration tests: needs the stack from dev/start-stack.sh (mock mailcow + mock Stripe, DEV_SKIP_DNS_VERIFY).
 import { test } from 'node:test';
+import { finishSetup } from './setup-helper.js';
 import assert from 'node:assert/strict';
 import crypto from 'node:crypto';
 const D = process.env.TEST_DOMAIN || 'free.test'; // the sign-up domain of the server under test
@@ -18,6 +19,7 @@ class Client {
     const r = await fetch(BASE + path, { method, headers, body: body === undefined ? undefined : JSON.stringify(body) });
     for (const c of r.headers.getSetCookie?.() || []) if (c.startsWith('mc_session=')) this.cookie = c.split(';')[0];
     const t = await r.text(); let data; try { data = JSON.parse(t); } catch { data = t; }
+    if (this.autoSetup !== false && method === 'POST' && /^\/api\/(login|login\/2fa|signup|password\/reset)$/.test(path) && r.status === 200 && data?.setupRequired?.length) this.password = await finishSetup((m, p, b) => this.req(m, p, b), data, body?.password);
     return { status: r.status, data };
   }
   get(p) { return this.req('GET', p); }

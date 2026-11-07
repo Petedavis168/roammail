@@ -1,6 +1,7 @@
 import { broadcast, onBroadcast, counter } from './shared.js';
 import { resolveMailboxId } from './mailboxids.js';
 import { onStoredCredentialsRejected } from './imap.js';
+import { setupGate } from './setup.js';
 // Server-side sessions. The browser cookie is an opaque random token; the mailbox password
 // is stored only on the server, encrypted (AES-256-GCM) with a key derived from SESSION_SECRET.
 import crypto from 'node:crypto';
@@ -156,20 +157,7 @@ export async function requireAuth(req, res, next) {
   req.user = { email: s.email, password: creds.password, name: s.name, sid: id, userId: s.user_id || null };
   req.accounts = live.map((x) => ({ email: x.s.email, name: x.s.name }));
 
-  // 2-step verification enforcement
-  const path = (req.originalUrl || '').split('?')[0];
-  const setupPaths = /^\/api\/(me|logout|events|security(\/2fa\/(setup|enable))?|security\/sessions|signup\/config)$/;
-  const pol = await twoFactorPolicy(s.email);
-  if (!pol.enabled) {
-    if (pol.requiredByOrg && !setupPaths.test(path)) {
-      return res.status(403).json({ error: 'Your organization requires 2-step verification. Set it up to continue.', code: '2fa_required' });
-    }
-    if (config.requireAdmin2fa && /^\/api\/(admin|super)\//.test(path)) {
-      const r = await rolesFor(s.email);
-      if (r.superAdmin || r.orgs.some((o) => o.role === 'admin')) {
-        return res.status(403).json({ error: 'Admins must turn on 2-step verification first (Settings → Security).', code: 'admin_2fa_required' });
-      }
-    }
-  }
+  // First sign-in setup: temporary password replaced + 2-step verification (see setup.js)
+  if (!(await setupGate(req, res))) return;
   next();
 }

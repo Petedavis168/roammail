@@ -20,6 +20,7 @@ const call = async (base, method, path, body, cookie) => {
 test('a session made on one server works on the other', async () => {
   const s = await call(A, 'POST', '/api/signup', { name: 'Multi', username: `ms${Date.now() % 1e6}`, password: PW, acceptTerms: true });
   assert.equal(s.status, 200, JSON.stringify(s.data));
+  await call(A, 'POST', '/api/setup/2fa/remind', {}, s.cookie); await call(A, 'POST', '/api/setup/step', { step: 'done' }, s.cookie);
   await sleep(1500);
   const me = await call(B, 'GET', '/api/me', null, s.cookie);
   assert.equal(me.status, 200);
