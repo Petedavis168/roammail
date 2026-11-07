@@ -166,6 +166,18 @@ test('admins must use 2FA; companies can require it; external forwarding off by 
   assert.equal((await owner.post('/api/admin/users', { domain, localPart: 'emp', name: 'Emp', password: PW, welcome: false })).status, 200);
   await sleep(1500);
   const emp = new Client(); assert.equal((await emp.post('/api/login', { email: `emp@${domain}`, password: PW })).status, 200);
+  // 4a: "Send temporary password": two words + 4 digits; shown to the admin only when there's no address to email it to
+  assert.ok([403, 404].includes((await emp.post('/api/admin/users/temp-password', { email: `owner@${D}` })).status), 'only admins of that domain');
+  const tp = await owner.post('/api/admin/users/temp-password', { email: `emp@${domain}` });
+  assert.equal(tp.status, 200, JSON.stringify(tp.data)); assert.equal(tp.data.sent, false);
+  assert.match(tp.data.password, /^[A-Z][a-z]+[A-Z][a-z]+[2-9]{4}$/); assert.doesNotMatch(tp.data.password, /[lioIO01]/, 'no look-alike characters');
+  assert.equal((await emp.get('/api/me')).status, 401, 'old sessions signed out');
+  const emp2 = new Client(); emp2.autoSetup = false;
+  const relog = await emp2.post('/api/login', { email: `emp@${domain}`, password: tp.data.password });
+  assert.equal(relog.status, 200); assert.ok(relog.data.setupRequired.includes('password'), 'must choose a new password');
+  emp.cookie = ''; // signs in with the temporary password and chooses a new one (the helper does the wizard)
+  assert.equal((await emp.post('/api/login', { email: `emp@${domain}`, password: tp.data.password })).status, 200);
+  assert.equal((await emp.get('/api/folders')).status, 200);
   // external forwarding blocked by default, internal allowed
   assert.equal((await emp.post('/api/filters/server', { desc: 'fw', script: 'redirect "x@elsewhere.test";' })).status, 403);
   assert.equal((await emp.req('PUT', '/api/rules', { rules: [{ name: 'r', conditions: [{ field: 'from', value: 'x' }], actions: [{ type: 'forward', value: `boss@${domain}` }] }] })).status, 200);
@@ -176,6 +188,19 @@ test('admins must use 2FA; companies can require it; external forwarding off by 
   assert.equal((await emp.get('/api/me')).status, 200);
   // other orgs can't be touched
   assert.equal((await emp.get(`/api/admin/users?domain=${domain}`)).status, 403);
+  // 4a: with a recovery address on file the temporary password is emailed there (from no-reply), not shown to the admin
+  const personal = new Client(); const personalEmail = await signup(personal, `rc${run}`); // stands in for their personal mailbox
+  assert.equal((await emp.req('PUT', '/api/security/recovery-email', { email: personalEmail, password: emp.password })).status, 200);
+  await sleep(1500);
+  const pBox = await personal.get('/api/messages?folder=INBOX'); assert.equal(pBox.status, 200, JSON.stringify(pBox.data));
+  const code = /^(\d{6}) is your/.exec(pBox.data.messages.find((m) => /is your Roammail verification code/.test(m.subject))?.subject || '')?.[1];
+  assert.ok(code, 'verification code arrived');
+  assert.equal((await emp.post('/api/security/recovery-email/verify', { code })).status, 200);
+  const sent = await owner.post('/api/admin/users/temp-password', { email: `emp@${domain}` });
+  assert.equal(sent.data.sent, true, JSON.stringify(sent.data)); assert.equal(sent.data.password, undefined); assert.match(sent.data.to, /^r•+@/);
+  await sleep(1500);
+  const box = (await personal.get('/api/messages?folder=INBOX')).data.messages;
+  assert.ok(box.some((m) => m.subject === 'Your temporary Roammail password'), 'arrived at the recovery address');
 });
 
 test('privacy: export as mbox and delete account', async () => {

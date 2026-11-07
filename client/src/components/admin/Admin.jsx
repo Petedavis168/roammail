@@ -17,12 +17,7 @@ import SharedMailboxes from './SharedMailboxes.jsx';
 import Archive from './Archive.jsx';
 import { TemplatesEditor } from '../settings/Templates.jsx';
 
-const genPassword = () => {
-  const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnpqrstuvwxyz23456789';
-  const a = crypto.getRandomValues(new Uint32Array(14));
-  let p = [...a].map((n) => chars[n % chars.length]).join('');
-  return `${p.slice(0, 5)}-${p.slice(5, 10)}-${p.slice(10)}${a[0] % 10}`;
-};
+import { tempPassword as genPassword } from '../../temppass.js'; // two words + 4 digits, no look-alike characters (4a)
 
 function Modal({ title, onClose, children }) {
   return (
@@ -188,8 +183,14 @@ function Users({ org, domains }) {
             <span className="actions">
               <button className="btn sm" onClick={() => setEdit(u)}>Edit</button>
               <button className="btn sm" title="Email a new set-password link" onClick={async () => { const to = prompt(`Send ${u.email} a new invite link. Their current email:`); if (!to) return; try { await api.post('/api/admin/users/invite', { email: u.email, name: u.name, inviteEmail: to }); alert(`Invite sent to ${to}`); } catch (e) { alert(e.message); } }}>Resend invite</button>
-              <button className="btn sm" onClick={() => { const p = genPassword(); if (confirm(`Reset password for ${u.email}?`)) update(u.email, { password: p }, 'Password reset').then(() => setCreated({ email: u.email, password: p, reset: true })); }}>
-                <Icon name="key" size={14} /> Reset</button>
+              <button className="btn sm" title="Make a new temporary password and email it to their own (recovery) address" onClick={async () => {
+                if (!confirm(`Send ${u.email} a temporary password? They'll be signed out everywhere and must choose a new password when they sign in.`)) return;
+                try {
+                  const r = await api.post('/api/admin/users/temp-password', { email: u.email });
+                  if (r.sent) alert(`Temporary password sent to ${r.to}`);
+                  else setCreated({ email: u.email, password: r.password, reset: true });
+                } catch (e) { alert(e.message); }
+              }}><Icon name="key" size={14} /> Send temporary password</button>
               {u.twoFactor && <button className="btn sm" title="Turn off 2-step verification (lost phone)" onClick={() => { if (confirm(`Turn off 2-step verification for ${u.email}? They'll be signed out and asked to set it up again.`)) update(u.email, { reset2fa: true }, '2-step verification reset'); }}>
                 <Icon name="shield" size={14} /> Reset 2-step</button>}
               <button className="icon-btn" title="Delete user" onClick={() => del(u)}><Icon name="trash" size={16} /></button>
