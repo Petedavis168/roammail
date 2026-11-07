@@ -1019,3 +1019,4 @@ input, select, textarea { border-radius: 8px; }
 details.card { padding: 12px 16px; margin-top: 12px; }
 details.card summary { cursor: pointer; }
 .callout.ok { background: color-mix(in srgb, var(--ok) 10%, transparent); color: var(--text); }
+.g-alts { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-top: 8px; } .g-alts small { width: 100%; color: var(--muted); } .g-alts .g-chip { cursor: pointer; }

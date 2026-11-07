@@ -155,6 +155,14 @@ test('first-name rule: customers cannot take a bare first name; staff can be giv
   const sug = (await c.get('/api/signup/suggest?first=John&last=Quill')).data.suggestions;
   assert.ok(sug.length && !sug.includes('john'), JSON.stringify(sug));
   assert.equal((await c.get(`/api/signup/check?username=john.q${run}`)).data.available, true);
+  // refused or taken: alternatives built from their name, never a bare first name
+  const alt = (await c.get(`/api/signup/check?username=john&first=John&last=Quill${run}`)).data;
+  assert.ok(alt.alternatives.length >= 3, JSON.stringify(alt)); assert.ok(alt.alternatives.every((a) => a.replace(/[._-]/g, '') !== 'john' && a.startsWith('john')), JSON.stringify(alt.alternatives));
+  // only a first name, and a very common one: still gets suggestions (numbers added)
+  const only = (await c.get('/api/signup/suggest?first=John&count=3')).data.suggestions;
+  assert.equal(only.length, 3); assert.ok(!only.includes('john'));
+  const gen = (await c.get(`/api/signup/suggest?first=Ann&last=Lee${run}&shuffle=1`)).data.suggestions;
+  assert.equal(gen.length, 3);
   // only super-admins create staff addresses
   const a = new Client(); await signup(a, `nosuper${run}`);
   assert.equal((await a.post('/api/super/staff-mailboxes', { localPart: 'john', name: 'John' })).status, 403);

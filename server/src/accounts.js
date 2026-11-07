@@ -86,23 +86,46 @@ async function aliasesCached() {
 }
 const usernameHint = (local) => (local.length < 3 ? 'Use at least 3 characters' : !LOCAL_RE.test(local) ? 'Use only letters, numbers, dots, dashes and underscores' : RESERVED.has(local) ? 'That name is reserved' : isBareFirstName(local) ? FIRST_NAME_HINT : null);
 
+// Address ideas from the person's name (and what they typed). Never a bare first name, a reserved word or a taken
+// address: addressAvailable() checks each one. If the obvious ones are gone, a number is added so there are always some.
+const normName = (s) => String(s || '').normalize('NFKD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/[^a-z0-9]/g, '').slice(0, 20);
+async function addressIdeas({ first, last, want, count = 3, shuffle = false }) {
+  const f = normName(first); const l = normName(last); const w = String(want || '').toLowerCase().replace(/[^a-z0-9._-]/g, '').replace(/^[._-]+|[._-]+$/g, '').slice(0, 30);
+  const yy = new Date().getFullYear() % 100;
+  const n2 = () => crypto.randomInt(10, 100); const n3 = () => crypto.randomInt(100, 1000);
+  let ideas = [
+    w && l && !w.includes(l) && `${w}.${l}`, w && l && !w.includes(l) && `${w}${l}`, w && l && !w.includes(l) && `${w}.${l[0]}`,
+    f && l && `${f}.${l}`, f && l && `${f}${l}`, f && l && `${f[0]}${l}`, f && l && `${f}.${l[0]}`, f && l && `${l}.${f}`, f && l && `${f}${l}${yy}`,
+    w && `${w}${n2()}`, w && `${w}.${n3()}`,
+    f && `${f}${l ? `.${l}` : ''}${n2()}`, f && `${f}${yy}`, f && l && `${f[0]}${l}${n2()}`, f && `${f}.${n3()}`,
+  ].filter((x) => x && x.length >= 3 && x.length <= 40);
+  ideas = [...new Set(ideas)];
+  if (shuffle) ideas.sort(() => crypto.randomInt(3) - 1);
+  const out = [];
+  for (const i of ideas) { if (out.length >= count) break; if (await addressAvailable(i)) out.push(i); }
+  // still short (very common name): keep adding numbers to the best base
+  const base = (l && f ? `${f}.${l}` : f || w || 'mail').slice(0, 30);
+  for (let tries = 0; out.length < count && tries < 12; tries++) {
+    const c = `${base}${tries < 6 ? n2() : n3()}`;
+    if (!out.includes(c) && await addressAvailable(c)) out.push(c);
+  }
+  return out;
+}
+
 publicAccounts.get('/signup/check', rateLimit({ windowMs: 60_000, limit: 60 }), wrap(async (req, res) => {
   const local = String(req.query.username || '').toLowerCase().trim();
   const hint = usernameHint(local);
-  if (hint) return res.json({ available: false, reason: hint });
-  res.json({ available: await addressAvailable(local) });
+  const available = !hint && await addressAvailable(local);
+  if (available) return res.json({ available: true });
+  // Not allowed or taken: offer alternatives built from their name and what they typed
+  const alternatives = await addressIdeas({ first: req.query.first, last: req.query.last, want: local });
+  res.json({ available: false, ...(hint ? { reason: hint } : {}), alternatives });
 }));
 
-// Gmail-style suggestions from the person's name
+// Gmail-style suggestions from the person's name; ?shuffle=1 for "Generate one for me"
 publicAccounts.get('/signup/suggest', rateLimit({ windowMs: 60_000, limit: 30 }), wrap(async (req, res) => {
-  const norm = (s) => String(s || '').normalize('NFKD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/[^a-z0-9]/g, '').slice(0, 20);
-  const f = norm(req.query.first); const l = norm(req.query.last);
-  const year = new Date().getFullYear();
-  const ideas = [...new Set([f && l && `${f}.${l}`, f && l && `${f}${l}`, f && l && `${f[0]}${l}`, f && l && `${f}.${l[0]}`, f && l && `${f}${l}${year % 100}`,
-    f && `${f}${l ? `.${l}` : ''}${Math.floor(10 + Math.random() * 89)}`, f && l && `${l}.${f}`, f && `${f}${year}`].filter(Boolean))];
-  const out = [];
-  for (const i of ideas) { if (out.length >= 3) break; if (await addressAvailable(i)) out.push(i); }
-  res.json({ domain: config.signup.domain, suggestions: out });
+  const suggestions = await addressIdeas({ first: req.query.first, last: req.query.last, count: Math.min(5, Number(req.query.count) || 3), shuffle: req.query.shuffle === '1' });
+  res.json({ domain: config.signup.domain, suggestions });
 }));
 
 publicAccounts.post('/signup', rateLimit({ windowMs: 60 * 60_000, limit: 10 }), wrap(async (req, res) => {
