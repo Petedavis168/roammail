@@ -27,7 +27,7 @@ async function mailer() {
 export async function sendSystemMail(to, subject, html, text) {
   const m = await mailer();
   if (!m) return false;
-  await m.sendMail({ from: { name: config.appName, address: config.systemMail.from }, to, subject, html, text: text || html.replace(/<[^>]+>/g, '') });
+  await m.sendMail({ from: { name: config.appName, address: config.systemMail.from }, to, subject, html, text: text || html.replace(/<[^<>]*>/g, '') });
   return true;
 }
 const frame = (title, body) => `<div style="font-family:Segoe UI,Arial,sans-serif;font-size:14px;color:#242424;max-width:560px"><h2 style="color:#244960;margin:0 0 10px">${esc(title)}</h2>${body}<p style="color:#888;font-size:12px;margin-top:24px">${esc(config.appName)} will never ask for your password by email.</p></div>`;

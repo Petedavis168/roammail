@@ -91,7 +91,8 @@ export async function hold(email, reason, evidence, actor = 'watchdog') {
     ON CONFLICT(email) DO UPDATE SET status = excluded.status, reason = excluded.reason, evidence = excluded.evidence, at = excluded.at, lifted_by = NULL`,
   e, status, reason, JSON.stringify(evidence || {}).slice(0, 4000), Date.now());
   await audit(actor, null, `outbound.${status}`, { email: e, reason });
-  console.warn(`SECURITY_OUTBOUND_${status.toUpperCase()} account=${e} reason=${reason}`);
+  const oneLine = (v) => String(v).replace(/[\r\n\t]+/g, ' ').slice(0, 300); // no forged log lines
+  console.warn(`SECURITY_OUTBOUND_${status.toUpperCase()} account=${oneLine(e)} reason=${oneLine(reason)}`);
   const html = `<p>We ${status === 'held' ? 'paused sending from' : 'noticed unusual sending from'} <b>${esc(e)}</b>: ${esc(reason)}.</p>
 <p>This usually means someone else knows the password. Please <b>change your password</b> and turn on 2-step verification in Settings → Security.</p>
 ${status === 'held' ? '<p>You can still read your mail. Reply to this message or contact support to turn sending back on.</p>' : ''}`;

@@ -90,7 +90,7 @@ const usernameHint = (local) => (local.length < 3 ? 'Use at least 3 characters' 
 // address: addressAvailable() checks each one. If the obvious ones are gone, a number is added so there are always some.
 const normName = (s) => String(s || '').normalize('NFKD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/[^a-z0-9]/g, '').slice(0, 20);
 async function addressIdeas({ first, last, want, count = 3, shuffle = false }) {
-  const f = normName(first); const l = normName(last); const w = String(want || '').toLowerCase().replace(/[^a-z0-9._-]/g, '').replace(/^[._-]+|[._-]+$/g, '').slice(0, 30);
+  const f = normName(first); const l = normName(last); const w = String(want || '').slice(0, 64).toLowerCase().replace(/[^a-z0-9._-]/g, '').replace(/^[._-]+/, '').replace(/[._-]+$/, '').slice(0, 30);
   const yy = new Date().getFullYear() % 100;
   const n2 = () => crypto.randomInt(10, 100); const n3 = () => crypto.randomInt(100, 1000);
   let ideas = [
@@ -455,7 +455,7 @@ accounts.post('/admin/users', wrap(async (req, res) => {
 /** Minimal RFC 4180 CSV parser (quotes, commas and line breaks inside quotes). */
 export function parseCsv(text) {
   const rows = []; let row = []; let field = ''; let quoted = false;
-  const s = String(text || '').replace(/^\uFEFF/, '');
+  const s = String(text || '').slice(0, 2_000_000).replace(/^\uFEFF/, ''); // bounded (requests are capped at 2 MB anyway)
   for (let i = 0; i < s.length; i++) {
     const c = s[i];
     if (quoted) {
