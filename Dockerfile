@@ -1,5 +1,5 @@
 # ---- build the web app ----
-FROM public.ecr.aws/docker/library/node:22-alpine AS client
+FROM public.ecr.aws/docker/library/node:26-alpine AS client
 WORKDIR /app/client
 COPY client/package*.json ./
 RUN npm ci
@@ -7,7 +7,7 @@ COPY client/ ./
 RUN npm run build
 
 # ---- runtime ----
-FROM public.ecr.aws/docker/library/node:22-alpine
+FROM public.ecr.aws/docker/library/node:26-alpine
 RUN apk add --no-cache openssl
 # Trust Amazon RDS's certificate authority so the database connection is verified TLS
 ADD --chmod=644 https://truststore.pki.rds.amazonaws.com/global/global-bundle.pem /etc/ssl/rds-global-bundle.pem
