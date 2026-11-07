@@ -2,6 +2,24 @@ import { useEffect, useState } from 'react';
 import { Icon } from '../icons.jsx';
 import Signatures from './settings/Signatures.jsx';
 import Templates from './settings/Templates.jsx';
+import { pushState, enablePush, disablePush } from '../push.js';
+
+function PushToggle() {
+  const [state, setState] = useState('…');
+  const [err, setErr] = useState('');
+  useEffect(() => { pushState().then(setState); }, []);
+  if (state === 'unsupported') return <p className="muted small">This browser can't show notifications when Roammail is closed. On iPhone, add Roammail to your Home Screen first (Share → Add to Home Screen).</p>;
+  return (
+    <div className="small" style={{ margin: '6px 0' }}>
+      <label className="check"><input type="checkbox" checked={state === 'on'} disabled={state === 'blocked'} onChange={async (e) => {
+        setErr('');
+        try { if (e.target.checked) await enablePush(); else await disablePush(); setState(await pushState()); } catch (x) { setErr(x.message); setState(await pushState()); }
+      }} /> Notify me on this device even when Roammail is closed</label>
+      {state === 'blocked' && <div className="muted">Notifications are blocked for this site in your browser settings.</div>}
+      {err && <div className="bad">{err}</div>}
+    </div>
+  );
+}
 import Security from './settings/Security.jsx';
 import { AutoReply, Rules, ImportMail } from './settings/MailTools.jsx';
 import SpamSettings from './settings/Spam.jsx';
@@ -39,6 +57,7 @@ function General({ prefs, setPrefs, me }) {
         </div>
       )}
       <label className="check"><input type="checkbox" checked={prefs.notifications} onChange={set('notifications')} /> Desktop notifications for new mail</label>
+      <PushToggle />
       <h3>Categories</h3>
       {prefs.categories.map((c, i) => (
         <div key={i} className="cat-edit">

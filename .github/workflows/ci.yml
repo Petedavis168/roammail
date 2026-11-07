@@ -65,6 +65,9 @@ jobs:
       - name: Outbound spam watchdog and abuse desk tests
         run: npm run test:outbound --prefix server
 
+      - name: Push notification tests
+        run: npm run test:push --prefix server
+
       - name: Browser injection tests
         working-directory: server
         run: |

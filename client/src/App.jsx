@@ -1,3 +1,4 @@
+import { refreshPush } from './push.js';
 import { useEffect, useState } from 'react';
 import { api } from './api.js';
 import Login from './components/Login.jsx';
@@ -15,6 +16,7 @@ export default function App() {
   }, [theme]);
 
   const refreshMe = () => api.me().then(setMe).catch(() => setMe(null));
+  useEffect(() => { if (me) refreshPush(); }, [me?.email]); // keeps this device's notifications from expiring
   // Back from Stripe checkout: confirm the payment with the server (which asks Stripe directly)
   useEffect(() => {
     const p = new URLSearchParams(location.search);

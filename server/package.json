@@ -11,7 +11,8 @@
     "test:e2e": "node --disable-warning=ExperimentalWarning --test test/e2e.test.js",
     "test:billing": "node --disable-warning=ExperimentalWarning --test test/billing.test.js",
     "test:workspace": "node --disable-warning=ExperimentalWarning --test test/workspace.test.js",
-    "test:outbound": "node --test test/outbound.test.js"
+    "test:outbound": "node --test test/outbound.test.js",
+    "test:push": "node --test test/push.test.js"
   },
   "keywords": [],
   "author": "",
@@ -32,7 +33,8 @@
     "qrcode": "^1.5.4",
     "rate-limit-redis": "^4.3.1",
     "redis": "^5.12.1",
-    "sanitize-html": "^2.18.1"
+    "sanitize-html": "^2.18.1",
+    "web-push": "^3.6.7"
   },
   "type": "module"
 }
