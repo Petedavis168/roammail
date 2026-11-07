@@ -964,3 +964,47 @@ input, select, textarea { border-radius: 8px; }
 [data-theme='dark'] .rail-badge { color: #0F1418; }
 .acct-tag { font-size: 12px; color: var(--muted); margin-top: 2px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 @media (max-width: 899px) { .rail-accounts { display: none; } }
+
+/* Item 9: tasks / notes / follow-ups panel */
+.tasks-panel { width: 340px; flex: none; display: flex; flex-direction: column; background: var(--panel); border-left: 1px solid var(--border); min-height: 0; }
+.panel-head { display: flex; align-items: center; justify-content: space-between; border-bottom: 1px solid var(--border); padding-right: 8px; }
+.panel-head .tabs { border-bottom: 0; padding-top: 4px; }
+.panel-body { flex: 1; overflow-y: auto; padding: 12px 16px 24px; }
+.panel-h { margin: 16px 0 8px; font-size: 12px; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); }
+.panel-empty { color: var(--muted); font-size: var(--fs-xs); padding: 16px 4px; line-height: 1.5; }
+.panel-more { display: block; margin: 12px 0 4px; }
+.quick-add input { width: 100%; height: 40px; }
+.qa-hints { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
+.qa-hints .pill { display: inline-flex; align-items: center; gap: 4px; background: var(--brand-soft); color: var(--brand); padding: 2px 8px; border-radius: 999px; font-size: 12px; }
+.task { display: flex; align-items: flex-start; gap: 10px; padding: 10px 0; border-bottom: 1px solid var(--border); }
+.task input[type=checkbox] { margin-top: 3px; width: 16px; height: 16px; flex: none; }
+.task-main { flex: 1; min-width: 0; }
+.task-title { overflow-wrap: anywhere; }
+.task.done .task-title { text-decoration: line-through; color: var(--muted); }
+.task-meta { display: flex; flex-wrap: wrap; gap: 4px 10px; font-size: 12px; color: var(--muted); margin-top: 2px; }
+.task-meta span, .task-meta .link { display: inline-flex; align-items: center; gap: 3px; }
+.task-meta .link { padding: 0; font-weight: 500; font-size: 12px; max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.fu-due > .icon { color: var(--warn); } .fu-replied > .icon { color: var(--ok); }
+.note { padding: 10px 0; border-bottom: 1px solid var(--border); }
+.note-body { white-space: pre-wrap; overflow-wrap: anywhere; }
+.note-editor textarea { width: 100%; resize: vertical; min-height: 64px; }
+.note-editor .row-btns { display: flex; justify-content: flex-end; gap: 6px; margin-top: 6px; }
+.peek { background: var(--panel-2); border: 1px solid var(--border); border-radius: var(--radius); padding: 10px 12px; margin-bottom: 12px; }
+.peek-title { font-size: 12px; font-weight: 600; color: var(--muted); display: flex; gap: 6px; align-items: center; margin-bottom: 6px; }
+.peek-ev { display: flex; gap: 8px; font-size: var(--fs-xs); padding: 2px 0; }
+.peek-ev span { color: var(--muted); flex: none; min-width: 90px; }
+.peek-ev b { font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.icon-btn.on-dark.pressed { background: rgba(255,255,255,.2); }
+.menu kbd { margin-left: auto; font-size: 11px; }
+@media (max-width: 1279px) { .tasks-panel { position: absolute; right: 0; top: 0; bottom: 0; z-index: 32; box-shadow: var(--shadow); } }
+@media (max-width: 599px) { .tasks-panel { width: 100%; } }
+.panel-h { text-transform: none; letter-spacing: 0; font-size: 13px; }
+/* Narrow reading pane (e.g. with the tasks panel open): stack the message header like on phones */
+.reading { container-type: inline-size; }
+@container (max-width: 560px) {
+  .tmsg-head { flex-wrap: wrap; gap: 8px; }
+  .tmsg-actions .date { display: none; }
+  .who > div:first-child .muted { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .tmsg-body { padding-left: 16px; }
+  .img-banner, .unsub, .attachments { margin-left: 16px; padding-left: 0; }
+}

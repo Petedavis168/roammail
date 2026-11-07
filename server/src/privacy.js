@@ -100,7 +100,7 @@ privacy.post('/account/delete', wrap(async (req, res) => {
   await closeClient(req.user.sid);
   await mailcow.deleteMailbox(req.user.email);
   const e = req.user.email;
-  for (const t of ['user_security', 'user_settings', 'user_signatures', 'profiles', 'jobs', 'password_resets', 'setup_tokens']) await q.run(`DELETE FROM ${t} WHERE email = ?`, e);
+  for (const t of ['user_security', 'user_settings', 'user_signatures', 'profiles', 'jobs', 'password_resets', 'setup_tokens', 'tasks', 'notes', 'followups']) await q.run(`DELETE FROM ${t} WHERE email = ?`, e);
   await q.run('DELETE FROM members WHERE email = ?', e);
   await q.run("UPDATE signups SET recovery_email = NULL WHERE email = ?", e); // keep the row for sign-up abuse limits only
   await revokeSessions(e);

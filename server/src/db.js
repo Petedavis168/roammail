@@ -185,6 +185,24 @@ CREATE TABLE IF NOT EXISTS account_setup (
   twofa_snooze_until INTEGER NOT NULL DEFAULT 0, onboarded_at INTEGER, source TEXT, created_at INTEGER NOT NULL
 );
 CREATE TABLE IF NOT EXISTS send_counts (email TEXT NOT NULL, day TEXT NOT NULL, count INTEGER NOT NULL DEFAULT 0, PRIMARY KEY (email, day));
+CREATE TABLE IF NOT EXISTS tasks (
+  id INTEGER PRIMARY KEY AUTOINCREMENT, email TEXT NOT NULL, title TEXT NOT NULL, details TEXT NOT NULL DEFAULT '',
+  due_at INTEGER, remind_at INTEGER, reminded INTEGER NOT NULL DEFAULT 0, done_at INTEGER,
+  msg_key TEXT, msg_subject TEXT, msg_mailbox TEXT, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS tasks_email ON tasks(email, done_at);
+CREATE INDEX IF NOT EXISTS tasks_remind ON tasks(remind_at, reminded);
+CREATE TABLE IF NOT EXISTS notes (
+  id INTEGER PRIMARY KEY AUTOINCREMENT, email TEXT NOT NULL, body TEXT NOT NULL, contact TEXT, thread TEXT, thread_subject TEXT,
+  created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS notes_email ON notes(email, contact);
+CREATE TABLE IF NOT EXISTS followups (
+  id INTEGER PRIMARY KEY AUTOINCREMENT, email TEXT NOT NULL, message_id TEXT NOT NULL, subject TEXT, recipients TEXT,
+  creds TEXT NOT NULL, remind_at INTEGER NOT NULL, status TEXT NOT NULL DEFAULT 'waiting', checked_at INTEGER,
+  created_at INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS followups_due ON followups(status, remind_at);
 `;
 
 // Columns added after the first release: [table, column, definition]

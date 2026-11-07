@@ -11,6 +11,7 @@ import Ribbon from './Ribbon.jsx';
 import ComposeManager, { replyDraft } from './Compose.jsx';
 import SettingsPanel from './Settings.jsx';
 import ShortcutsHelp from './ShortcutsHelp.jsx';
+import TasksPanel from './TasksPanel.jsx';
 const Admin = lazy(() => import('./admin/Admin.jsx'));
 import { initials, avatarColor, folderLabel } from '../util.js';
 import { useSignatures } from '../signatures.js';
@@ -66,6 +67,11 @@ export default function Mail({ me, route, refreshMe, theme, setTheme, onLogout }
   };
   const [userMenu, setUserMenu] = useState(false);
   const [opsHelp, setOpsHelp] = useState(false);
+  // Item 9: tasks / notes / follow-ups panel
+  const [panel, setPanel] = useState(() => { const p = new URLSearchParams(location.search).get('panel'); return ['tasks', 'notes', 'followups'].includes(p) ? p : null; });
+  const [panelTab, setPanelTab] = useState(() => new URLSearchParams(location.search).get('panel') || 'tasks');
+  const [taskSeed, setTaskSeed] = useState(null);
+  const [openThreadMsg, setOpenThreadMsg] = useState(null); // full message (with Message-ID) shown in the reading pane
   const searchRef = useRef();
   const goPending = useRef(0);
   const [sigData, reloadSigs] = useSignatures();
@@ -302,6 +308,18 @@ export default function Mail({ me, route, refreshMe, theme, setTheme, onLogout }
   });
   // Home-screen shortcut "New mail" (/app?compose=1)
   useEffect(() => { if (new URLSearchParams(location.search).get('compose') === '1') { compose(); history.replaceState(null, '', location.pathname); } }, []);
+  const addTaskFrom = (m) => {
+    if (!m) { setPanel('tasks'); setPanelTab('tasks'); return; }
+    setTaskSeed({ title: m.subject && m.subject !== '(no subject)' ? m.subject : '', message: { key: messageKey(m.folder || listFolder, m.uid), subject: m.subject, mailboxId: route.id } });
+    setPanelTab('tasks'); setPanel('tasks');
+  };
+  const followUp = async (m, days) => {
+    const at = new Date(); at.setDate(at.getDate() + days); at.setHours(9, 0, 0, 0);
+    try {
+      await api.post('/api/followups', { messageId: m.messageId, subject: m.subject, recipients: (m.to || []).map((a) => a.name || a.address).join(', '), remindAt: at.getTime() });
+      toast(`We'll remind you ${days === 1 ? 'tomorrow' : `in ${days} days`} if nobody replies`, { action: 'View', onAction: () => { setPanelTab('followups'); setPanel('followups'); } });
+    } catch (e) { toast(e.message, { error: true }); }
+  };
   const reply = (msg, mode) => compose(replyDraft({ folder: listFolder, ...msg }, mode, me.email));
 
   const openMessage = (m) => {
@@ -357,6 +375,7 @@ export default function Mail({ me, route, refreshMe, theme, setTheme, onLogout }
         I: () => act.read(true), U: () => act.read(false), q: () => act.read(true),
         x: () => active && setSelected((s) => { const n = new Set(s); n.has(active) ? n.delete(active) : n.add(active); return n; }),
         '/': () => searchRef.current?.focus(), '?': () => setShowHelp(true), '[': () => toggleNav(),
+        t: () => setPanel((p) => (p ? null : panelTab)), T: () => addTaskFrom(openThreadMsg || activeMsg),
       };
       if (map[k]) { e.preventDefault(); map[k](); }
     };
@@ -391,6 +410,7 @@ export default function Mail({ me, route, refreshMe, theme, setTheme, onLogout }
         ) : <div className="spacer" />}
         <div className="topbar-right">
           {view === 'admin' && <button className="top-btn" onClick={() => setView('mail')}><Icon name="mail" /> <span>Back to mail</span></button>}
+          <button className={`icon-btn on-dark ${panel ? 'pressed' : ''}`} onClick={() => setPanel((p) => (p ? null : panelTab))} title="Tasks, notes and follow-ups (T)" aria-label="Tasks, notes and follow-ups" aria-pressed={!!panel}><Icon name="check" /></button>
           <button className="icon-btn on-dark" onClick={() => setShowSettings(true)} title="Settings" aria-label="Settings"><Icon name="settings" /></button>
           <div className="user-menu-wrap">
             <button className="avatar sm" style={{ background: avatarColor(me.email) }} onClick={() => setUserMenu((u) => !u)} title={me.email}>
@@ -482,10 +502,16 @@ export default function Mail({ me, route, refreshMe, theme, setTheme, onLogout }
                   key={`${listFolder}:${active}`} folder={listFolder} msg={activeMsg} me={me} prefs={prefs} setPrefs={setPrefs}
                   conversation={prefs.conversation} onReply={reply} act={act} categories={prefs.categories}
                   onClose={() => setActive(null)} isJunk={currentFolderObj?.specialUse === '\\Junk'} orgDomains={me.orgDomains || []}
+                  onAddTask={addTaskFrom} onFollowUp={followUp} onThread={setOpenThreadMsg}
                 />
               ) : null}
             </div>
           </main>
+          {panel && (
+            <TasksPanel tab={panelTab} setTab={(t) => { setPanelTab(t); setPanel(t); }} onClose={() => setPanel(null)}
+              context={active ? openThreadMsg : null} seed={taskSeed} onSeedUsed={() => setTaskSeed(null)}
+              onOpenMessage={(m) => (m.mailboxId && m.mailboxId !== route.id ? location.assign(`/${m.mailboxId}/message/${m.key}`) : (() => { const k = parseMessageKey(m.key); if (k) { setView('mail'); setFolder(k.folder); setTimeout(() => setActive(k.uid), 0); } })())} />
+          )}
         </div>
       )}
       </div>

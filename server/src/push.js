@@ -73,15 +73,19 @@ onRevoke((email) => { q.run('DELETE FROM push_subs WHERE email = ?', email).catc
 const watchers = new Map(); // email -> { client, closed }
 function stopWatch(email) { const w = watchers.get(email); if (w) { w.closed = true; watchers.delete(email); w.client.logout().catch(() => {}); } }
 
-async function notify(email, payload) {
+export async function notify(email, payload) {
   await vapid();
+  let sent = 0;
   for (const s of await q.all('SELECT * FROM push_subs WHERE email = ?', email)) {
     try {
+      sent++;
       await webpush.sendNotification({ endpoint: s.endpoint, keys: { p256dh: s.p256dh, auth: s.auth } }, JSON.stringify(payload), { TTL: 3600, urgency: 'normal', ...(devLocal(s.endpoint) ? { agent: devAgent } : {}) });
     } catch (e) {
+      sent--;
       if (e.statusCode === 404 || e.statusCode === 410) await q.run('DELETE FROM push_subs WHERE id = ?', s.id); // browser unsubscribed
     }
   }
+  return sent;
 }
 
 async function watch(email, user) {
