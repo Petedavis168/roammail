@@ -30,7 +30,7 @@ class Client {
 }
 async function user(name) {
   const c = new Client();
-  const r = await c.post('/api/signup', { name, username: `${name}${run}`, password: PW, acceptTerms: true });
+  const r = await c.post('/api/signup', { name, username: `${name}${run}`, password: PW, acceptTerms: true, birthday: '1990-01-15', recoveryEmail: 'recovery@example.org', phone: '+15555550123' });
   assert.equal(r.status, 200, JSON.stringify(r.data));
   await sleep(1200);
   c.email = r.data.email;

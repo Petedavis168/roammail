@@ -38,7 +38,7 @@ const mailcowAdd = (local, password) => fetch(`${MOCK}/api/v1/add/mailbox`, { me
 
 test('free sign-up: 2-step verification is asked for, can be postponed 3 times, nothing else works meanwhile', async () => {
   const c = new Client();
-  const s = await c.post('/api/signup', { name: 'Setup Free', username: `sf${run}`, password: PW, acceptTerms: true });
+  const s = await c.post('/api/signup', { name: 'Setup Free', username: `sf${run}`, password: PW, acceptTerms: true, birthday: '1990-01-15', recoveryEmail: 'recovery@example.org', phone: '+15555550123' });
   assert.equal(s.status, 200); assert.deepEqual(s.data.setupRequired, ['2fa']);
   await sleep(1200);
   const blocked = await c.get('/api/messages?folder=INBOX');
@@ -75,7 +75,7 @@ test('mailbox created outside the app (temporary password): must choose a new on
 
 test('super-admins cannot postpone 2-step verification; turning it on completes setup', async () => {
   const c = new Client();
-  const s = await c.post('/api/signup', { name: 'Setup Super', username: 'setupsuper', password: PW, acceptTerms: true });
+  const s = await c.post('/api/signup', { name: 'Setup Super', username: 'setupsuper', password: PW, acceptTerms: true, birthday: '1990-01-15', recoveryEmail: 'recovery@example.org', phone: '+15555550123' });
   if (s.status !== 200) return; // already exists from an earlier run on this data folder
   assert.deepEqual(s.data.setupRequired, ['2fa']);
   await sleep(1200);
@@ -89,7 +89,7 @@ test('super-admins cannot postpone 2-step verification; turning it on completes 
 
 test('server tool can require setup with a signed request; nobody else can', async () => {
   const c = new Client();
-  const s = await c.post('/api/signup', { name: 'Setup Tool', username: `st${run}`, password: PW, acceptTerms: true });
+  const s = await c.post('/api/signup', { name: 'Setup Tool', username: `st${run}`, password: PW, acceptTerms: true, birthday: '1990-01-15', recoveryEmail: 'recovery@example.org', phone: '+15555550123' });
   await sleep(1200); await c.post('/api/setup/2fa/remind');
   assert.equal((await c.get('/api/messages?folder=INBOX')).status, 200);
   const path = `/api/admin/users/${encodeURIComponent(s.data.email)}/require-setup`;

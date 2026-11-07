@@ -9,7 +9,7 @@ import { rateLimit } from './shared.js';
 import { config } from './config.js';
 import { q, rolesFor, audit, setting, setSetting } from './db.js';
 import { mailcow } from './mailcow.js';
-import { setSession, requireAuth, revokeSessions } from './session.js';
+import { setSession, requireAuth, revokeSessions, seal } from './session.js';
 import { verifyRecord, requiredRecords, checkVerification, checkRecords } from './dns.js';
 import { findZone, applyRecords } from './route53.js';
 import { saveProfile, getProfile, deleteUserData } from './signatures.js';
@@ -22,7 +22,7 @@ import { resetTwoFactor } from './recovery.js';
 import { syncOrgGroups } from './groups.js';
 import { tempPassword, TEMP_PASSWORD_RE } from './temppass.js';
 import { isBareFirstName, FIRST_NAME_HINT } from './names.js';
-import { phoneRequired, requireVerifiedPhone } from './phone.js';
+import { phoneRequired, requireVerifiedPhone, normalizePhone, checkBirthday } from './phone.js';
 import { sendSystemMail } from './recovery.js';
 import { needsPaymentToActivate, seatCheck, shrinkSeats, onPaid, startBillingChecks, orgBilling, setSeats } from './billing.js';
 
@@ -55,6 +55,7 @@ publicAccounts.get('/signup/config', async (req, res) => res.json({
   rootDomain: config.rootDomain || null, loginHost: config.loginHost || null,
   // mailbox sizes (config values, in MB)
   quota: { free: config.signup.quotaMb, business: config.business.defaultQuotaMb, businessMax: config.business.maxQuotaMb },
+  minAge: config.signup.minAge, requireDetails: config.signup.requireDetails,
   phoneRequired: phoneRequired(), // 5b: free sign-ups verify a mobile number by SMS
 }));
 
@@ -147,6 +148,15 @@ publicAccounts.post('/signup', rateLimit({ windowMs: 60 * 60_000, limit: 10 }), 
   await assertNotBreached(password, `${local}@x`);
   await checkCaptcha(req.body.captcha, req.ip);
   const phoneHash = await requireVerifiedPhone(req.body.phoneToken);
+  // Account details (both sign-ups): date of birth (age check), recovery email and mobile number, for recovery
+  let details = null;
+  if (config.signup.requireDetails || req.body.birthday || req.body.phone) {
+    const birthday = checkBirthday(req.body.birthday, config.signup.minAge);
+    const recovery = String(req.body.recoveryEmail || '').trim().toLowerCase();
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(recovery)) throw fail(400, 'Enter a recovery email address (a different account you can get into)');
+    if (recovery === `${local}@${config.signup.domain}`) throw fail(400, 'Use a different address than the new one for recovery');
+    details = { birthday, phone: normalizePhone(req.body.phone) };
+  }
   // Business sign-up: their own domain and the address they want there (created once the domain is connected)
   let biz = null;
   if (req.body.business) {
@@ -168,6 +178,10 @@ publicAccounts.post('/signup', rateLimit({ windowMs: 60 * 60_000, limit: 10 }), 
   if (biz) await createOrgWithDomain(email, biz.domain, biz.orgName, biz.local);
   await saveProfile(email, { name });
   await setRecoveryEmail(email, String(req.body.recoveryEmail || '').trim());
+  if (details) {
+    await q.run('INSERT INTO user_security(email) VALUES(?) ON CONFLICT(email) DO NOTHING', email);
+    await q.run('UPDATE user_security SET birthday = ?, phone = ? WHERE email = ?', details.birthday, seal({ p: details.phone }), email); // phone stored encrypted
+  }
   deliverWelcome({ email, password, name }).catch(() => {});
   await setSession(res, { email, password, name }, req);
   const mailboxId = await ensureMailboxId(email, { name });

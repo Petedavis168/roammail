@@ -26,7 +26,7 @@ class Browser {
   }
 }
 async function signup(b, username, name = 'Test Person') {
-  const r = await b.req('POST', '/api/signup', { name, username, password: PW, acceptTerms: true });
+  const r = await b.req('POST', '/api/signup', { name, username, password: PW, acceptTerms: true, birthday: '1990-01-15', recoveryEmail: 'recovery@example.org', phone: '+15555550123' });
   assert.equal(r.status, 200, JSON.stringify(r.data));
   await sleep(1200);
   return r.data;

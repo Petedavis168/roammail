@@ -39,7 +39,7 @@ export default function Login({ onLogin, mode = 'signin' }) {
   const signupType = params.get('type') === 'domain' ? 'domain' : 'free';
   const billing = ['monthly', 'yearly'].includes(params.get('billing')) ? params.get('billing') : '';
   const [step, setStep] = useState(resetToken ? 'reset' : mode === 'signup' || params.get('signup') ? 'name' : 'email');
-  const [f, setF] = useState({ email: '', password: '', code: '', first: '', last: '', purpose: signupType === 'domain' ? 'business' : 'personal', username: '', custom: false, pw: '', pw2: '', recovery: '', terms: false, phone: '', code: '', phoneToken: null, bizDomain: '', bizLocal: '', bizName: '', codeSent: false, remember: localStorage.getItem('remember') === '1' });
+  const [f, setF] = useState({ email: '', password: '', code: '', first: '', last: '', purpose: signupType === 'domain' ? 'business' : 'personal', username: '', custom: false, pw: '', pw2: '', recovery: '', terms: false, phone: '', code: '', phoneToken: null, birthday: '', bizDomain: '', bizLocal: '', bizName: '', codeSent: false, remember: localStorage.getItem('remember') === '1' });
   const [show, setShow] = useState(false);
   const [error, setError] = useState('');
   const [info, setInfo] = useState('');
@@ -240,12 +240,26 @@ export default function Login({ onLogin, mode = 'signin' }) {
       </Shell>
     );
   }
+  // Account details (both sign-ups): date of birth, recovery email, mobile number
   if (step === 'recovery') return (
     <Shell>
-      <Card title="Add a recovery email" subtitle="If you ever forget your password, we'll send a reset link here."
-        onSubmit={(e) => { e.preventDefault(); if (f.recovery && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(f.recovery)) return setError('Enter a valid email address'); go(cfg.phoneRequired && !f.phoneToken ? 'phone' : 'review'); }}
-        footer={<><button type="button" className="g-link" onClick={() => { setF({ ...f, recovery: '' }); go(cfg.phoneRequired && !f.phoneToken ? 'phone' : 'review'); }}>Skip</button><button className="g-btn">Next</button></>}>
-        <Field label="Recovery email" type="email" autoFocus value={f.recovery} onChange={set('recovery')} error={error} />
+      <Card title="Your details" subtitle="These keep your account safe and let you get back in if you ever forget your password."
+        onSubmit={(e) => { e.preventDefault(); setError('');
+          const b = f.birthday ? new Date(`${f.birthday}T00:00:00`) : null; const now = new Date();
+          const age = b ? now.getFullYear() - b.getFullYear() - (now < new Date(now.getFullYear(), b.getMonth(), b.getDate()) ? 1 : 0) : -1;
+          if (!b || Number.isNaN(b.getTime()) || age > 120 || age < 0) return setError('Enter your date of birth');
+          if (age < (cfg.minAge || 13)) return setError(`You need to be at least ${cfg.minAge || 13} to create an account`);
+          if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(f.recovery)) return setError('Enter a recovery email address (a different account you can get into)');
+          if (f.recovery.trim().toLowerCase() === `${username}@${cfg.domain}`) return setError('Use a different address than your new one');
+          const ph = f.phone.trim().replace(/[\s().-]/g, '').replace(/^00/, '+');
+          if (!/^\+[1-9]\d{7,14}$/.test(ph)) return setError('Enter your mobile number with the country code, like +1 555 123 4567');
+          setF((x) => ({ ...x, phone: ph }));
+          go(cfg.phoneRequired && !f.phoneToken ? 'phone' : 'review'); }}
+        footer={<><button type="button" className="g-link" onClick={() => go('password-new')}>Back</button><button className="g-btn">Next</button></>}>
+        <Field label="Date of birth" type="date" autoComplete="bday" autoFocus value={f.birthday} onChange={set('birthday')} max={new Date().toISOString().slice(0, 10)} />
+        <Field label="Recovery email" type="email" autoComplete="email" value={f.recovery} onChange={set('recovery')} hint="Another email you use. We'll send a code to confirm it." />
+        <Field label="Mobile number" type="tel" inputMode="tel" autoComplete="tel" value={f.phone} onChange={set('phone')} hint="With country code, like +1 555 123 4567" error={error} />
+        <p className="g-note">We only use these to protect and recover your account. They're never shown to anyone or used for marketing.</p>
       </Card>
     </Shell>
   );
@@ -269,7 +283,7 @@ export default function Login({ onLogin, mode = 'signin' }) {
     <Shell>
       <Card title="Privacy and Terms" subtitle={`Almost done, ${f.first}.`}
         onSubmit={(e) => { e.preventDefault(); if (!f.terms) return setError('Please agree to continue'); run(async () => {
-          const r = await api.signup({ name: `${f.first} ${f.last}`.trim(), username, password: f.pw, recoveryEmail: f.recovery, captcha, acceptTerms: true, phoneToken: f.phoneToken,
+          const r = await api.signup({ name: `${f.first} ${f.last}`.trim(), username, password: f.pw, recoveryEmail: f.recovery, captcha, acceptTerms: true, phoneToken: f.phoneToken, birthday: f.birthday, phone: f.phone,
             ...(f.purpose === 'business' && f.bizDomain ? { business: { domain: f.bizDomain, local: f.bizLocal, orgName: f.bizName } } : {}) });
           // Own-domain sign-ups go straight on to connecting the domain (and choosing monthly/yearly)
           if (f.purpose === 'business') localStorage.setItem('startBusiness', '1');

@@ -27,7 +27,7 @@ const PAYLOADS = {
 };
 
 test('malicious email content cannot run code or overlay the app (reading, reply, forward)', async () => {
-  const { cookie } = await api('/api/signup', { name: 'E2E', username: user, password: PW, acceptTerms: true });
+  const { cookie } = await api('/api/signup', { name: 'E2E', username: user, password: PW, acceptTerms: true, birthday: '1990-01-15', recoveryEmail: 'recovery@example.org', phone: '+15555550123' });
   assert.ok(cookie, 'signed up');
   // first sign-in setup: postpone 2-step verification and finish the welcome wizard (tested in setup.test.js)
   await api('/api/setup/2fa/remind', {}, cookie); await api('/api/setup/step', { step: 'done' }, cookie);

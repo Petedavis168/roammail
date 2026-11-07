@@ -228,9 +228,23 @@ securityApi.get('/security', wrap(async (req, res) => {
     twoFactor: !!s.totp_enabled,
     backupCodesLeft: JSON.parse(s.backup_codes || '[]').length,
     recoveryEmail: s.recovery_email || '', recoveryVerified: !!s.recovery_verified, recoveryPending: s.recovery_pending || '',
+    phone: (s.phone && unseal(s.phone)?.p) || '', birthday: s.birthday || '',
     resetAvailable: !!config.systemMail.user,
     events: await q.all('SELECT ip, ua, ok, reason, at FROM login_events WHERE email = ? ORDER BY id DESC LIMIT 25', req.user.email),
   });
+}));
+
+// Mobile number and date of birth (collected at sign-up): change them with the current password
+securityApi.put('/security/details', wrap(async (req, res) => {
+  const { normalizePhone, checkBirthday } = await import('./phone.js');
+  if (!(await checkMailPassword(req.user.email, String(req.body.password || '')))) throw fail(401, 'Wrong password');
+  const phone = req.body.phone ? normalizePhone(req.body.phone) : null;
+  const birthday = req.body.birthday ? checkBirthday(req.body.birthday, config.signup.minAge) : null;
+  await security(req.user.email);
+  if (phone) await q.run('UPDATE user_security SET phone = ? WHERE email = ?', seal({ p: phone }), req.user.email);
+  if (birthday) await q.run('UPDATE user_security SET birthday = ? WHERE email = ?', birthday, req.user.email);
+  await audit(req.user.email, null, 'security.details_changed', { phone: !!phone, birthday: !!birthday });
+  res.json({ ok: true });
 }));
 
 // Step 1: create a secret + QR code (not active until confirmed)
