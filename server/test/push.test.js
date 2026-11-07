@@ -37,6 +37,10 @@ test('push: new mail triggers an encrypted web push; sign-out everywhere stops i
     const subscription = { endpoint: 'https://127.0.0.1:12999/push/abc', keys: { p256dh: ecdh.getPublicKey().toString('base64url'), auth: crypto.randomBytes(16).toString('base64url') } };
     assert.equal((await call('POST', '/api/push/subscribe', { subscription: { ...subscription, endpoint: 'http://evil.example/x' } })).status, 400, 'only https push services');
     assert.equal((await call('POST', '/api/push/subscribe', { subscription })).status, 200);
+    // phone apps register a Firebase / Apple device token instead
+    assert.equal((await call('POST', '/api/push/native', { platform: 'ios', token: 'nothex' })).status, 400);
+    assert.equal((await call('POST', '/api/push/native', { platform: 'android', token: 'fcm-device-token-1234567890' })).status, 200);
+    assert.equal((await call('POST', '/api/push/native/unregister', { platform: 'android', token: 'fcm-device-token-1234567890' })).status, 200);
     await sleep(5000); // worker starts watching
     const fd = new FormData(); fd.append('to', s.data.email); fd.append('subject', 'Ping'); fd.append('text', 'hello');
     assert.equal((await call('POST', '/api/send', fd)).status, 200);

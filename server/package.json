@@ -17,7 +17,8 @@
     "test:setup": "node --test test/setup.test.js",
     "test:tasks": "node --disable-warning=ExperimentalWarning --test test/tasks.test.js",
     "test:imports": "node --disable-warning=ExperimentalWarning --test test/imports.test.js",
-    "test:phone": "node --disable-warning=ExperimentalWarning --test test/phone.test.js"
+    "test:phone": "node --disable-warning=ExperimentalWarning --test test/phone.test.js",
+    "test:nativepush": "NODE_ENV=test node --disable-warning=ExperimentalWarning --test test/nativepush.test.js"
   },
   "keywords": [],
   "author": "",

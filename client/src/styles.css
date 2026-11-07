@@ -81,7 +81,7 @@ kbd { font: 12px ui-monospace, monospace; background: var(--panel-2); border: 1p
 .brand img { height: 24px; width: auto; }
 .search { flex: 1; max-width: 680px; margin: 0 auto; display: flex; align-items: center; gap: 6px; background: rgba(255,255,255,.95); color: #333; border-radius: 6px; padding: 0 6px 0 10px; height: 34px; }
 [data-theme='dark'] .search { background: #2b2b2b; color: var(--text); }
-.search input { flex: 1; border: 0; background: transparent; box-shadow: none !important; padding: 0; color: inherit; }
+.search input { flex: 1; min-width: 0; width: 0; border: 0; background: transparent; box-shadow: none !important; padding: 0; color: inherit; }
 .search .icon-btn { width: 26px; height: 26px; color: #555; }
 .topbar-right { display: flex; align-items: center; gap: 2px; margin-left: auto; }
 .top-btn { display: flex; align-items: center; gap: 6px; border: 0; background: rgba(255,255,255,.12); color: #fff; padding: 6px 12px; border-radius: 6px; font-weight: 600; margin-right: 6px; }
@@ -1026,3 +1026,30 @@ details.card summary { cursor: pointer; }
 .gate-card, .gate-card.wizard { width: min(640px, 100%); max-width: 100%; margin: 0; }
 @media (max-width: 480px) { .gate-card { padding: 20px 16px; } }
 .g-addr .g-domain { min-width: 0; max-width: 55%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* Phone apps (mobile/): keep sign-in pages clear of the notch and home bar; no rubber-band scrolling of the whole page */
+.native-app body { overscroll-behavior: none; -webkit-tap-highlight-color: transparent; }
+.native-app .g-page { padding-top: env(safe-area-inset-top); padding-bottom: env(safe-area-inset-bottom); }
+
+/* Calendar on phones: date range on its own line, controls below; the grid scrolls inside the screen */
+@media (max-width: 899px) {
+  .cal-toolbar { flex-wrap: wrap; padding: 8px 10px; row-gap: 4px; }
+  .cal-toolbar h2 { order: -1; flex: 1 0 100%; font-size: 17px; margin: 0 0 2px 2px; }
+  .cal-main { min-height: 0; }
+}
+
+/* Phones: floating "New mail" button above the bottom bar */
+.compose-fab { display: none; }
+@media (max-width: 899px) {
+  .compose-fab { display: grid; place-items: center; position: fixed; right: 18px; bottom: calc(76px + env(safe-area-inset-bottom)); z-index: 30;
+    width: 56px; height: 56px; border: 0; border-radius: 18px; background: var(--brand); color: #fff; box-shadow: 0 4px 14px rgba(0,0,0,.25); }
+  .compose-fab:active { transform: scale(.96); }
+}
+
+/* Narrow phones: keep the folder name readable; the filter chips scroll sideways instead of squeezing it */
+@media (max-width: 420px) {
+  .list-head h2 { flex: none; max-width: 45%; }
+  .list-head .filters { flex: 1; min-width: 0; overflow-x: auto; scrollbar-width: none; flex-wrap: nowrap; }
+  .list-head .filters::-webkit-scrollbar { display: none; }
+  .list-head .filters .chip { flex: none; }
+}

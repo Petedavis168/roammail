@@ -10,6 +10,7 @@ import { q, setting, setSetting, audit } from './db.js';
 import { requireAuth, seal, unseal, onRevoke } from './session.js';
 import { makeClient } from './imap.js';
 import { authFailed, isAuthError } from './authguard.js';
+import { sendNative, nativePushConfig } from './nativepush.js';
 
 const wrap = (fn) => (req, res, next) => Promise.resolve(fn(req, res, next)).catch(next);
 const fail = (status, message) => Object.assign(new Error(message), { status });
@@ -40,22 +41,50 @@ const devAgent = new https.Agent({ rejectUnauthorized: false });
 
 export const push = express.Router();
 push.use('/push', requireAuth);
-push.get('/push/key', wrap(async (req, res) => res.json({ publicKey: (await vapid()).publicKey })));
+push.get('/push/key', wrap(async (req, res) => res.json({ publicKey: (await vapid()).publicKey, native: nativePushConfig() })));
+
+/** Signed-in mailboxes on this device (each one notifies) with the password the IDLE watch needs. */
+function deviceUsers(req) {
+  const users = (req.liveSessions || []).map((x) => ({ email: x.email, password: unseal(x.creds)?.password })).filter((u) => u.password);
+  if (!users.some((u) => u.email === req.user.email)) users.unshift({ email: req.user.email, password: req.user.password });
+  return users;
+}
+async function saveSubs(users, endpoint, p256dh, auth) {
+  for (const u of users) {
+    const id = crypto.createHash('sha256').update(`${endpoint}|${u.email}`).digest('hex');
+    const creds = seal({ email: u.email, password: u.password, exp: Date.now() + SUB_DAYS * 864e5 });
+    await q.run(`INSERT INTO push_subs(id, email, endpoint, p256dh, auth, creds, created_at) VALUES(?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT(id) DO UPDATE SET email = excluded.email, creds = excluded.creds, p256dh = excluded.p256dh, auth = excluded.auth`,
+    id, u.email, endpoint, p256dh, auth, creds, Date.now());
+  }
+}
+
+// Phone apps (mobile/): the device token from Firebase (Android) or Apple (iPhone)
+const nativeEndpoint = (platform, token) => {
+  const t = String(token || '');
+  if (platform === 'android' && /^[\w:.-]{20,4096}$/.test(t)) return `fcm:${t}`;
+  if (platform === 'ios' && /^[0-9a-f]{32,200}$/i.test(t)) return `apns:${t.toLowerCase()}`;
+  return null;
+};
+push.post('/push/native', wrap(async (req, res) => {
+  const endpoint = nativeEndpoint(req.body.platform, req.body.token);
+  if (!endpoint) throw fail(400, 'Invalid device token');
+  await saveSubs(deviceUsers(req), endpoint, '', '');
+  await audit(req.user.email, null, 'push.subscribe', { platform: req.body.platform });
+  res.json({ ok: true });
+}));
+push.post('/push/native/unregister', wrap(async (req, res) => {
+  const endpoint = nativeEndpoint(req.body.platform, req.body.token);
+  if (endpoint) for (const e of new Set([req.user.email, ...(req.liveSessions || []).map((x) => x.email)])) await q.run('DELETE FROM push_subs WHERE email = ? AND endpoint = ?', e, endpoint);
+  res.json({ ok: true });
+}));
 
 push.post('/push/subscribe', wrap(async (req, res) => {
   const s = req.body.subscription || {};
   if (!validEndpoint(s.endpoint) || !s.keys?.p256dh || !s.keys?.auth) throw fail(400, 'Invalid push subscription');
   // One subscription per signed-in mailbox on this device, so each account notifies (item 10)
-  const users = (req.liveSessions || []).map((x) => ({ email: x.email, password: unseal(x.creds)?.password })).filter((u) => u.password);
-  if (!users.some((u) => u.email === req.user.email)) users.unshift({ email: req.user.email, password: req.user.password });
   await q.run('DELETE FROM push_subs WHERE endpoint = ? AND id = ?', s.endpoint, crypto.createHash('sha256').update(s.endpoint).digest('hex')); // pre-multi-account row
-  for (const u of users) {
-    const id = crypto.createHash('sha256').update(`${s.endpoint}|${u.email}`).digest('hex');
-    const creds = seal({ email: u.email, password: u.password, exp: Date.now() + SUB_DAYS * 864e5 });
-    await q.run(`INSERT INTO push_subs(id, email, endpoint, p256dh, auth, creds, created_at) VALUES(?, ?, ?, ?, ?, ?, ?)
-      ON CONFLICT(id) DO UPDATE SET email = excluded.email, creds = excluded.creds, p256dh = excluded.p256dh, auth = excluded.auth`,
-    id, u.email, s.endpoint, s.keys.p256dh, s.keys.auth, creds, Date.now());
-  }
+  await saveSubs(deviceUsers(req), s.endpoint, s.keys.p256dh, s.keys.auth);
   await audit(req.user.email, null, 'push.subscribe');
   res.json({ ok: true });
 }));
@@ -77,6 +106,11 @@ export async function notify(email, payload) {
   await vapid();
   let sent = 0;
   for (const s of await q.all('SELECT * FROM push_subs WHERE email = ?', email)) {
+    if (!s.p256dh) { // phone app
+      const r = await sendNative(s.endpoint, payload).catch(() => ({ ok: false }));
+      if (r.ok) sent++; else if (r.gone) await q.run('DELETE FROM push_subs WHERE id = ?', s.id);
+      continue;
+    }
     try {
       sent++;
       await webpush.sendNotification({ endpoint: s.endpoint, keys: { p256dh: s.p256dh, auth: s.auth } }, JSON.stringify(payload), { TTL: 3600, urgency: 'normal', ...(devLocal(s.endpoint) ? { agent: devAgent } : {}) });

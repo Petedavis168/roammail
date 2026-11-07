@@ -2,6 +2,10 @@ import { useEffect, useState } from 'react';
 import { api } from '../../api.js';
 import { Icon } from '../../icons.jsx';
 import { useToast } from '../Toast.jsx';
+import { platform } from '../../native.js';
+// Apple only allows in-app purchase for subscriptions bought inside the iPhone app, so the iPhone app shows no payment screens
+const NO_PAY = () => platform() === 'ios';
+const NoPayHere = () => <div className="empty-card"><p>Plans and payment aren't available in the iPhone app.</p></div>;
 
 const money = (n, cur = 'USD') => new Intl.NumberFormat([], { style: 'currency', currency: cur, maximumFractionDigits: n % 1 ? 2 : 0 }).format(n);
 
@@ -12,6 +16,7 @@ export function PlanPicker({ orgId, seats = 1, adding = 0, title = 'Choose your 
   const [interval, setInterval] = useState(() => localStorage.getItem('preferredBilling') || 'month');
   const [busy, setBusy] = useState(false);
   useEffect(() => { api.get('/api/billing/config').then(setCfg).catch(() => {}); }, []);
+  if (NO_PAY()) return <NoPayHere />;
   if (!cfg) return <div className="spinner" />;
   const per = interval === 'year' ? cfg.perUserYearly : cfg.perUserMonthly;
   const go = async () => {
@@ -78,7 +83,7 @@ export default function Billing({ org }) {
         {b.status === 'past_due' && <div className="banner warn">Your last payment didn't go through. Update your card in Manage billing to avoid interruption.</div>}
         {b.status === 'canceled' && <div className="banner warn">Your subscription was canceled. Mailboxes beyond the free allowance will be paused soon. Choose a plan to keep them running.</div>}
         <div className="step-actions" style={{ justifyContent: 'flex-start' }}>
-          {(b.status === 'active' || b.status === 'past_due') && <button className="btn primary" onClick={portal}><Icon name="external" size={14} /> Manage billing (card, invoices, monthly/yearly)</button>}
+          {(b.status === 'active' || b.status === 'past_due') && !NO_PAY() && <button className="btn primary" onClick={portal}><Icon name="external" size={14} /> Manage billing (card, invoices, monthly/yearly)</button>}
           {(b.status === 'none' || b.status === 'canceled') && b.billable > 0 && <button className="btn primary" onClick={() => setChoose(true)}>Choose a plan</button>}
         </div>
         {choose && <PlanPicker orgId={org.id} seats={Math.max(1, b.billable)} onCancel={() => setChoose(false)} />}

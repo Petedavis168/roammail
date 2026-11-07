@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import DOMPurify from 'dompurify';
 import { api } from '../api.js';
 import { escapeHtml } from '../util.js';
+import { nativeFrameLinks } from '../native.js';
 
 // Render an email safely: sanitized HTML in a sandboxed iframe (no scripts),
 // remote images blocked until the user allows them (privacy / tracking pixels).
@@ -100,6 +101,7 @@ export default function MessageBody({ msg, allowRemote, onBlocked, disableLinks 
       const doc = frame.contentDocument;
       if (doc) try { collapseQuotes(doc, fit); } catch { /* never block reading */ }
       fit();
+      nativeFrameLinks(doc); // phone app: links open in the in-app browser
       doc?.querySelectorAll('img').forEach((img) => img.addEventListener('load', fit));
       if (doc?.body) { ro = new ResizeObserver(fit); ro.observe(doc.body); }
     };

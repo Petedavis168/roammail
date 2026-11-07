@@ -1,3 +1,4 @@
+import { createPortal } from 'react-dom';
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { api, mailUrl } from '../api.js';
 import { messageKey, parseMessageKey, sectionForFolder, folderForSection, loginHref } from '../nav.js';
@@ -507,6 +508,7 @@ export default function Mail({ me, route, refreshMe, theme, setTheme, onLogout }
                 />
               ) : null}
             </div>
+            {!active && createPortal(<button className="compose-fab" onClick={() => compose()} aria-label="New mail" title="New mail"><Icon name="pen" /></button>, document.body)}
           </main>
           {panel && (
             <TasksPanel tab={panelTab} setTab={(t) => { setPanelTab(t); setPanel(t); }} onClose={() => setPanel(null)}

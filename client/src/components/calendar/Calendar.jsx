@@ -132,7 +132,7 @@ function MonthGrid({ cursor, events, onSlot, onOpen, now }) {
 
 export default function Calendar({ me }) {
   const toast = useToast();
-  const [view, setView] = useState(() => localStorage.getItem('calView') || 'week');
+  const [view, setView] = useState(() => localStorage.getItem('calView') || (matchMedia('(max-width: 899px)').matches ? 'day' : 'week')); // phones start on Day
   const [cursor, setCursor] = useState(startOfDay(new Date()));
   const [calendars, setCalendars] = useState(null);
   const [hidden, setHidden] = useState(() => new Set(JSON.parse(localStorage.getItem('calHidden') || '[]')));
