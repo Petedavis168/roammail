@@ -45,6 +45,8 @@ function AiSetting() {
   );
 }
 import Security from './settings/Security.jsx';
+import Premium from './settings/Premium.jsx';
+import { platform } from '../native.js';
 import { AutoReply, Rules, ImportMail } from './settings/MailTools.jsx';
 import SpamSettings from './settings/Spam.jsx';
 import Privacy from './settings/Privacy.jsx';
@@ -163,17 +165,21 @@ function Apps({ me, sigData }) {
 
 const TABS = [
   ['general', 'General', 'settings'], ['signatures', 'Signatures', 'pen'], ['templates', 'Templates', 'mail'], ['security', 'Security', 'lock'],
-  ['autoreply', 'Automatic replies', 'reply'], ['junk', 'Junk & spam', 'junk'], ['rules', 'Rules', 'filter'], ['import', 'Import mail', 'import'], ['apps', 'Phone & apps', 'phone'], ['privacy', 'Privacy', 'shield'],
+  ['autoreply', 'Automatic replies', 'reply'], ['junk', 'Junk & spam', 'junk'], ['rules', 'Rules', 'filter'], ['import', 'Import mail', 'import'], ['apps', 'Phone & apps', 'phone'], ['privacy', 'Privacy', 'shield'], ['premium', 'Premium', 'spark'],
 ];
 
-export default function SettingsPanel({ prefs, setPrefs, me, folders, sigData, reloadSigs, onClose, initialTab = 'general', importMsg }) {
+export default function SettingsPanel({ prefs, setPrefs, me, folders, sigData, reloadSigs, onClose, initialTab = 'general', importMsg, premiumMsg }) {
   const [tab, setTab] = useState(initialTab);
+  // Premium tab only where it can be bought (personal accounts, Stripe prices set) and never in the iPhone app
+  const [showPremium, setShowPremium] = useState(false);
+  useEffect(() => { if (platform() !== 'ios') api.get('/api/premium').then((p) => setShowPremium(p.available || p.active)).catch(() => {}); }, []);
+  const tabs = TABS.filter(([k]) => k !== 'premium' || showPremium);
   return (
     <div className="modal-wrap" onClick={onClose}>
       <div className="settings-modal" onClick={(e) => e.stopPropagation()} role="dialog" aria-label="Settings">
         <nav className="settings-nav">
           <h2>Settings</h2>
-          {TABS.map(([k, l, i]) => <button key={k} className={tab === k ? 'on' : ''} onClick={() => setTab(k)}><Icon name={i} size={16} /> {l}</button>)}
+          {tabs.map(([k, l, i]) => <button key={k} className={tab === k ? 'on' : ''} onClick={() => setTab(k)}><Icon name={i} size={16} /> {l}</button>)}
         </nav>
         <div className="settings-body">
           <div className="drawer-head"><h2>{TABS.find((t) => t[0] === tab)[1]}</h2><button className="icon-btn" aria-label="Close settings" title="Close" onClick={onClose}><Icon name="close" /></button></div>
@@ -186,6 +192,7 @@ export default function SettingsPanel({ prefs, setPrefs, me, folders, sigData, r
             {tab === 'junk' && <SpamSettings />}
             {tab === 'rules' && <Rules folders={folders} categories={prefs.categories} me={me} />}
             {tab === 'import' && <ImportMail me={me} importMsg={importMsg} />}
+            {tab === 'premium' && <Premium premiumMsg={premiumMsg} />}
             {tab === 'apps' && <Apps me={me} sigData={sigData} />}
             {tab === 'privacy' && <Privacy me={me} />}
           </div>

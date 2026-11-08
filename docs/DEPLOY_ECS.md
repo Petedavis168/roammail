@@ -106,6 +106,10 @@ The allowlist and a reference implementation of the check are in `server/src/pro
 
 | Variable | What it does |
 |---|---|
+| `STRIPE_PRICE_PREMIUM_MONTHLY` / `STRIPE_PRICE_PREMIUM_YEARLY` | Personal Premium. In Stripe, create a product "Roammail Premium" with a $5/month and a $50/year price, then put both `price_...` IDs here. Premium stays hidden until both are set |
+| `PREMIUM_PRICE_MONTHLY` / `PREMIUM_PRICE_YEARLY` / `PREMIUM_QUOTA_MB` | What the app shows for Premium (default 5, 50, 102400). Keep them matching the Stripe prices |
+| `ANTHROPIC_API_KEY` | AI help. Stored in the secret `roammail/integrations`, not as a plain setting. The feature stays hidden while it says `unset` |
+| `AI_MODEL` / `AI_FREE_MONTHLY` | AI help model (default `claude-opus-5-5`) and free requests per person per month (default 40) |
 | `SPF_INCLUDE` | Added to every domain's SPF record. For the relay: `include:spf.smtp2go.com` |
 | `RELAY_CNAMES` | Relay CNAMEs shown on every domain (required when the domain sends through the relay). For SMTP2GO: `em1184580:return.smtp2go.net,s1184580._domainkey:dkim.smtp2go.net,link:track.smtp2go.net` |
 | `FREE_RELAYHOST_ID` / `BUSINESS_RELAYHOST_ID` | mailcow relayhost ids for free vs business domains (separate reputations, 5e) |
