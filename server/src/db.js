@@ -168,6 +168,11 @@ CREATE TABLE IF NOT EXISTS push_subs (
   id TEXT PRIMARY KEY, email TEXT NOT NULL, endpoint TEXT NOT NULL, p256dh TEXT NOT NULL, auth TEXT NOT NULL, creds TEXT NOT NULL, created_at INTEGER NOT NULL
 );
 CREATE INDEX IF NOT EXISTS push_subs_email ON push_subs(email);
+CREATE TABLE IF NOT EXISTS passkeys (
+  id TEXT PRIMARY KEY, email TEXT NOT NULL, public_key TEXT NOT NULL, counter INTEGER NOT NULL DEFAULT 0, transports TEXT,
+  name TEXT, creds TEXT NOT NULL, created_at INTEGER NOT NULL, last_used INTEGER
+);
+CREATE INDEX IF NOT EXISTS passkeys_email ON passkeys(email);
 CREATE TABLE IF NOT EXISTS support_tickets (
   id INTEGER PRIMARY KEY AUTOINCREMENT, email TEXT NOT NULL, account TEXT, topic TEXT, message TEXT, ip TEXT, at INTEGER NOT NULL,
   status TEXT NOT NULL DEFAULT 'open'

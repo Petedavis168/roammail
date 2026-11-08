@@ -9,7 +9,7 @@ ok(read('android/app/build.gradle').includes(`applicationId "${id}"`), 'Android 
 ok(read('ios/App/App.xcodeproj/project.pbxproj').split(`PRODUCT_BUNDLE_IDENTIFIER = ${id};`).length - 1 === 2, 'iOS bundle id differs from capacitor.config.json');
 ok(read('ios/App/App.xcodeproj/project.pbxproj').includes('CODE_SIGN_ENTITLEMENTS = App/App.entitlements;'), 'iOS entitlements not wired');
 const ent = read('ios/App/App/App.entitlements');
-ok(ent.includes('aps-environment') && ent.includes('applinks:roammail.net'), 'iOS entitlements missing push or app links');
+ok(ent.includes('aps-environment') && ent.includes('applinks:roammail.net') && ent.includes('webcredentials:roammail.net'), 'iOS entitlements missing push, app links or passkeys');
 ok(read('ios/App/App/AppDelegate.swift').includes('capacitorDidRegisterForRemoteNotifications'), 'iOS AppDelegate does not forward the push token');
 const plist = read('ios/App/App/Info.plist');
 for (const k of ['NSCameraUsageDescription', 'NSPhotoLibraryUsageDescription', 'ITSAppUsesNonExemptEncryption']) ok(plist.includes(k), `Info.plist missing ${k}`);

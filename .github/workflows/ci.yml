@@ -93,6 +93,9 @@ jobs:
       - name: Phone app tests (faked native shell)
         working-directory: server
         run: npm run test:mobile
+      - name: Passkey tests (virtual authenticator)
+        working-directory: server
+        run: npm run test:passkeys
 
       - name: Logs on failure
         if: failure()

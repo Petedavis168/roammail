@@ -51,7 +51,7 @@ export function verifyTotp(secret, code) {
 }
 
 // ---------------------------------------------------------------- helpers
-async function logEvent(req, email, ok, reason) {
+export async function logEvent(req, email, ok, reason) {
   await q.run('INSERT INTO login_events(email, ip, ua, ok, reason) VALUES(?, ?, ?, ?, ?)', email, req.ip, String(req.get('user-agent') || '').slice(0, 300), ok ? 1 : 0, reason || null);
 }
 async function bumpEpoch(email, keepId) {
@@ -98,14 +98,19 @@ publicSecurity.post('/login', loginLimiter, wrap(async (req, res) => {
     const ticket = seal({ email, password, exp: Date.now() + 5 * 60 * 1000, t: '2fa', remember: req.body.remember === true });
     return res.json({ twoFactor: true, ticket });
   }
+  await finishLogin(req, res, { email, password, remember: req.body.remember === true });
+}));
+
+/** Last steps of every sign-in (password, 2-step code, passkey): session, alerts, where to go next. */
+export async function finishLogin(req, res, { email, password, remember, how }) {
   await loginSucceeded(email, req.ip);
-  await logEvent(req, email, true);
-  await setSession(res, { email, password, name: '', remember: req.body.remember === true }, req);
+  await logEvent(req, email, true, how);
+  await setSession(res, { email, password, name: '', remember }, req);
   await newDeviceCheck(req, email, password);
   const mailboxId = await ensureMailboxId(email);
   await ensureSetupRow(email);
   res.json({ email, mailboxId, redirect: inboxUrl(mailboxId), setupRequired: (await setupState(email)).setupRequired });
-}));
+}
 
 publicSecurity.post('/login/2fa', loginLimiter, wrap(async (req, res) => {
   const t = unseal(String(req.body.ticket || ''));
@@ -134,13 +139,7 @@ publicSecurity.post('/login/2fa', loginLimiter, wrap(async (req, res) => {
     await logEvent(req, t.email, false, '2fa');
     throw fail(401, 'That code isn\'t right. Check your authenticator app and try again.');
   }
-  await loginSucceeded(t.email, req.ip);
-  await logEvent(req, t.email, true, '2fa');
-  await setSession(res, { email: t.email, password: t.password, name: '', remember: !!t.remember }, req);
-  await newDeviceCheck(req, t.email, t.password);
-  const mailboxId = await ensureMailboxId(t.email);
-  await ensureSetupRow(t.email);
-  res.json({ email: t.email, mailboxId, redirect: inboxUrl(mailboxId), setupRequired: (await setupState(t.email)).setupRequired });
+  await finishLogin(req, res, { email: t.email, password: t.password, remember: !!t.remember, how: '2fa' });
 }));
 
 const resetLimiter = rateLimit({ windowMs: 60 * 60 * 1000, limit: 10 });

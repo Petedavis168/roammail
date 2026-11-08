@@ -4,6 +4,43 @@ import { Icon } from '../../icons.jsx';
 import { useToast } from '../Toast.jsx';
 import { fmtDate } from '../../util.js';
 import TwoFactorSetup from '../TwoFactorSetup.jsx';
+import { passkeysSupported, addPasskey } from '../../passkeys.js';
+
+function Passkeys() {
+  const toast = useToast();
+  const [list, setList] = useState(null);
+  const [busy, setBusy] = useState(false);
+  const load = () => api.get('/api/passkeys').then(setList).catch(() => setList([]));
+  useEffect(() => { load(); }, []);
+  const add = async () => {
+    const pw = prompt('Enter your password to add a passkey for this device');
+    if (!pw) return;
+    setBusy(true);
+    try { const r = await addPasskey(pw); toast(`Passkey added for ${r.name}`); load(); } catch (e) { toast(e.message, { error: true }); } finally { setBusy(false); }
+  };
+  const remove = async (k) => {
+    if (!confirm(`Remove the passkey "${k.name}"? You can add it again later.`)) return;
+    try { await api.del('/api/passkeys', { id: k.id }); load(); } catch (e) { toast(e.message, { error: true }); }
+  };
+  return (
+    <>
+      <h3>Passkeys</h3>
+      <p className="muted small">Sign in with Face ID, your fingerprint or your device's screen lock instead of a password and code. Passkeys can't be phished or stolen in a data breach.</p>
+      {list?.length > 0 && (
+        <ul className="plain-list">
+          {list.map((k) => (
+            <li key={k.id}><Icon name="lock" size={14} /> <b>{k.name}</b> <span className="muted small">added {fmtDate(k.created)}{k.lastUsed ? `, last used ${fmtDate(k.lastUsed)}` : ''}</span>
+              <button className="link" onClick={() => remove(k)}>Remove</button></li>
+          ))}
+        </ul>
+      )}
+      {passkeysSupported()
+        ? <button className="btn" disabled={busy} onClick={add}>{busy ? 'Waiting for your device…' : 'Add a passkey for this device'}</button>
+        : <p className="muted small">This browser doesn't support passkeys.</p>}
+      <p className="muted small">Changing your password or signing out everywhere removes your passkeys; add them again afterwards.</p>
+    </>
+  );
+}
 
 function device(ua = '') {
   const b = /Edg\//.test(ua) ? 'Edge' : /Chrome\//.test(ua) ? 'Chrome' : /Firefox\//.test(ua) ? 'Firefox' : /Safari\//.test(ua) ? 'Safari' : ua.split('/')[0] || 'Unknown';
@@ -87,6 +124,8 @@ export default function Security({ me }) {
         <input type="date" autoComplete="bday" value={det.birthday} onChange={(e) => setDet({ ...det, birthday: e.target.value })} />
         <button className="btn" onClick={() => { const pw = prompt('Enter your password to change these details'); if (pw) run(() => api.put('/api/security/details', { ...det, password: pw }), 'Details saved').then(load); }}>Save</button>
       </div>
+
+      <Passkeys />
 
       <h3>Change password</h3>
       <form className="form narrow" onSubmit={async (e) => {

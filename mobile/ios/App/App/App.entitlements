@@ -8,6 +8,7 @@
 	<array>
 		<string>applinks:roammail.net</string>
 		<string>applinks:login.roammail.net</string>
+		<string>webcredentials:roammail.net</string>
 	</array>
 </dict>
 </plist>

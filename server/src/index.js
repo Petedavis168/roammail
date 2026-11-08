@@ -32,6 +32,7 @@ import { deviceSetup, deviceSetupApi } from './devicesetup.js';
 import { legalPages, privacy, startRetention } from './privacy.js';
 import { appLinks } from './nativepush.js';
 import { clientErrors } from './clienterrors.js';
+import { passkeysApi, passkeyLogin } from './passkeys.js';
 import { calendar } from './calendar.js';
 import { contacts } from './contacts.js';
 import { groups } from './groups.js';
@@ -92,6 +93,7 @@ app.use(deviceSetup);
 app.use(legalPages);
 app.use('/api', clientErrors); // browser and phone-app error reports (no sign-in needed)
 app.use('/api', publicSecurity);
+app.use('/api', passkeyLogin); // sign in with a passkey (no session yet)
 app.use('/api', importsPublic); // Microsoft sign-in callback for imports (no session: sealed state)
 app.use('/api', publicRecovery);
 app.use('/api', requireSetupApi); // server tool may call with a signed request (no session)
@@ -103,6 +105,7 @@ app.use('/api', api);
 app.use('/api', accounts);
 app.use('/api', signatures);
 app.use('/api', securityApi);
+app.use('/api', passkeysApi);
 app.use('/api', mailtools);
 app.use('/api', spam);
 app.use('/api', deviceSetupApi);
