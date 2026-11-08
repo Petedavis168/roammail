@@ -7,6 +7,7 @@ Work top to bottom. **You** = Pete. **Claude** = done in a Claude session. Detai
 - [x] New-mail notifications (Android and iPhone), with a "hide sender and subject" option in Settings
 - [x] Attachments save/share, links open in the in-app browser, roammail.net links open the app
 - [x] Phone layout checked on every screen at 360 and 390 px wide; accessibility checks clean
+- [x] Website too: public pages, app, settings and every admin tab checked at 320, 375, 768 and 1280 px, no overflow and no accessibility (WCAG 2 AA) issues
 - [x] Stay signed in by default in the apps (30 days, renewed on use)
 - [x] iPhone app shows no payment screens (Apple rule)
 - [x] Privacy policy and subprocessors list cover the apps and Google/Apple notifications

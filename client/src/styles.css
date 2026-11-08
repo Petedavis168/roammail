@@ -327,7 +327,7 @@ kbd { font: 12px ui-monospace, monospace; background: var(--panel-2); border: 1p
 .pill { font-size: 12px; font-weight: 600; padding: 2px 10px; border-radius: 10px; }
 .pill.ok { background: rgba(16,124,16,.12); color: var(--ok); }
 .pill.bad { background: rgba(209,52,56,.12); color: var(--danger); }
-.pill.warn { background: rgba(193,156,0,.16); color: #8a6d00; }
+.pill.warn { background: rgba(193,156,0,.16); color: #6b5400; }
 [data-theme='dark'] .pill.warn { color: #f2d98c; }
 .meter { height: 6px; background: var(--border); border-radius: 3px; overflow: hidden; margin-bottom: 3px; }
 .meter div { height: 100%; background: var(--brand); }
@@ -608,7 +608,7 @@ kbd { font: 12px ui-monospace, monospace; background: var(--panel-2); border: 1p
 .mm-dow { font-size: 10.5px; color: var(--muted); padding: 2px 0; }
 .mm-day { border: 0; background: none; font-size: 12px; height: 26px; border-radius: 50%; }
 .mm-day:hover { background: var(--hover); }
-.mm-day.other { color: var(--muted); opacity: .6; }
+.mm-day.other { color: var(--muted); font-weight: 400; }
 .mm-day.today { color: #fff; background: var(--brand); font-weight: 700; }
 .mm-day.sel:not(.today) { background: var(--sel); font-weight: 700; }
 .cal-main { flex: 1; display: flex; flex-direction: column; min-width: 0; }

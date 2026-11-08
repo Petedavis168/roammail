@@ -14,8 +14,8 @@ function MiniMonth({ cursor, onPick, today }) {
   return (
     <div className="mini-month">
       <div className="mm-head"><b>{fmt(m, { month: 'long', year: 'numeric' })}</b>
-        <button className="icon-btn xs" onClick={() => setM(new Date(m.getFullYear(), m.getMonth() - 1, 1))}><Icon name="back" size={14} /></button>
-        <button className="icon-btn xs" onClick={() => setM(new Date(m.getFullYear(), m.getMonth() + 1, 1))}><Icon name="chevron" size={14} /></button></div>
+        <button className="icon-btn xs" aria-label="Previous month" title="Previous month" onClick={() => setM(new Date(m.getFullYear(), m.getMonth() - 1, 1))}><Icon name="back" size={14} /></button>
+        <button className="icon-btn xs" aria-label="Next month" title="Next month" onClick={() => setM(new Date(m.getFullYear(), m.getMonth() + 1, 1))}><Icon name="chevron" size={14} /></button></div>
       <div className="mm-grid">
         {['M', 'T', 'W', 'T', 'F', 'S', 'S'].map((d, i) => <span key={i} className="mm-dow">{d}</span>)}
         {Array.from({ length: 42 }, (_, i) => addDays(start, i)).map((d) => (
@@ -182,7 +182,7 @@ export default function Calendar({ me }) {
         <button className="compose-btn" onClick={() => newAt(nextSlot())}><Icon name="plus" /> New event</button>
         <MiniMonth cursor={cursor} today={now} onPick={(d) => setCursor(startOfDay(d))} />
         <div className="nav-title">My calendars
-          <button className="icon-btn xs" title="New calendar" onClick={async () => { const name = prompt('Calendar name'); if (name) { try { await api.post('/api/calendars', { name }); loadCalendars(); } catch (e) { toast(e.message, { error: true }); } } }}><Icon name="plus" size={14} /></button>
+          <button className="icon-btn xs" aria-label="New calendar" title="New calendar" onClick={async () => { const name = prompt('Calendar name'); if (name) { try { await api.post('/api/calendars', { name }); loadCalendars(); } catch (e) { toast(e.message, { error: true }); } } }}><Icon name="plus" size={14} /></button>
         </div>
         {(calendars || []).map((c) => (
           <label key={c.href} className="cal-item"><input type="checkbox" checked={!hidden.has(c.href)} onChange={() => toggle(c.href)} style={{ accentColor: c.color }} /><span className="cat-dot" style={{ background: c.color }} />{c.name}</label>
