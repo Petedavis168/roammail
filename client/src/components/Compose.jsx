@@ -103,7 +103,7 @@ function Composer({ c, me, prefs, sigData, identities, onClose, onSend, focusInd
       if (cancelled || !editor.current) return;
       const sender = quote?.from?.[0]?.address?.toLowerCase();
       const allowRemote = prefs.showImages === 'always' || (sender && prefs.trustedSenders?.includes(sender));
-      editor.current.innerHTML = init.html != null ? safeHtml(init.html) : `<div><br></div>${sig}${quote ? quoteHtml(quote, init.mode, allowRemote) : ''}`;
+      editor.current.innerHTML = init.html != null ? safeHtml(init.html) : `${init.prefillText ? `<div style="white-space:pre-wrap">${escapeHtml(init.prefillText)}</div>` : '<div><br></div>'}${sig}${quote ? quoteHtml(quote, init.mode, allowRemote) : ''}`; // prefillText: an AI-suggested reply
       setReady(true);
       if (to.length || init.mode === 'forward') {
         const r = document.createRange(); r.setStart(editor.current, 0); r.collapse(true);

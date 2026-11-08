@@ -300,22 +300,21 @@ api.get('/message', wrap(async (req, res) => {
   res.json(fullMessage(folder, r.msg, r.parsed));
 }));
 
-// Gmail-style conversation: find related messages in this folder + Sent.
-api.get('/thread', wrap(async (req, res) => {
-  const { folder = 'INBOX', uid } = req.query;
-  const first = await loadMessage(req.user, folder, uid);
-  if (!first) return res.status(404).json({ error: 'Message not found' });
+// Gmail-style conversation: find related messages in this folder + Sent. Also used by AI help (ai.js).
+export async function loadThread(user, folder = 'INBOX', uid, { markSeen = true } = {}) {
+  const first = await loadMessage(user, folder, uid, { markSeen });
+  if (!first) return null;
   const root = fullMessage(folder, first.msg, first.parsed);
   const ids = new Set([root.messageId, root.inReplyTo, ...root.references].filter(Boolean));
 
-  const sent = await specialFolder(req.user, '\\Sent');
+  const sent = await specialFolder(user, '\\Sent');
   const folders = [...new Set([folder, 'INBOX', sent].filter(Boolean))];
   const seen = new Map();
   seen.set(`${folder}:${root.uid}`, root);
 
   for (const f of folders) {
     try {
-      await withMailbox(req.user, f, async (client) => {
+      await withMailbox(user, f, async (client) => {
         const criteria = [];
         for (const id of ids) {
           criteria.push({ header: { 'Message-ID': id } }, { header: { References: id } }, { header: { 'In-Reply-To': id } });
@@ -339,7 +338,13 @@ api.get('/thread', wrap(async (req, res) => {
     if (!byId.has(k) || (m.folder === folder && m.uid === root.uid)) byId.set(k, m);
   }
   const messages = [...byId.values()].sort((a, b) => new Date(a.date) - new Date(b.date));
-  res.json({ subject: root.subject, messages });
+  return { subject: root.subject, messages };
+}
+
+api.get('/thread', wrap(async (req, res) => {
+  const t = await loadThread(req.user, req.query.folder || 'INBOX', req.query.uid);
+  if (!t) return res.status(404).json({ error: 'Message not found' });
+  res.json(t);
 }));
 
 api.get('/attachment', wrap(async (req, res) => {

@@ -27,6 +27,23 @@ function PreviewToggle() {
   if (on === null) return null;
   return <label className="check" style={{ marginLeft: 22 }}><input type="checkbox" checked={on} onChange={async (e) => { const v = e.target.checked; setOn(v); await api.put('/api/push/preview', { on: v }).catch(() => setOn(!v)); }} /> Show sender and subject (turn off to show only "New mail")</label>;
 }
+import { aiStatus, setAiEnabled, aiConsentText } from '../ai.js';
+function AiSetting() {
+  const [st, setSt] = useState(null);
+  useEffect(() => { aiStatus(true).then(setSt); }, []);
+  if (!st?.available) return null;
+  return (
+    <>
+      <h3>AI help</h3>
+      {st.blockedByOrg ? <p className="muted small">Your company has turned off AI help.</p> : (
+        <>
+          <label className="check"><input type="checkbox" checked={!!st.enabled} onChange={async (e) => setSt(await setAiEnabled(e.target.checked))} /> Summarise conversations, suggest replies and find mail that needs a reply</label>
+          <p className="muted small">{aiConsentText}{st.limit != null ? ` Free accounts get ${st.limit} AI requests a month (${Math.max(0, st.limit - st.used)} left this month).` : ''}</p>
+        </>
+      )}
+    </>
+  );
+}
 import Security from './settings/Security.jsx';
 import { AutoReply, Rules, ImportMail } from './settings/MailTools.jsx';
 import SpamSettings from './settings/Spam.jsx';
@@ -65,6 +82,7 @@ function General({ prefs, setPrefs, me }) {
       )}
       <label className="check"><input type="checkbox" checked={prefs.notifications} onChange={set('notifications')} /> Desktop notifications for new mail</label>
       <PushToggle />
+      <AiSetting />
       <h3>Categories</h3>
       {prefs.categories.map((c, i) => (
         <div key={i} className="cat-edit">

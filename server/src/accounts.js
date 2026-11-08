@@ -213,7 +213,7 @@ export async function requireDomainAdmin(req, domain) {
   if (d.suspended && !(await rolesFor(req.user.email)).superAdmin) throw fail(403, 'This organization is suspended');
   return d;
 }
-async function requireOrgAdmin(req, orgId) {
+export async function requireOrgAdmin(req, orgId) {
   const o = await q.get('SELECT * FROM orgs WHERE id = ?', Number(orgId));
   if (!o) throw fail(404, 'Organization not found');
   if (!await isOrgAdmin(req.user, o.id)) throw fail(403, 'You are not an admin of this organization');

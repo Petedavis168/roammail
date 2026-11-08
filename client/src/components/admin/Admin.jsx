@@ -428,6 +428,12 @@ function OrgSecurity({ org, reload }) {
         {without.length > 0 && <div className="chips-wrap">{without.map((u) => <span key={u.email} className="rchip locked">{u.email}</span>)}</div>}
       </div>
       <div className="card">
+        <h3>AI help</h3>
+        <label className="check big"><input type="checkbox" checked={!org.ai_blocked} onChange={async (e) => { try { await api.put(`/api/ai/org/${org.id}`, { blocked: !e.target.checked }); toast(e.target.checked ? 'AI help allowed' : 'AI help turned off for everyone'); reload(); } catch (x) { toast(x.message, { error: true }); } }} />
+          Allow people in {org.name} to use AI help</label>
+        <small className="muted">AI help (thread summaries, suggested replies, "what needs my reply") is off until each person turns it on, and it sends only the emails they choose to Anthropic (Claude). Turn this off if your company doesn't allow AI tools.</small>
+      </div>
+      <div className="card">
         <h3>Automatic forwarding</h3>
         <label className="check big"><input type="checkbox" checked={!!org.allow_external_forward} onChange={(e) => set({ allowExternalForward: e.target.checked }, 'Saved')} />
           Allow people to auto-forward mail to addresses outside {org.name}</label>

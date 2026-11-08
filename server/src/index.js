@@ -33,6 +33,7 @@ import { legalPages, privacy, startRetention } from './privacy.js';
 import { appLinks } from './nativepush.js';
 import { clientErrors } from './clienterrors.js';
 import { passkeysApi, passkeyLogin } from './passkeys.js';
+import { aiApi } from './ai.js';
 import { calendar } from './calendar.js';
 import { contacts } from './contacts.js';
 import { groups } from './groups.js';
@@ -106,6 +107,7 @@ app.use('/api', accounts);
 app.use('/api', signatures);
 app.use('/api', securityApi);
 app.use('/api', passkeysApi);
+app.use('/api', aiApi);
 app.use('/api', mailtools);
 app.use('/api', spam);
 app.use('/api', deviceSetupApi);
@@ -125,10 +127,11 @@ app.use('/api', outboundAdmin);
 app.use('/api', (req, res) => res.status(404).json({ error: 'Not found' }));
 app.use('/api', (err, req, res, _next) => {
   const status = err.status || (err.code === 'LIMIT_FILE_SIZE' ? 413 : err.authenticationFailed ? 401 : 500);
-  if (status >= 500) console.error(`APP_ERROR [${new Date().toISOString()}] ${req.method} ${req.path}`, err);
+  if (status >= 500 && err.expose !== true) console.error('APP_ERROR [%s] %s %s', new Date().toISOString(), req.method, String(req.path).replace(/[\r\n]/g, ''), err);
   // Never leak internals: only messages we created on purpose (status < 500) or from the mail server are shown
-  const safe = status < 500 || err.responseText || /^mailcow:/.test(err.message || '') || err.code === 'EAUTH';
-  res.status(status).json({ error: safe ? (err.responseText || err.message) : 'Something went wrong. Please try again.' });
+  const safe = status < 500 || err.expose === true || err.responseText || /^mailcow:/.test(err.message || '') || err.code === 'EAUTH';
+  const code = (status < 500 || err.expose === true) && /^[a-z][a-z0-9_]*$/.test(String(err.code || '')) ? err.code : undefined; // our own codes only (ai_off, ...)
+  res.status(status).json({ error: safe ? (err.responseText || err.message) : 'Something went wrong. Please try again.', ...(code ? { code } : {}) });
 });
 
 // Public marketing site (Pete's static site in /site): roammail.net/, its pages and /assets
