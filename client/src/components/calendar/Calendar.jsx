@@ -72,7 +72,7 @@ function TimeGrid({ days, events, onSlot, onOpen, now }) {
           </div>
         ))}
       </div>
-      <div className="tg-body" ref={ref}>
+      <div className="tg-body" ref={ref} tabIndex={0} aria-label="Calendar times">
         <div className="tg-inner" style={{ gridTemplateColumns: `56px repeat(${days.length}, 1fr)`, height: HOUR_PX * 24 }}>
           <div className="tg-hours">{Array.from({ length: 24 }, (_, h) => <span key={h} style={{ top: h * HOUR_PX }}>{h ? timeLabel(new Date(2000, 0, 1, h)) : ''}</span>)}</div>
           {days.map((d) => {

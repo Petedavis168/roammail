@@ -83,16 +83,17 @@ export default function MessageList({ list, title, search, onClearSearch, folder
       {(folderUse === '\\Trash' || folderUse === '\\Junk') && messages.length > 0 && !search && (
         <div className="banner">Items here can be removed permanently. <button className="link" onClick={onEmpty}>Empty folder now</button></div>
       )}
-      <div className="rows" ref={ref} onScroll={onScroll} role="listbox" aria-label="Messages">
+      <div className="rows" ref={ref} onScroll={onScroll}>
+        <div role="list" aria-label="Messages">
         {messages.map((m) => {
           const group = dateGroup(m.date);
-          const header = group !== lastGroup ? <div className="group-head" key={`g-${group}-${m.uid}`}>{group}</div> : null;
+          const header = group !== lastGroup ? <div className="group-head" role="listitem" key={`g-${group}-${m.uid}`}>{group}</div> : null;
           lastGroup = group;
           const who = showTo ? m.to : m.from;
           const person = who?.[0] || { name: '', address: '' };
           return [
             header,
-            <div key={m.uid} role="option" aria-selected={active === m.uid}
+            <div key={m.uid} role="listitem" aria-current={active === m.uid ? 'true' : undefined}
               className={`row ${m.seen ? '' : 'unread'} ${active === m.uid ? 'active' : ''} ${selected.has(m.uid) ? 'selected' : ''}`}
               onClick={(e) => onRowClick(m, e)} draggable={!allInboxes} onDragStart={(e) => onDragStart(m, e)}>
               <div className="row-left" onClick={(e) => toggle(m.uid, e)}>
@@ -112,7 +113,7 @@ export default function MessageList({ list, title, search, onClearSearch, folder
                     : <span className="date">{fmtDate(m.date)}</span>}
                 </div>
                 <div className="row-sub">
-                  {!m.seen && <span className="unread-dot" aria-label="Unread" />}
+                  {!m.seen && <span className="unread-dot" role="img" aria-label="Unread" />}
                   <span className="subject">{m.draft && <span className="draft-tag">[Draft] </span>}{m.subject}</span>
                   {density !== 'compact' && m.snippet && <span className="snippet"> — {m.snippet}</span>}
                   {m.categories?.map((c) => <span key={c} className="cat" style={{ '--c': catColor(c) }}>{c}</span>)}
@@ -132,6 +133,7 @@ export default function MessageList({ list, title, search, onClearSearch, folder
             </div>,
           ];
         })}
+        </div>
         {loading && <div className="list-msg"><div className="spinner" /></div>}
         {!loading && messages.length === 0 && (
           <div className="empty">

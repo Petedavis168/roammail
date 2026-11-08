@@ -41,6 +41,11 @@ test('push: new mail triggers an encrypted web push; sign-out everywhere stops i
     assert.equal((await call('POST', '/api/push/native', { platform: 'ios', token: 'nothex' })).status, 400);
     assert.equal((await call('POST', '/api/push/native', { platform: 'android', token: 'fcm-device-token-1234567890' })).status, 200);
     assert.equal((await call('POST', '/api/push/native/unregister', { platform: 'android', token: 'fcm-device-token-1234567890' })).status, 200);
+    // notification preview: on by default, can hide sender and subject
+    assert.equal((await call('GET', '/api/push/preview')).data.on, true);
+    assert.equal((await call('PUT', '/api/push/preview', { on: false })).status, 200);
+    assert.equal((await call('GET', '/api/push/preview')).data.on, false);
+    assert.equal((await call('PUT', '/api/push/preview', { on: true })).status, 200);
     await sleep(5000); // worker starts watching
     const fd = new FormData(); fd.append('to', s.data.email); fd.append('subject', 'Ping'); fd.append('text', 'hello');
     assert.equal((await call('POST', '/api/send', fd)).status, 200);

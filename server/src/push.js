@@ -59,6 +59,15 @@ async function saveSubs(users, endpoint, p256dh, auth) {
   }
 }
 
+// Show sender and subject in notifications (default), or only "New mail"
+const previewOn = async (email) => Number((await q.get('SELECT push_preview FROM user_security WHERE email = ?', email))?.push_preview ?? 1) !== 0;
+push.get('/push/preview', wrap(async (req, res) => res.json({ on: await previewOn(req.user.email) })));
+push.put('/push/preview', wrap(async (req, res) => {
+  await q.run('INSERT INTO user_security(email) VALUES(?) ON CONFLICT(email) DO NOTHING', req.user.email);
+  await q.run('UPDATE user_security SET push_preview = ? WHERE email = ?', req.body.on === false ? 0 : 1, req.user.email);
+  res.json({ ok: true, on: req.body.on !== false });
+}));
+
 // Phone apps (mobile/): the device token from Firebase (Android) or Apple (iPhone)
 const nativeEndpoint = (platform, token) => {
   const t = String(token || '');
@@ -136,7 +145,9 @@ async function watch(email, user) {
         for await (const m of client.fetch(`${d.prevCount + 1}:${d.count}`, { envelope: true, flags: true })) {
           if (m.flags?.has('\\Seen')) continue;
           const from = m.envelope.from?.[0];
-          await notify(email, { title: from?.name || from?.address || 'New mail', body: String(m.envelope.subject || '(no subject)').slice(0, 140), tag: `mail-${email}-${m.uid || m.seq}`, url: '/app' });
+          const tag = `mail-${email}-${m.uid || m.seq}`;
+          if (await previewOn(email)) await notify(email, { title: from?.name || from?.address || 'New mail', body: String(m.envelope.subject || '(no subject)').slice(0, 140), tag, url: '/app' });
+          else await notify(email, { title: 'New mail', body: email, tag, url: '/app' }); // sender and subject hidden
         }
       } catch { /* next time */ }
     });

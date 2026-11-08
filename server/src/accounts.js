@@ -193,7 +193,7 @@ publicAccounts.post('/signup', rateLimit({ windowMs: 60 * 60_000, limit: 10 }), 
     await q.run('UPDATE user_security SET birthday = ?, phone = ? WHERE email = ?', details.birthday, seal({ p: details.phone }), email); // phone stored encrypted
   }
   deliverWelcome({ email, password, name }).catch(() => {});
-  await setSession(res, { email, password, name }, req);
+  await setSession(res, { email, password, name, remember: req.body.remember === true }, req); // phone apps stay signed in
   const mailboxId = await ensureMailboxId(email, { name });
   res.json({ email, mailboxId, redirect: inboxUrl(mailboxId), setupRequired: (await setupState(email)).setupRequired });
 }));
