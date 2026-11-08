@@ -35,7 +35,7 @@ export const MAILCOW_API_ALLOWLIST = [
   // company archive (BCC maps)
   ['GET', /^get\/bcc\/all$/], ['POST', /^add\/bcc$/], ['POST', /^delete\/bcc$/],
   // outbound spam watchdog (read-only logs) and status
-  ['GET', /^get\/logs\/(rspamd-history|ratelimited)\/\d{1,4}$/], ['GET', /^get\/status\/version$/],
+  ['GET', /^get\/logs\/(rspamd-history|ratelimited|postfix)\/\d{1,4}$/], ['GET', /^get\/status\/version$/],
 ];
 export const allowedCall = (method, path) => MAILCOW_API_ALLOWLIST.some(([m, re]) => m === method && re.test(path));
 

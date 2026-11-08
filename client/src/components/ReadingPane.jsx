@@ -82,7 +82,7 @@ function InviteCard({ m, me }) {
   );
 }
 
-function ThreadMessage({ m, expanded, onToggle, onReply, prefs, setPrefs, last, orgDomains, onBlock, isJunk, me }) {
+function ThreadMessage({ m, expanded, onToggle, onReply, prefs, setPrefs, last, orgDomains, onBlock, isJunk, me, onAddTask, onFollowUp }) {
   const sender = m.from?.[0] || {};
   const trusted = prefs.showImages === 'always' || prefs.trustedSenders.includes(sender.address?.toLowerCase());
   const [allow, setAllow] = useState(trusted);
@@ -114,7 +114,7 @@ function ThreadMessage({ m, expanded, onToggle, onReply, prefs, setPrefs, last, 
             {m.security?.dkim === 'pass' && m.security?.dmarc === 'pass' && <span className="verified" title="Sender's domain verified (DKIM + DMARC)"><Icon name="lock" size={12} /></span>}
           </div>
           <div className="muted small" onClick={(e) => { e.stopPropagation(); setDetails((d) => !d); }} style={{ cursor: 'pointer' }}>
-            to {[...(m.to || []), ...(m.cc || [])].map(personName).join(', ') || 'undisclosed recipients'} <Icon name="down" size={12} />
+            to {[...(m.to || []), ...(m.cc || [])].map((a) => (a.address?.toLowerCase() === me?.email?.toLowerCase() ? 'me' : personName(a))).join(', ') || 'undisclosed recipients'} <Icon name="down" size={12} />
           </div>
           {details && (
             <div className="details">
@@ -138,6 +138,13 @@ function ThreadMessage({ m, expanded, onToggle, onReply, prefs, setPrefs, last, 
                   try { await api.post('/api/address-contacts', { first: parts[0] || '', last: parts.slice(1).join(' '), name: sender.name || '', emails: [{ value: sender.address, type: 'work' }] }); alert(`${sender.name || sender.address} was added to your contacts`); }
                   catch (e) { alert(e.message); }
                 }}><Icon name="users" /> Add to contacts</button>}
+                {onAddTask && <button onClick={() => { setMenu(false); onAddTask(m); }}><Icon name="check" /> Add as task <kbd>Shift+T</kbd></button>}
+                {onFollowUp && m.messageId && <>
+                  <div className="menu-note">Remind me if no reply</div>
+                  {[['Tomorrow', 1], ['In 3 days', 3], ['In a week', 7]].map(([l, d]) => (
+                    <button key={d} onClick={() => { setMenu(false); onFollowUp(m, d); }}><Icon name="clock" /> {l}</button>
+                  ))}
+                </>}
                 {sender.address && <button onClick={() => { setMenu(false); onBlock(sender.address); }}><Icon name="block" /> Block {sender.address}</button>}
                 <button onClick={() => window.open(mailUrl(`/api/raw?folder=${encodeURIComponent(m.folder)}&uid=${m.uid}`), '_blank')}><Icon name="external" /> View source</button>
                 <button onClick={() => { const f = document.querySelector(`[data-msg="${m.folder}:${m.uid}"] iframe`); f?.contentWindow?.print(); }}><Icon name="print" /> Print</button>
@@ -175,7 +182,7 @@ function ThreadMessage({ m, expanded, onToggle, onReply, prefs, setPrefs, last, 
   );
 }
 
-export default function ReadingPane({ folder, msg, me, prefs, setPrefs, conversation, onReply, act, categories, onClose, isJunk, orgDomains = [] }) {
+export default function ReadingPane({ folder, msg, me, prefs, setPrefs, conversation, onReply, act, categories, onClose, isJunk, orgDomains = [], onAddTask, onFollowUp, onThread }) {
   const [thread, setThread] = useState(null);
   const [error, setError] = useState('');
   const [expanded, setExpanded] = useState(new Set());
@@ -185,7 +192,7 @@ export default function ReadingPane({ folder, msg, me, prefs, setPrefs, conversa
     setThread(null); setError('');
     const p = conversation ? api.thread(folder, msg.uid) : api.get('/api/message', { folder, uid: msg.uid }).then((m) => ({ subject: m.subject, messages: [m] }));
     p.then((t) => {
-      setThread(t);
+      setThread(t); onThread?.(t.messages[t.messages.length - 1]);
       const last = t.messages[t.messages.length - 1];
       setExpanded(new Set([`${last.folder}:${last.uid}`, ...t.messages.filter((m) => !m.seen).map((m) => `${m.folder}:${m.uid}`), `${folder}:${msg.uid}`]));
     }).catch((e) => setError(e.message));
@@ -194,8 +201,9 @@ export default function ReadingPane({ folder, msg, me, prefs, setPrefs, conversa
   if (!msg) {
     return (
       <section className="reading empty-pane">
-        <Icon name="mail" size={64} />
-        <p>Select an item to read</p>
+        <Icon name="mail" size={48} />
+        <b>Nothing selected</b>
+        <p className="muted">Pick a message to read it here.</p>
         <small className="muted">Tip: press <kbd>?</kbd> for keyboard shortcuts</small>
       </section>
     );
@@ -209,13 +217,6 @@ export default function ReadingPane({ folder, msg, me, prefs, setPrefs, conversa
         <h1>{msg.subject}</h1>
         <div className="reading-tools">
           {msg.categories?.map((c) => <span key={c} className="cat" style={{ '--c': catColor(c) }}>{c}</span>)}
-          <button className="icon-btn" title="Snooze (b)" onClick={() => act.snooze(msg.uid)}><Icon name="clock" /></button>
-          <button className="icon-btn" title="Archive (e)" onClick={() => act.archive(msg.uid)}><Icon name="archive" /></button>
-          <button className="icon-btn" title="Delete (#)" onClick={() => act.del(msg.uid)}><Icon name="trash" /></button>
-          <button className="icon-btn" title={msg.flagged ? 'Unflag' : 'Flag (s)'} onClick={() => act.flag(msg.uid)}>
-            <Icon name="flag" fill={msg.flagged ? 'currentColor' : 'none'} style={{ color: msg.flagged ? '#d13438' : undefined }} />
-          </button>
-          <button className="icon-btn" title="Mark unread" onClick={() => { act.read(false, msg.uid); onClose(); }}><Icon name="mail" /></button>
         </div>
       </div>
       {isJunk && <div className="banner warn">This message was identified as junk. Be careful with links and attachments. <button className="link" onClick={() => act.notJunk(msg.uid, msg.from?.[0]?.address)}>It's not junk</button></div>}
@@ -228,17 +229,17 @@ export default function ReadingPane({ folder, msg, me, prefs, setPrefs, conversa
           return (
             <ThreadMessage key={k} m={m} last={i === thread.messages.length - 1} expanded={expanded.has(k)} prefs={prefs} setPrefs={setPrefs}
               onToggle={() => setExpanded((s) => { const n = new Set(s); n.has(k) ? n.delete(k) : n.add(k); return n; })}
-              onReply={onReply} orgDomains={orgDomains} onBlock={act.block} isJunk={isJunk} me={me} />
+              onReply={onReply} orgDomains={orgDomains} onBlock={act.block} isJunk={isJunk} me={me} onAddTask={onAddTask} onFollowUp={onFollowUp} />
           );
         })}
-        {thread && (
-          <div className="quick-reply">
-            <button className="btn" onClick={() => onReply(thread.messages[thread.messages.length - 1], 'reply')}><Icon name="reply" /> Reply</button>
-            <button className="btn" onClick={() => onReply(thread.messages[thread.messages.length - 1], 'all')}><Icon name="replyAll" /> Reply all</button>
-            <button className="btn" onClick={() => onReply(thread.messages[thread.messages.length - 1], 'forward')}><Icon name="forward" /> Forward</button>
-          </div>
-        )}
       </div>
+      {thread && (
+        <div className="reply-bar">
+          <button className="btn" onClick={() => onReply(thread.messages[thread.messages.length - 1], 'reply')}><Icon name="reply" /> Reply</button>
+          <button className="btn" onClick={() => onReply(thread.messages[thread.messages.length - 1], 'all')}><Icon name="replyAll" /> Reply all</button>
+          <button className="btn" onClick={() => onReply(thread.messages[thread.messages.length - 1], 'forward')}><Icon name="forward" /> Forward</button>
+        </div>
+      )}
     </section>
   );
 }

@@ -17,12 +17,7 @@ import SharedMailboxes from './SharedMailboxes.jsx';
 import Archive from './Archive.jsx';
 import { TemplatesEditor } from '../settings/Templates.jsx';
 
-const genPassword = () => {
-  const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnpqrstuvwxyz23456789';
-  const a = crypto.getRandomValues(new Uint32Array(14));
-  let p = [...a].map((n) => chars[n % chars.length]).join('');
-  return `${p.slice(0, 5)}-${p.slice(5, 10)}-${p.slice(10)}${a[0] % 10}`;
-};
+import { tempPassword as genPassword } from '../../temppass.js'; // two words + 4 digits, no look-alike characters (4a)
 
 function Modal({ title, onClose, children }) {
   return (
@@ -41,6 +36,115 @@ let quotaCfg = null;
 const loadQuota = () => (quotaCfg ||= api.signupConfig().then((c) => c.quota || { business: 10240, businessMax: 10240 }).catch(() => ({ business: 10240, businessMax: 10240 })));
 const sizeOptions = (q, current) => [...new Set([1024, 2048, 5120, 10240, 20480, 51200, 102400].filter((m) => m <= q.businessMax).concat([q.business, current].filter(Boolean)))].sort((a, b) => a - b);
 function useQuota() { const [q, setQ] = useState({ business: 10240, businessMax: 10240 }); useEffect(() => { loadQuota().then(setQ); }, []); return q; }
+
+// Item 6: copy many people's old mailboxes at once (one row per person; app passwords from their old provider)
+// Staff-only addresses: a bare first name on the free domain (e.g. pete@roammail.net). Customers can't take these.
+function StaffAddresses({ domain }) {
+  const [f, setF] = useState({ localPart: '', name: '' });
+  const [older, setOlder] = useState(null);
+  useEffect(() => { api.get('/api/super/first-name-accounts').then(setOlder).catch(() => setOlder([])); }, []);
+  const [made, setMade] = useState(null);
+  const [err, setErr] = useState('');
+  return (
+    <div className="card" style={{ marginTop: 16 }}>
+      <h3>Staff addresses</h3>
+      <p className="muted small">Addresses that are only a first name (like <b>pete@{domain}</b>) are kept for Roammail staff so nobody can pose as us. Create them here; the person sets their own password at first sign-in.</p>
+      <form className="pick-time" onSubmit={async (e) => {
+        e.preventDefault(); setErr(''); setMade(null);
+        try { setMade(await api.post('/api/super/staff-mailboxes', f)); setF({ localPart: '', name: '' }); } catch (x) { setErr(x.message); }
+      }}>
+        <input placeholder="first name (address)" value={f.localPart} onChange={(e) => setF({ ...f, localPart: e.target.value })} required />
+        <input placeholder="Full name" value={f.name} onChange={(e) => setF({ ...f, name: e.target.value })} required />
+        <button className="btn primary">Create</button>
+      </form>
+      {err && <div className="form-error">{err}</div>}
+      {made && <div className="callout ok"><small>Created <b>{made.email}</b>. Temporary password: <code>{made.password}</code> (shown once; they must change it at first sign-in).</small></div>}
+      {older?.length > 0 && (
+        <>
+          <p className="small" style={{ marginTop: 12 }}><b>{older.length}</b> customer account{older.length === 1 ? '' : 's'} took a first-name address before this rule. Review them in Abuse if any look like impersonation:</p>
+          <p className="small mono">{older.map((o) => o.email).join(', ')}</p>
+        </>
+      )}
+    </div>
+  );
+}
+
+// Daily sending report (plan 5h): what goes out by email each morning, on demand
+function ReputationCard() {
+  const [r, setR] = useState(null); const [busy, setBusy] = useState(false);
+  const load = (send) => { setBusy(true); api.get('/api/super/reputation', send ? { send: 1 } : {}).then(setR).catch((e) => alert(e.message)).finally(() => setBusy(false)); };
+  const color = { advance: 'ok', hold: 'warn', 'roll back': 'bad' };
+  return (
+    <div className="card" style={{ marginTop: 16 }}>
+      <h3>Sending report</h3>
+      <p className="muted small">Emailed to super-admins and abuse@ every morning. Delivery, bounces, pauses, complaints and blocklists for the last 24 hours, with a warm-up recommendation.</p>
+      {r && (
+        <div className="small">
+          <p><span className={`pill ${color[r.advice]}`}>{r.advice}</span> {r.why.join('; ')}</p>
+          <p>Delivered {r.delivery ? r.delivery.sent : 'n/a'} · bounced {r.delivery ? `${r.delivery.bounced} (${(r.bounceRate * 100).toFixed(1)}%)` : 'n/a'} · paused {r.holds.length} · complaints {r.complaints} · listings {r.listed} · new sign-ups {r.signups}</p>
+        </div>
+      )}
+      <div className="actions"><button className="btn sm" disabled={busy} onClick={() => load(false)}>{r ? 'Refresh' : 'Show now'}</button><button className="btn sm" disabled={busy} onClick={() => load(true)}>Email it now</button></div>
+    </div>
+  );
+}
+
+// Item 2: complimentary plan (fee waiver) for a business: forever, until a date, or N months. Super-admins only.
+function CompControl({ o, onChange }) {
+  const COMP_FOREVER = 32503680000000;
+  const until = Number(o.comp_until || 0);
+  const active = until > Date.now();
+  const set = async (mode) => {
+    let body = { mode };
+    if (mode === 'until') { const d = prompt('Complimentary until (YYYY-MM-DD)'); if (!d) return; body.until = d; }
+    if (mode === 'months') { const n = prompt('How many months?', '12'); if (!n) return; body.months = Number(n); }
+    if (mode !== 'off') { const note = prompt('Note for the audit log (why is this complimentary?)', o.comp_note || ''); if (!note) return; body.note = note; }
+    else if (!confirm(`End the complimentary plan for ${o.name}? Admins get the normal 7-day grace before unpaid mailboxes pause.`)) return;
+    try { await api.put(`/api/super/orgs/${o.id}/comp`, body); onChange(); } catch (e) { alert(e.message); }
+  };
+  return (
+    <span className="comp">
+      {active && <span className="pill ok" title={o.comp_note || ''}>Complimentary {until >= COMP_FOREVER ? '(forever)' : `until ${new Date(until).toLocaleDateString()}`}</span>}
+      <select value="" onChange={(e) => e.target.value && set(e.target.value)} aria-label="Complimentary plan">
+        <option value="">{active ? 'Change comp…' : 'Comp…'}</option>
+        <option value="forever">Forever</option><option value="months">For N months</option><option value="until">Until a date</option>
+        {active && <option value="off">End comp</option>}
+      </select>
+    </span>
+  );
+}
+
+function ImportMailBulk({ domain, onClose }) {
+  const toast = useToast();
+  const [results, setResults] = useState(null);
+  const [busy, setBusy] = useState(false);
+  const template = () => {
+    const blob = new Blob([`Mailbox,Provider,Old email,App password,IMAP server\r\njane@${domain},gmail,jane.smith@gmail.com,abcd efgh ijkl mnop,\r\nbob@${domain},other,bob@oldhost.com,secret,imap.oldhost.com\r\n`], { type: 'text/csv' });
+    const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = 'roammail-mail-import-template.csv'; a.click();
+  };
+  const run = async (file) => {
+    setBusy(true);
+    try { setResults(await api.post('/api/admin/imports/bulk', { csv: await file.text() })); } catch (e) { toast(e.message, { error: true }); } finally { setBusy(false); }
+  };
+  return (
+    <Modal title={`Import old mail for @${domain}`} onClose={onClose}>
+      {!results ? (
+        <>
+          <p className="small">One row per person: <b>Mailbox</b> (their new address here), <b>Provider</b> (gmail, yahoo, aol, icloud or other), <b>Old email</b>, <b>App password</b>, and <b>IMAP server</b> for "other".
+            Each login is tested first; mail keeps syncing for 7 days. Delete the file afterwards: it contains passwords. <button className="link" onClick={template}>Download a template</button></p>
+          <input type="file" accept=".csv,text/csv" onChange={(e) => e.target.files[0] && run(e.target.files[0])} />
+          {busy && <div className="spinner" />}
+        </>
+      ) : (
+        <>
+          <p><b>{results.started}</b> of {results.results.length} imports started.</p>
+          {results.results.filter((r) => !r.ok).map((r, i) => <div key={i} className="bad small">{r.mailbox}: {r.error}</div>)}
+          <div className="actions"><button className="btn" onClick={onClose}>Done</button></div>
+        </>
+      )}
+    </Modal>
+  );
+}
 
 function ImportUsers({ domain, onClose }) {
   const toast = useToast();
@@ -107,6 +211,7 @@ function Users({ org, domains }) {
   const [users, setUsers] = useState(null);
   const [adding, setAdding] = useState(false);
   const [importing, setImporting] = useState(false);
+  const [importingMail, setImportingMail] = useState(false);
   const [created, setCreated] = useState(null);
   const [edit, setEdit] = useState(null);
   const [q, setQ] = useState('');
@@ -133,6 +238,7 @@ function Users({ org, domains }) {
         <div className="spacer" />
         <span className="muted small">{users?.length ?? '…'} of {org.max_mailboxes} users</span>
         <button className="btn" onClick={() => setImporting(true)}><Icon name="users" size={16} /> Import from spreadsheet</button>
+        <button className="btn" onClick={() => setImportingMail(true)}><Icon name="import" size={16} /> Import old mail</button>
         <button className="btn primary" onClick={() => setAdding(true)}><Icon name="plus" size={16} /> Invite people</button>
       </div>
       <div className="table">
@@ -153,8 +259,14 @@ function Users({ org, domains }) {
             <span className="actions">
               <button className="btn sm" onClick={() => setEdit(u)}>Edit</button>
               <button className="btn sm" title="Email a new set-password link" onClick={async () => { const to = prompt(`Send ${u.email} a new invite link. Their current email:`); if (!to) return; try { await api.post('/api/admin/users/invite', { email: u.email, name: u.name, inviteEmail: to }); alert(`Invite sent to ${to}`); } catch (e) { alert(e.message); } }}>Resend invite</button>
-              <button className="btn sm" onClick={() => { const p = genPassword(); if (confirm(`Reset password for ${u.email}?`)) update(u.email, { password: p }, 'Password reset').then(() => setCreated({ email: u.email, password: p, reset: true })); }}>
-                <Icon name="key" size={14} /> Reset</button>
+              <button className="btn sm" title="Make a new temporary password and email it to their own (recovery) address" onClick={async () => {
+                if (!confirm(`Send ${u.email} a temporary password? They'll be signed out everywhere and must choose a new password when they sign in.`)) return;
+                try {
+                  const r = await api.post('/api/admin/users/temp-password', { email: u.email });
+                  if (r.sent) alert(`Temporary password sent to ${r.to}`);
+                  else setCreated({ email: u.email, password: r.password, reset: true });
+                } catch (e) { alert(e.message); }
+              }}><Icon name="key" size={14} /> Send temporary password</button>
               {u.twoFactor && <button className="btn sm" title="Turn off 2-step verification (lost phone)" onClick={() => { if (confirm(`Turn off 2-step verification for ${u.email}? They'll be signed out and asked to set it up again.`)) update(u.email, { reset2fa: true }, '2-step verification reset'); }}>
                 <Icon name="shield" size={14} /> Reset 2-step</button>}
               <button className="icon-btn" title="Delete user" onClick={() => del(u)}><Icon name="trash" size={16} /></button>
@@ -164,6 +276,7 @@ function Users({ org, domains }) {
       </div>
       <datalist id="org-departments">{[...new Set((users || []).map((u) => u.department).filter(Boolean))].map((d) => <option key={d} value={d} />)}</datalist>
       {importing && <ImportUsers domain={domain} onClose={() => { setImporting(false); load(); }} />}
+      {importingMail && <ImportMailBulk domain={domain} onClose={() => setImportingMail(false)} />}
       {adding && <AddUser domain={domain} orgId={org.id} onClose={() => setAdding(false)} onCreated={(c) => { setAdding(false); setCreated(c); load(); }} />}
       {edit && <EditUser u={edit} onClose={() => setEdit(null)} onSave={async (patch) => { await update(edit.email, patch, 'User updated'); setEdit(null); }} />}
       {created && (
@@ -473,6 +586,8 @@ function Platform() {
         <p className="muted small">Mail server: <b>{d.settings.mailHostname}</b> · Route 53 auto-DNS: <b>{d.settings.route53 ? 'on' : 'off'}</b></p>
       </div>
       <FriendlyCodes />
+      <StaffAddresses domain={d.settings.signupDomain} />
+      <ReputationCard />
       <h3>Businesses</h3>
       <div className="table">
         <div className="tr th"><span>Business</span><span>Domains</span><span>User limit</span><span>Status</span><span /></div>
@@ -483,7 +598,8 @@ function Platform() {
             <span><input type="number" min="1" defaultValue={o.max_mailboxes} className="num" onBlur={(e) => Number(e.target.value) !== o.max_mailboxes && patchOrg(o, { maxMailboxes: Number(e.target.value) })} /></span>
             <span>{o.suspended ? <span className="pill bad">Suspended</span> : <span className="pill ok">Active</span>}
               <label className="check small"><input type="checkbox" checked={o.plan === 'friendly'} onChange={async (e) => { await api.patch(`/api/super/orgs/${o.id}/plan`, { plan: e.target.checked ? 'friendly' : 'standard' }); load(); }} /> Friendly</label>
-              <small className="muted">{o.billing_status !== 'none' ? `billing: ${o.billing_status}` : ''}</small></span>
+              <small className="muted">{o.billing_status !== 'none' ? `billing: ${o.billing_status}` : ''}</small>
+              <CompControl o={o} onChange={load} /></span>
             <span className="actions"><button className="btn sm" onClick={() => confirm(`${o.suspended ? 'Reactivate' : 'Suspend'} ${o.name}?`) && patchOrg(o, { suspended: !o.suspended })}>{o.suspended ? 'Reactivate' : 'Suspend'}</button></span>
           </div>
         ))}

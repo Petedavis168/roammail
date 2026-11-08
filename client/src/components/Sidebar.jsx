@@ -4,7 +4,7 @@ import { Icon } from '../icons.jsx';
 import { folderIcon, folderLabel, SPECIAL_ORDER } from '../util.js';
 import { useToast } from './Toast.jsx';
 
-export default function Sidebar({ folders, current, onSelect, onCompose, reload, onDropMessages, categories, onCategory, onScheduled, onQuarantine, qCount, me, mailboxes = [], mailbox = '', onMailbox }) {
+export default function Sidebar({ folders, current, onSelect, onCompose, reload, onDropMessages, categories, onCategory, onScheduled, onQuarantine, qCount, me, mailboxes = [], mailbox = '', onMailbox, mode = 'full', width = 240, onResizeStart, overlay, allInboxes = null, onAllInboxes }) {
   const toast = useToast();
   const [collapsed, setCollapsed] = useState(() => JSON.parse(localStorage.getItem('collapsed') || '{}'));
   const [dragOver, setDragOver] = useState(null);
@@ -23,7 +23,7 @@ export default function Sidebar({ folders, current, onSelect, onCompose, reload,
     return { specials, tree: byParent, snoozedFolder: folders.find((f) => f.path.toLowerCase() === 'snoozed') };
   }, [folders]);
 
-  const toggle = (p) => setCollapsed((c) => { const n = { ...c, [p]: !c[p] }; localStorage.setItem('collapsed', JSON.stringify(n)); return n; });
+  const toggle = (p) => setCollapsed((c) => { const n = { ...c, [p]: p === '@labels' ? c[p] !== false ? false : true : !c[p] }; localStorage.setItem('collapsed', JSON.stringify(n)); return n; });
 
   const createFolder = async (parent) => {
     const name = prompt(parent ? `New subfolder in "${parent.name}"` : 'New folder name');
@@ -60,7 +60,7 @@ export default function Sidebar({ folders, current, onSelect, onCompose, reload,
     return (
       <>
         <div className={`folder ${current === f.path ? 'on' : ''} ${dragOver === f.path ? 'drop' : ''}`} style={{ paddingLeft: 10 + depth * 14 }}
-          onClick={() => !f.flags.includes('\\Noselect') && onSelect(f.path)} {...dropProps(f)}
+          onClick={() => !f.flags.includes('\\Noselect') && onSelect(f.path)} {...dropProps(f)} title={folderLabel(f)}
           onContextMenu={(e) => { e.preventDefault(); setMenu({ f, x: e.clientX, y: e.clientY }); }}
           role="button" tabIndex={0} onKeyDown={(e) => e.key === 'Enter' && onSelect(f.path)}>
           {kids.length ? (
@@ -76,9 +76,9 @@ export default function Sidebar({ folders, current, onSelect, onCompose, reload,
   };
 
   return (
-    <nav className="sidebar" onClick={() => setMenu(null)}>
-      <button className="compose-btn" onClick={onCompose}><Icon name="pen" /> New mail</button>
-      {(mailboxes.length > 0 || (me?.accounts || []).length > 1) && (
+    <nav className={`sidebar ${mode} ${overlay ? 'overlay' : ''}`} style={mode === 'rail' ? undefined : { width }} onClick={() => setMenu(null)} aria-label="Folders">
+      <button className="compose-btn" onClick={onCompose} title="New mail (c)"><Icon name="pen" /> <span>New mail</span></button>
+      {mailboxes.length > 0 && (
         <label className="mailbox-pick" title="Switch between your accounts and shared mailboxes">
           <Icon name="users" size={14} />
           <select value={mailbox} onChange={(e) => onMailbox(e.target.value)} aria-label="Mailbox">
@@ -88,39 +88,42 @@ export default function Sidebar({ folders, current, onSelect, onCompose, reload,
         </label>
       )}
       <div className="nav-section">
-        {specials.map((f) => (
-          <span key={f.path}>
-            <Row f={f} />
-            {f.specialUse === '\\Junk' && (
-              <div className={`folder ${current === '@quarantine' ? 'on' : ''}`} style={{ paddingLeft: 10 }} onClick={onQuarantine} role="button" title="Definite spam held back by the server">
-                <span className="twisty" /><Icon name="shield" /><span className="fname">Spam quarantine</span>{qCount > 0 && <span className="count muted">{qCount}</span>}
-              </div>
-            )}
-          </span>
-        ))}
-        {!specials.some((f) => f.specialUse === '\\Junk') && (
-          <div className={`folder ${current === '@quarantine' ? 'on' : ''}`} style={{ paddingLeft: 10 }} onClick={onQuarantine} role="button">
-            <span className="twisty" /><Icon name="shield" /><span className="fname">Spam quarantine</span>{qCount > 0 && <span className="count muted">{qCount}</span>}
+        {allInboxes !== null && (
+          <div className={`folder ${current === '@all' ? 'on' : ''}`} style={{ paddingLeft: 10 }} onClick={onAllInboxes} role="button" tabIndex={0} title="All inboxes">
+            <span className="twisty" /><Icon name="users" /><span className="fname">All inboxes</span>{allInboxes > 0 && <span className="count">{allInboxes}</span>}
           </div>
         )}
-        {snoozedFolder && <Row f={snoozedFolder} />}
-        <div className={`folder ${current === '@scheduled' ? 'on' : ''}`} style={{ paddingLeft: 10 }} onClick={onScheduled} role="button">
+        {specials.map((f) => <Row key={f.path} f={f} />)}
+        <div className={`folder ${current === '@scheduled' ? 'on' : ''}`} style={{ paddingLeft: 10 }} onClick={onScheduled} role="button" tabIndex={0} title="Scheduled">
           <span className="twisty" /><Icon name="clock" /><span className="fname">Scheduled</span>
         </div>
+        {snoozedFolder && <Row f={snoozedFolder} />}
+        {!specials.some((f) => f.specialUse === '\\Junk') && (
+          <div className={`folder ${current === '@quarantine' ? 'on' : ''}`} style={{ paddingLeft: 10 }} onClick={onQuarantine} role="button" tabIndex={0}>
+            <span className="twisty" /><Icon name="shield" /><span className="fname">Quarantine</span>{qCount > 0 && <span className="count muted">{qCount}</span>}
+          </div>
+        )}
       </div>
-      <div className="nav-title">Folders <button className="icon-btn xs" onClick={() => createFolder(null)} title="New folder"><Icon name="plus" size={14} /></button></div>
+      {(tree.get('') || []).length > 0 && <div className="nav-title">Folders</div>}
       <div className="nav-section">
         {(tree.get('') || []).map((f) => <Row key={f.path} f={f} />)}
-        {!(tree.get('') || []).length && <div className="nav-empty">Right-click to manage folders</div>}
+        <div className="folder add-row" title="New folder" style={{ paddingLeft: 10 }} onClick={() => createFolder(null)} role="button" tabIndex={0}>
+          <span className="twisty" /><Icon name="plus" /><span className="fname">New folder</span>
+        </div>
       </div>
-      <div className="nav-title">Categories</div>
-      <div className="nav-section">
-        {categories.map((c) => (
-          <div key={c.name} className="folder" onClick={() => onCategory(c)} role="button">
-            <span className="twisty" /><span className="cat-dot" style={{ background: c.color }} /><span className="fname">{c.name}</span>
-          </div>
-        ))}
-      </div>
+      <button className="nav-title toggle" onClick={() => toggle('@labels')} aria-expanded={collapsed['@labels'] === false}>
+        <span>Labels</span><Icon name={collapsed['@labels'] === false ? 'down' : 'chevron'} size={12} />
+      </button>
+      {collapsed['@labels'] === false && (
+        <div className="nav-section">
+          {categories.map((c) => (
+            <div key={c.name} className="folder" onClick={() => onCategory(c)} role="button" tabIndex={0}>
+              <span className="twisty" /><span className="cat-dot" style={{ background: c.color }} /><span className="fname">{c.name}</span>
+            </div>
+          ))}
+        </div>
+      )}
+      {mode === 'full' && onResizeStart && <div className="nav-resize" onPointerDown={onResizeStart} role="separator" aria-orientation="vertical" aria-label="Resize navigation" />}
       {menu && (
         <div className="menu" style={{ position: 'fixed', left: menu.x, top: menu.y }}>
           <button onClick={() => createFolder(menu.f)}><Icon name="plus" /> New subfolder</button>

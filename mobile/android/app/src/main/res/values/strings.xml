@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">Roammail</string>
+    <string name="title_activity_main">Roammail</string>
+    <string name="package_name">net.roammail.app</string>
+    <string name="custom_url_scheme">net.roammail.app</string>
+</resources>

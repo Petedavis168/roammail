@@ -25,7 +25,7 @@ class Client {
 }
 async function user(name) {
   const c = new Client();
-  const r = await c.post('/api/signup', { name, username: name, password: PW, acceptTerms: true });
+  const r = await c.post('/api/signup', { name, username: name, password: PW, acceptTerms: true, birthday: '1990-01-15', recoveryEmail: 'recovery@example.org', phone: '+15555550123' });
   assert.equal(r.status, 200, JSON.stringify(r.data)); await sleep(1200); return c;
 }
 const range = () => ({ from: new Date().toISOString(), to: new Date(Date.now() + 30 * 864e5).toISOString() });
@@ -78,4 +78,26 @@ test('calendar invitations count against free-account sending limits', async () 
   const start = new Date(Date.now() + 2 * 864e5).toISOString();
   const r = await a.post('/api/calendar/events', { calendar: cal, title: 'Spam party', start, attendees: Array.from({ length: 21 }, (_, i) => ({ email: `p${i}@example.com` })) });
   assert.equal(r.status, 400, 'more than 20 invitees from a free account is refused');
+});
+
+test('calendar import: an .ics from another provider is rebuilt; importing twice adds nothing; nobody is emailed', async () => {
+  const me = await user(`ics${run}`);
+  const day = new Date(Date.now() + 2 * 864e5); const ymd = (d) => d.toISOString().slice(0, 10).replace(/-/g, '');
+  const ics = ['BEGIN:VCALENDAR', 'VERSION:2.0', 'PRODID:-//Google Inc//Google Calendar//EN',
+    'BEGIN:VEVENT', 'UID:abc123@google.com', `DTSTART:${ymd(day)}T150000Z`, `DTEND:${ymd(day)}T160000Z`, 'SUMMARY:Dentist', 'LOCATION:Main St',
+    'ATTENDEE;CN=Victim:mailto:victim@example.com', 'BEGIN:VALARM', 'ACTION:EMAIL', 'ATTENDEE:mailto:victim@example.com', 'TRIGGER:-PT5M', 'END:VALARM', 'END:VEVENT',
+    'BEGIN:VEVENT', 'UID:bday@google.com', `DTSTART;VALUE=DATE:${ymd(day)}`, 'RRULE:FREQ=YEARLY', 'SUMMARY:Birthday', 'END:VEVENT', 'END:VCALENDAR'].join('\r\n');
+  for (let i = 0; i < 2; i++) {
+    const fd = new FormData(); fd.append('file', new Blob([ics]), 'google.ics');
+    const r = await me.req('POST', '/api/calendar/import', fd);
+    assert.equal(r.status, 200, JSON.stringify(r.data));
+    assert.deepEqual([r.data.imported, r.data.existing], i ? [0, 2] : [2, 0]);
+  }
+  const evs = (await me.get(`/api/calendar/events?${new URLSearchParams(range())}`)).data;
+  assert.equal(evs.filter((e) => e.title === 'Dentist').length, 1, 'no duplicate on re-import');
+  const dentist = evs.find((e) => e.title === 'Dentist');
+  assert.equal(dentist.location, 'Main St'); assert.equal((dentist.attendees || []).length, 0, 'attendees dropped');
+  assert.ok(evs.some((e) => e.title === 'Birthday' && e.allDay && e.repeat === 'yearly'));
+  const bad = new FormData(); bad.append('file', new Blob(['not a calendar']), 'x.ics');
+  assert.equal((await me.req('POST', '/api/calendar/import', bad)).status, 400);
 });

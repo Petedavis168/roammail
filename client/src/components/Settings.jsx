@@ -15,10 +15,17 @@ function PushToggle() {
         setErr('');
         try { if (e.target.checked) await enablePush(); else await disablePush(); setState(await pushState()); } catch (x) { setErr(x.message); setState(await pushState()); }
       }} /> Notify me on this device even when Roammail is closed</label>
+      {state === 'on' && <PreviewToggle />}
       {state === 'blocked' && <div className="muted">Notifications are blocked for this site in your browser settings.</div>}
       {err && <div className="bad">{err}</div>}
     </div>
   );
+}
+function PreviewToggle() {
+  const [on, setOn] = useState(null);
+  useEffect(() => { api.get('/api/push/preview').then((r) => setOn(r.on)).catch(() => {}); }, []);
+  if (on === null) return null;
+  return <label className="check" style={{ marginLeft: 22 }}><input type="checkbox" checked={on} onChange={async (e) => { const v = e.target.checked; setOn(v); await api.put('/api/push/preview', { on: v }).catch(() => setOn(!v)); }} /> Show sender and subject (turn off to show only "New mail")</label>;
 }
 import Security from './settings/Security.jsx';
 import { AutoReply, Rules, ImportMail } from './settings/MailTools.jsx';
@@ -61,9 +68,9 @@ function General({ prefs, setPrefs, me }) {
       <h3>Categories</h3>
       {prefs.categories.map((c, i) => (
         <div key={i} className="cat-edit">
-          <input type="color" value={c.color} onChange={(e) => setPrefs((p) => ({ categories: p.categories.map((x, j) => (j === i ? { ...x, color: e.target.value } : x)) }))} />
-          <input value={c.name} onChange={(e) => setPrefs((p) => ({ categories: p.categories.map((x, j) => (j === i ? { ...x, name: e.target.value } : x)) }))} />
-          <button className="icon-btn" onClick={() => setPrefs((p) => ({ categories: p.categories.filter((_, j) => j !== i) }))}><Icon name="trash" size={16} /></button>
+          <input type="color" aria-label={`Colour for ${c.name || 'category'}`} value={c.color} onChange={(e) => setPrefs((p) => ({ categories: p.categories.map((x, j) => (j === i ? { ...x, color: e.target.value } : x)) }))} />
+          <input aria-label="Category name" value={c.name} onChange={(e) => setPrefs((p) => ({ categories: p.categories.map((x, j) => (j === i ? { ...x, name: e.target.value } : x)) }))} />
+          <button className="icon-btn" aria-label={`Delete ${c.name || 'category'}`} title="Delete category" onClick={() => setPrefs((p) => ({ categories: p.categories.filter((_, j) => j !== i) }))}><Icon name="trash" size={16} /></button>
         </div>
       ))}
       <div><button className="btn" onClick={() => setPrefs((p) => ({ categories: [...p.categories, { name: 'New', color: '#038387' }] }))}><Icon name="plus" size={16} /> Add category</button></div>
@@ -141,7 +148,7 @@ const TABS = [
   ['autoreply', 'Automatic replies', 'reply'], ['junk', 'Junk & spam', 'junk'], ['rules', 'Rules', 'filter'], ['import', 'Import mail', 'import'], ['apps', 'Phone & apps', 'phone'], ['privacy', 'Privacy', 'shield'],
 ];
 
-export default function SettingsPanel({ prefs, setPrefs, me, folders, sigData, reloadSigs, onClose, initialTab = 'general' }) {
+export default function SettingsPanel({ prefs, setPrefs, me, folders, sigData, reloadSigs, onClose, initialTab = 'general', importMsg }) {
   const [tab, setTab] = useState(initialTab);
   return (
     <div className="modal-wrap" onClick={onClose}>
@@ -151,7 +158,7 @@ export default function SettingsPanel({ prefs, setPrefs, me, folders, sigData, r
           {TABS.map(([k, l, i]) => <button key={k} className={tab === k ? 'on' : ''} onClick={() => setTab(k)}><Icon name={i} size={16} /> {l}</button>)}
         </nav>
         <div className="settings-body">
-          <div className="drawer-head"><h2>{TABS.find((t) => t[0] === tab)[1]}</h2><button className="icon-btn" onClick={onClose}><Icon name="close" /></button></div>
+          <div className="drawer-head"><h2>{TABS.find((t) => t[0] === tab)[1]}</h2><button className="icon-btn" aria-label="Close settings" title="Close" onClick={onClose}><Icon name="close" /></button></div>
           <div className="drawer-body">
             {tab === 'general' && <General prefs={prefs} setPrefs={setPrefs} me={me} />}
             {tab === 'signatures' && <Signatures sigData={sigData} reloadSigs={reloadSigs} prefs={prefs} setPrefs={setPrefs} />}
@@ -160,7 +167,7 @@ export default function SettingsPanel({ prefs, setPrefs, me, folders, sigData, r
             {tab === 'autoreply' && <AutoReply me={me} />}
             {tab === 'junk' && <SpamSettings />}
             {tab === 'rules' && <Rules folders={folders} categories={prefs.categories} me={me} />}
-            {tab === 'import' && <ImportMail />}
+            {tab === 'import' && <ImportMail me={me} importMsg={importMsg} />}
             {tab === 'apps' && <Apps me={me} sigData={sigData} />}
             {tab === 'privacy' && <Privacy me={me} />}
           </div>

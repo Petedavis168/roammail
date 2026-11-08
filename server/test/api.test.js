@@ -43,7 +43,7 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const PW = 'Tq9-vLm2-Zx81';
 
 async function signup(c, username) {
-  const r = await c.post('/api/signup', { name: `Test ${username}`, username, password: PW, acceptTerms: true });
+  const r = await c.post('/api/signup', { name: `Test ${username}`, username, password: PW, acceptTerms: true, birthday: '1990-01-15', recoveryEmail: 'recovery@example.org', phone: '+15555550123' });
   assert.equal(r.status, 200, JSON.stringify(r.data));
   await sleep(1500); // mailbox provisioning
   return r.data.email;
@@ -82,8 +82,29 @@ test('CSRF: state-changing requests need the custom header', async () => {
 test('sign-up: terms required, weak passwords refused', async () => {
   const c = new Client();
   assert.equal((await c.post('/api/signup', { name: 'A', username: `t${run}a`, password: PW })).status, 400);
-  assert.equal((await c.post('/api/signup', { name: 'A', username: `t${run}a`, password: 'password123', acceptTerms: true })).status, 400);
-  assert.equal((await c.post('/api/signup', { name: 'A', username: 'admin', password: PW, acceptTerms: true })).status, 400);
+  assert.equal((await c.post('/api/signup', { name: 'A', username: `t${run}a`, password: 'password123', acceptTerms: true, birthday: '1990-01-15', recoveryEmail: 'recovery@example.org', phone: '+15555550123' })).status, 400);
+  assert.equal((await c.post('/api/signup', { name: 'A', username: 'admin', password: PW, acceptTerms: true, birthday: '1990-01-15', recoveryEmail: 'recovery@example.org', phone: '+15555550123' })).status, 400);
+});
+
+test('sign-up: birthday, recovery email and mobile number are required and stored', async () => {
+  const c = new Client(); const base = { name: 'Dee Tails', password: PW, acceptTerms: true };
+  const kid = new Date(Date.now() - 10 * 365 * 864e5).toISOString().slice(0, 10);
+  const r1 = await c.post('/api/signup', { ...base, username: `d${run}a`, recoveryEmail: 'recovery@example.org', phone: '+15555550123' });
+  assert.equal(r1.status, 400); assert.match(r1.data.error, /date of birth/);
+  const r2 = await c.post('/api/signup', { ...base, username: `d${run}a`, birthday: kid, recoveryEmail: 'recovery@example.org', phone: '+15555550123' });
+  assert.equal(r2.status, 400); assert.match(r2.data.error, /at least 13/);
+  const r3 = await c.post('/api/signup', { ...base, username: `d${run}a`, birthday: '1990-01-15', phone: '+15555550123' });
+  assert.equal(r3.status, 400); assert.match(r3.data.error, /recovery email/);
+  const r4 = await c.post('/api/signup', { ...base, username: `d${run}a`, birthday: '1990-01-15', recoveryEmail: 'recovery@example.org', phone: '12' });
+  assert.equal(r4.status, 400); assert.match(r4.data.error, /mobile number/);
+  const email = await signup(c, `d${run}b`);
+  const sec = (await c.get('/api/security')).data;
+  assert.equal(sec.birthday, '1990-01-15'); assert.equal(sec.phone, '+15555550123');
+  assert.equal(sec.recoveryEmail || sec.recoveryPending, 'recovery@example.org');
+  assert.equal((await c.req('PUT', '/api/security/details', { password: 'wrong', phone: '+15555550199' })).status, 401);
+  assert.equal((await c.req('PUT', '/api/security/details', { password: PW, phone: '+1 (555) 555-0199' })).status, 200);
+  assert.equal((await c.get('/api/security')).data.phone, '+15555550199');
+  assert.ok(email);
 });
 
 test('sessions: opaque cookie, logout kills stolen copies, devices can be signed out', async () => {
@@ -144,6 +165,30 @@ test('sensitive changes need the password', async () => {
   assert.equal((await a.req('PUT', '/api/security/recovery-email', { email: 'me@elsewhere.test', password: PW })).status, 200);
 });
 
+test('first-name rule: customers cannot take a bare first name; staff can be given one', async () => {
+  const c = new Client();
+  for (const u of ['john', 'j.o.h.n', 'Sarah']) {
+    const chk = (await c.get(`/api/signup/check?username=${encodeURIComponent(u)}`)).data;
+    assert.equal(chk.available, false, u); assert.match(chk.reason, /Roammail staff/);
+  }
+  const s = await c.post('/api/signup', { name: 'John Q', username: 'john', password: PW, acceptTerms: true, birthday: '1990-01-15', recoveryEmail: 'recovery@example.org', phone: '+15555550123' });
+  assert.equal(s.status, 400); assert.match(s.data.error, /first name/);
+  const sug = (await c.get('/api/signup/suggest?first=John&last=Quill')).data.suggestions;
+  assert.ok(sug.length && !sug.includes('john'), JSON.stringify(sug));
+  assert.equal((await c.get(`/api/signup/check?username=john.q${run}`)).data.available, true);
+  // refused or taken: alternatives built from their name, never a bare first name
+  const alt = (await c.get(`/api/signup/check?username=john&first=John&last=Quill${run}`)).data;
+  assert.ok(alt.alternatives.length >= 3, JSON.stringify(alt)); assert.ok(alt.alternatives.every((a) => a.replace(/[._-]/g, '') !== 'john' && a.startsWith('john')), JSON.stringify(alt.alternatives));
+  // only a first name, and a very common one: still gets suggestions (numbers added)
+  const only = (await c.get('/api/signup/suggest?first=John&count=3')).data.suggestions;
+  assert.equal(only.length, 3); assert.ok(!only.includes('john'));
+  const gen = (await c.get(`/api/signup/suggest?first=Ann&last=Lee${run}&shuffle=1`)).data.suggestions;
+  assert.equal(gen.length, 3);
+  // only super-admins create staff addresses
+  const a = new Client(); await signup(a, `nosuper${run}`);
+  assert.equal((await a.post('/api/super/staff-mailboxes', { localPart: 'john', name: 'John' })).status, 403);
+});
+
 test('admins must use 2FA; companies can require it; external forwarding off by default', async (t) => {
   // Needs a fresh database where SUPERADMIN_EMAILS includes owner@free.test (as in dev/test.env and CI)
   const owner = new Client();
@@ -166,6 +211,18 @@ test('admins must use 2FA; companies can require it; external forwarding off by 
   assert.equal((await owner.post('/api/admin/users', { domain, localPart: 'emp', name: 'Emp', password: PW, welcome: false })).status, 200);
   await sleep(1500);
   const emp = new Client(); assert.equal((await emp.post('/api/login', { email: `emp@${domain}`, password: PW })).status, 200);
+  // 4a: "Send temporary password": two words + 4 digits; shown to the admin only when there's no address to email it to
+  assert.ok([403, 404].includes((await emp.post('/api/admin/users/temp-password', { email: `owner@${D}` })).status), 'only admins of that domain');
+  const tp = await owner.post('/api/admin/users/temp-password', { email: `emp@${domain}` });
+  assert.equal(tp.status, 200, JSON.stringify(tp.data)); assert.equal(tp.data.sent, false);
+  assert.match(tp.data.password, /^[A-Z][a-z]+[A-Z][a-z]+[2-9]{4}$/); assert.doesNotMatch(tp.data.password, /[lioIO01]/, 'no look-alike characters');
+  assert.equal((await emp.get('/api/me')).status, 401, 'old sessions signed out');
+  const emp2 = new Client(); emp2.autoSetup = false;
+  const relog = await emp2.post('/api/login', { email: `emp@${domain}`, password: tp.data.password });
+  assert.equal(relog.status, 200); assert.ok(relog.data.setupRequired.includes('password'), 'must choose a new password');
+  emp.cookie = ''; // signs in with the temporary password and chooses a new one (the helper does the wizard)
+  assert.equal((await emp.post('/api/login', { email: `emp@${domain}`, password: tp.data.password })).status, 200);
+  assert.equal((await emp.get('/api/folders')).status, 200);
   // external forwarding blocked by default, internal allowed
   assert.equal((await emp.post('/api/filters/server', { desc: 'fw', script: 'redirect "x@elsewhere.test";' })).status, 403);
   assert.equal((await emp.req('PUT', '/api/rules', { rules: [{ name: 'r', conditions: [{ field: 'from', value: 'x' }], actions: [{ type: 'forward', value: `boss@${domain}` }] }] })).status, 200);
@@ -176,6 +233,30 @@ test('admins must use 2FA; companies can require it; external forwarding off by 
   assert.equal((await emp.get('/api/me')).status, 200);
   // other orgs can't be touched
   assert.equal((await emp.get(`/api/admin/users?domain=${domain}`)).status, 403);
+  // super-admin gives a staff member a first-name address (temporary password, must be changed)
+  const names = (await import('node:fs')).readFileSync(new URL('../src/first-names.txt', import.meta.url), 'utf8').split('\n').filter((x) => /^[a-z]{5,}$/.test(x));
+  const staffName = names[Math.floor(Math.random() * names.length)];
+  const st = await owner.post('/api/super/staff-mailboxes', { localPart: staffName, name: 'Staff Person' });
+  assert.equal(st.status, 200, JSON.stringify(st.data)); assert.equal(st.data.email, `${staffName}@${D}`);
+  assert.match(st.data.password, /^[A-Z][a-z]+[A-Z][a-z]+[2-9]{4}$/);
+  await sleep(1200);
+  const staff = new Client(); staff.autoSetup = false;
+  const sl = await staff.post('/api/login', { email: st.data.email, password: st.data.password });
+  assert.equal(sl.status, 200); assert.ok(sl.data.setupRequired.includes('password'));
+  assert.equal((await owner.post('/api/super/staff-mailboxes', { localPart: staffName, name: 'Again' })).status, 409);
+  // 4a: with a recovery address on file the temporary password is emailed there (from no-reply), not shown to the admin
+  const personal = new Client(); const personalEmail = await signup(personal, `rc${run}`); // stands in for their personal mailbox
+  assert.equal((await emp.req('PUT', '/api/security/recovery-email', { email: personalEmail, password: emp.password })).status, 200);
+  await sleep(1500);
+  const pBox = await personal.get('/api/messages?folder=INBOX'); assert.equal(pBox.status, 200, JSON.stringify(pBox.data));
+  const code = /^(\d{6}) is your/.exec(pBox.data.messages.find((m) => /is your Roammail verification code/.test(m.subject))?.subject || '')?.[1];
+  assert.ok(code, 'verification code arrived');
+  assert.equal((await emp.post('/api/security/recovery-email/verify', { code })).status, 200);
+  const sent = await owner.post('/api/admin/users/temp-password', { email: `emp@${domain}` });
+  assert.equal(sent.data.sent, true, JSON.stringify(sent.data)); assert.equal(sent.data.password, undefined); assert.match(sent.data.to, /^r•+@/);
+  await sleep(1500);
+  const box = (await personal.get('/api/messages?folder=INBOX')).data.messages;
+  assert.ok(box.some((m) => m.subject === 'Your temporary Roammail password'), 'arrived at the recovery address');
 });
 
 test('privacy: export as mbox and delete account', async () => {

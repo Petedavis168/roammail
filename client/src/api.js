@@ -6,9 +6,9 @@ export const currentMailboxId = () => mailboxId;
 /** For URLs the browser opens directly (attachments, live updates): add ?mid= so the server picks the right mailbox. */
 export const mailUrl = (url) => (mailboxId && url.startsWith('/api/') ? `${url}${url.includes('?') ? '&' : '?'}mid=${encodeURIComponent(mailboxId)}` : url);
 
-async function request(method, url, body, { form } = {}) {
+async function request(method, url, body, { form, asMailbox } = {}) {
   const opts = { method, headers: { 'X-Requested-With': 'mailcow-client' }, credentials: 'same-origin' };
-  if (mailboxId && url.startsWith('/api/')) opts.headers['X-Mailbox-Id'] = mailboxId;
+  if ((asMailbox || mailboxId) && url.startsWith('/api/')) opts.headers['X-Mailbox-Id'] = asMailbox || mailboxId;
   if (form) opts.body = form;
   else if (body !== undefined) {
     opts.headers['Content-Type'] = 'application/json';
@@ -36,10 +36,10 @@ export const api = {
   put: (url, body) => request('PUT', url, body),
   del: (url, params) => request('DELETE', params ? `${url}?${qs(params)}` : url),
   delWith: (url, body) => request('DELETE', url, body),
-  form: (url, form) => request('POST', url, undefined, { form }),
+  form: (url, form, asMailbox) => request('POST', url, undefined, { form, asMailbox }),
 
   me: () => api.get('/api/me'),
-  login: (email, password) => api.post('/api/login', { email, password }),
+  login: (email, password, remember = false) => api.post('/api/login', { email, password, remember }),
   logout: () => api.post('/api/logout'),
   signupConfig: () => api.get('/api/signup/config'),
   signup: (data) => api.post('/api/signup', data),

@@ -9,14 +9,14 @@ import { config } from './config.js';
 import { resolveMailboxId, ensureMailboxId, ID_RE } from './mailboxids.js';
 import { browserMailboxes } from './session.js';
 import { q } from './db.js';
-import { counter } from './shared.js';
+import { counter, rateLimit } from './shared.js';
 
 const root = () => config.rootDomain;
 export const loginUrl = (path = '/') => (config.loginHost ? `https://${config.loginHost}${path}` : `/login${path === '/' ? '' : path.replace(/^\/(?=\?)/, '')}`);
 export const appUrl = (path = '/') => (root() ? `https://${root()}${path}` : path);
 
 // Section names allowed under /{id}/
-const SECTIONS = /^\/(inbox|sent|drafts|spam|trash|archive|calendar|contacts|settings|scheduled|quarantine|snoozed|search|admin(\/[a-z-]+)?|folder\/[^/]{1,300}|message\/[A-Za-z0-9_.-]{1,400})\/?$/;
+const SECTIONS = /^\/(inbox|sent|drafts|spam|trash|archive|calendar|contacts|settings|scheduled|quarantine|all|snoozed|search|admin(\/[a-z-]+)?|folder\/[^/]{1,300}|message\/[A-Za-z0-9_.-]{1,400})\/?$/;
 const ID_PATH = /^\/(\d{8}|\d{6}-\d{3}-[A-Z]{2})(\/.*)?$/;
 
 const notFound = (res) => res.status(404).type('html').set('Cache-Control', 'no-store').send(`<!doctype html><meta name="viewport" content="width=device-width,initial-scale=1"><title>Not found</title>
@@ -49,6 +49,16 @@ hosts.get(['/', '/login'], async (req, res, next) => {
   if (!emails.length) return next();
   return res.redirect(302, appUrl(`/${await ensureMailboxId(emails[0])}/inbox`));
 });
+// Installed app (PWA start_url): the first signed-in mailbox, or sign-in
+const appLimiter = rateLimit({ windowMs: 60 * 1000, limit: 60, standardHeaders: true, legacyHeaders: false });
+hosts.get('/app', appLimiter, async (req, res) => {
+  const emails = await browserMailboxes(req);
+  if (!emails.length) return res.redirect(302, loginUrl('/'));
+  const imp = /^[a-z-]{1,20}$/.test(String(req.query.import || '')) ? String(req.query.import) : '';
+  const section = imp ? 'settings' : ['calendar', 'contacts'].includes(req.query.view) ? req.query.view : 'inbox';
+  const qs = imp ? `?import=${imp}` : req.query.compose === '1' ? '?compose=1' : ['tasks', 'notes', 'followups'].includes(req.query.panel) ? `?panel=${req.query.panel}` : '';
+  return res.redirect(302, appUrl(`/${await ensureMailboxId(emails[0])}/${section}${qs}`));
+});
 // Sign-up lives on the sign-in host: roammail.net/signup -> login.roammail.net/signup (query kept)
 hosts.get('/signup', (req, res, next) => {
   if (config.loginHost && String(req.hostname || '').toLowerCase() !== config.loginHost) {
@@ -76,7 +86,7 @@ hosts.get(ID_PATH, async (req, res, next) => {
   next(); // the web app's index.html
 });
 
-export { ID_RE };
+export { ID_RE, ID_PATH, notFound };
 
 // ---------------------------------------------------------------- the public website
 const SITE_PAGES = ['index', 'terms', 'privacy', 'cookies', 'acceptable-use', 'accessibility', 'legal', 'brand'];

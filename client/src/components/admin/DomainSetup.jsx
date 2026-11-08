@@ -49,6 +49,16 @@ export function DomainStatus({ domain, onActivated, onDone }) {
 
   const load = () => api.get(`/api/domains/${encodeURIComponent(domain)}`).then(setS).catch((e) => setMsg(e.message));
   useEffect(() => { load(); const t = setInterval(load, 20000); return () => clearInterval(t); }, [domain]);
+  // The address they asked for at sign-up (bob@theirdomain.com): made as soon as the domain is live, same password
+  const [ownerBox, setOwnerBox] = useState(null);
+  useEffect(() => {
+    if (s?.status !== 'active' || !s.ownerMailbox?.mine || ownerBox) return;
+    setOwnerBox({ busy: true });
+    api.post(`/api/domains/${encodeURIComponent(domain)}/owner-mailbox`).then((r) => {
+      setOwnerBox(r);
+      if (!s.ownerMailbox.created) toast(`${r.email} is ready`);
+    }).catch((e) => setOwnerBox({ error: e.message }));
+  }, [s?.status, s?.ownerMailbox?.created]);
 
   const verify = async (skip) => {
     setBusy('verify'); setMsg('');
@@ -110,18 +120,24 @@ export function DomainStatus({ domain, onActivated, onDone }) {
   return (
     <div className="setup-step">
       <div className="step-head"><span className={`step-n ${s.ready ? 'done' : ''}`}>{s.ready ? <Icon name="check" size={16} /> : 3}</span>
-        <div><h3>{s.ready ? `${s.domain} is ready for email` : `Point ${s.domain}'s email to us`}</h3>
+        <div><h3>{s.ready ? `${s.domain} is ready for email` : `Point ${s.domain}'s email to us`}
+          {s.sending && <span className={`pill ${s.sending === 'relay' ? 'ok' : ''}`} style={{ marginLeft: 8, verticalAlign: 'middle' }} title={s.sending === 'relay' ? 'Outgoing mail is delivered through a trusted relay for better inbox placement' : 'Outgoing mail is delivered straight from our mail server'}>Sending: {s.sending === 'relay' ? 'Trusted relay' : 'Direct'}</span>}</h3>
           <p className="muted">{s.ready ? 'All required records are in place. Mail to your domain now arrives here.' : `Add these records at your DNS provider. ${done} of ${required.length} required records found. We check automatically.`}</p></div></div>
       <div className="progress"><div style={{ width: `${(done / required.length) * 100}%` }} /></div>
       {s.route53 && !s.ready && (
         <div className="callout good"><Icon name="check" /> <div><b>This domain is in your AWS account.</b></div>
           <button className="btn primary" disabled={!!busy} onClick={autoDns}>{busy === 'r53' ? 'Setting up…' : 'Add records automatically'}</button></div>
       )}
+      {ownerBox?.email && (
+        <div className="callout good"><Icon name="check" /> <div><b>{ownerBox.email} is ready.</b> It uses the same password you chose at sign-up.</div>
+          <button className="btn primary" onClick={() => location.assign(`/${ownerBox.mailboxId}/inbox`)}>Open {ownerBox.email}</button></div>
+      )}
+      {ownerBox?.error && <div className="form-error">Couldn't create {s.ownerMailbox.address} yet: {ownerBox.error}</div>}
       <RecordTable records={s.records} />
       <p className="muted small">If you already use another email provider on this domain, changing the MX record moves email delivery here. Only one provider can receive mail at a time.</p>
       {msg && <div className="form-error">{msg}</div>}
       <div className="step-actions">
-        <button className="btn" onClick={load}><Icon name="refresh" size={16} /> Check again</button>
+        <button className="btn" onClick={load}><Icon name="refresh" size={16} /> Check records</button>
         {onDone && <button className="btn primary" onClick={onDone}>{s.ready ? 'Add your team' : 'Continue — add users now'}</button>}
       </div>
     </div>

@@ -35,7 +35,7 @@ function totp(secret) {
 }
 async function newAdmin(username) {
   const c = new Client();
-  let r = await c.post('/api/signup', { name: username, username, password: PW, acceptTerms: true });
+  let r = await c.post('/api/signup', { name: username, username, password: PW, acceptTerms: true, birthday: '1990-01-15', recoveryEmail: 'recovery@example.org', phone: '+15555550123' });
   if (r.status === 409) { r = await c.post('/api/login', { email: `${username}@${D}`, password: PW }); if (r.data?.twoFactor) return null; }
   assert.ok(r.status === 200, JSON.stringify(r.data));
   await sleep(1200);
@@ -46,6 +46,7 @@ async function newAdmin(username) {
   }
   return c;
 }
+let billingSuper = null;
 const addUser = (c, domain, local) => c.post('/api/admin/users', { domain, localPart: local, name: local, password: PW, welcome: false });
 
 test('standard business: pays at the end, seats follow users, webhooks are verified', async () => {
@@ -103,9 +104,46 @@ test('standard business: pays at the end, seats follow users, webhooks are verif
   assert.equal((await a.get(`/api/billing/${orgId}`)).data.status, 'canceled');
 });
 
+test('business sign-up: their own domain is taken at sign-up; their address there is made once it is live', async () => {
+  const c = new Client();
+  const domain = `marley${run}.test`;
+  assert.equal((await c.get(`/api/signup/domain-check?domain=${D}`)).data.ok, false, 'not our free domain');
+  assert.equal((await c.get(`/api/signup/domain-check?domain=https://www.${domain}/`)).data.domain, domain, 'cleaned up');
+  const s = await c.post('/api/signup', { name: 'Bob Marley', username: `bm${run}`, password: PW, acceptTerms: true, birthday: '1990-01-15', recoveryEmail: 'recovery@example.org', phone: '+15555550123', business: { domain, local: 'bob', orgName: 'Marley Music' } });
+  assert.equal(s.status, 200, JSON.stringify(s.data));
+  await sleep(1200);
+  const { secret } = (await c.post('/api/security/2fa/setup')).data; // business owners are admins: 2-step verification
+  assert.equal((await c.post('/api/security/2fa/enable', { code: totp(secret) })).status, 200);
+  const orgs = (await c.get('/api/admin/orgs')).data;
+  const org = orgs.find((o) => o.domains.some((x) => x.domain === domain));
+  assert.ok(org, 'the business and its domain exist right after sign-up'); assert.equal(org.name, 'Marley Music');
+  let st = (await c.get(`/api/domains/${domain}`)).data;
+  assert.equal(st.status, 'pending'); assert.deepEqual(st.ownerMailbox, { address: `bob@${domain}`, created: false, mine: true });
+  assert.equal((await c.post(`/api/domains/${domain}/owner-mailbox`)).status, 400, 'not before the domain is live');
+  // someone else can't take the same domain
+  const other = await new Client().post('/api/signup', { name: 'X', username: `bx${run}`, password: PW, acceptTerms: true, birthday: '1990-01-15', recoveryEmail: 'recovery@example.org', phone: '+15555550123', business: { domain, local: 'x' } });
+  assert.equal(other.status, 409);
+  // connect + pay, then the owner's own address is created with the same password
+  assert.equal((await c.post(`/api/domains/${domain}/verify`)).data.status, 'verified');
+  const { url } = (await c.post(`/api/billing/${org.id}/checkout`, { interval: 'month', seats: 1 })).data;
+  const paid = await fetch(url, { method: 'POST', redirect: 'manual' });
+  await sleep(500);
+  await c.post('/api/billing/confirm', { sessionId: new URL(paid.headers.get('location')).searchParams.get('session_id') });
+  assert.equal((await c.get(`/api/domains/${domain}`)).data.status, 'active');
+  const ob = await c.post(`/api/domains/${domain}/owner-mailbox`);
+  assert.equal(ob.status, 200, JSON.stringify(ob.data)); assert.equal(ob.data.email, `bob@${domain}`);
+  await sleep(1200);
+  const bob = new Client(); bob.autoSetup = false;
+  const login = await bob.post('/api/login', { email: `bob@${domain}`, password: PW });
+  assert.equal(login.status, 200, 'same password works'); assert.ok(!login.data.setupRequired.includes('password'), 'not treated as a temporary password');
+  // the sign-up account sees it as done (fresh sign-in to that account)
+  const again = new Client(); await again.post('/api/login', { email: s.data.email, password: PW });
+});
+
 test('Friendly Web Services customer: code makes the first mailbox free, codes are single use', async (t) => {
   const owner = await newAdmin('billingsuper');
   if (!owner) return t.skip('billingsuper@free.test already has 2FA from an earlier run; restart with a fresh data folder');
+  billingSuper = owner;
   const { code } = (await owner.post('/api/super/friendly-codes', { note: `test ${run}` })).data;
   assert.match(code, /^FWS-[A-Z2-9]{4}-[A-Z2-9]{4}-[A-Z2-9]{4}$/);
   const f = await newAdmin(`friend${run}`);
@@ -123,6 +161,27 @@ test('Friendly Web Services customer: code makes the first mailbox free, codes a
   assert.equal((await g.post(`/api/billing/${o2}/friendly`, { code })).status, 400);
   // only super-admins can create codes
   assert.equal((await f.post('/api/super/friendly-codes', { note: 'x' })).status, 403);
+});
+
+test('complimentary plan (fee waiver): every mailbox free, no checkout; only super-admins; can end', async (t) => {
+  const owner = billingSuper || await newAdmin('billingsuper');
+  if (!owner) return t.skip('billingsuper@free.test already has 2FA from an earlier run; restart with a fresh data folder');
+  const c = await newAdmin(`comp${run}`);
+  const domain = `comp${run}.test`;
+  const { orgId } = (await c.post('/api/domains', { domain, orgName: `Pete Co ${run}` })).data;
+  assert.equal((await c.req('PUT', `/api/super/orgs/${orgId}/comp`, { mode: 'forever', note: 'x' })).status, 403, 'not for org admins');
+  assert.equal((await owner.req('PUT', `/api/super/orgs/${orgId}/comp`, { mode: 'forever' })).status, 400, 'needs a note');
+  assert.equal((await owner.req('PUT', `/api/super/orgs/${orgId}/comp`, { mode: 'until', until: '2001-01-01', note: 'x y z' })).status, 400, 'past date');
+  const set = await owner.req('PUT', `/api/super/orgs/${orgId}/comp`, { mode: 'months', months: 12, note: "Pete's company" });
+  assert.equal(set.status, 200); assert.ok(set.data.comp.until > Date.now() + 300 * 864e5);
+  assert.equal((await c.post(`/api/domains/${domain}/verify`)).data.status, 'active', 'goes live without payment');
+  for (const u of ['a', 'b', 'c']) assert.equal((await addUser(c, domain, u)).status, 200, `mailbox ${u} is free`);
+  const bill = (await c.get(`/api/billing/${orgId}`)).data;
+  assert.ok(bill.comp && !bill.comp.forever); assert.equal(bill.billable, 0); assert.equal(bill.needsPayment, false);
+  assert.equal((await owner.req('PUT', `/api/super/orgs/${orgId}/comp`, { mode: 'forever', note: 'founder' })).data.comp.forever, true);
+  assert.equal((await owner.req('PUT', `/api/super/orgs/${orgId}/comp`, { mode: 'off' })).status, 200);
+  assert.equal((await c.get(`/api/billing/${orgId}`)).data.comp, null);
+  assert.equal((await addUser(c, domain, 'd')).status, 402, 'after the comp ends, new mailboxes need a seat again');
 });
 
 test('groups: department lists stay in sync, send-as is limited to members', async () => {
@@ -329,7 +388,7 @@ test('invite people: mailbox via the provisioner, emailed one-time link, no pass
   const sid = new URL((await fetch(url, { method: 'POST', redirect: 'manual' })).headers.get('location')).searchParams.get('session_id');
   await a.post('/api/billing/confirm', { sessionId: sid });
   // the invitee's existing address: another mailbox we can read
-  const personal = new Client(); const ps = await personal.post('/api/signup', { name: 'Kim Personal', username: `kimp${run}`, password: PW, acceptTerms: true });
+  const personal = new Client(); const ps = await personal.post('/api/signup', { name: 'Kim Personal', username: `kimp${run}`, password: PW, acceptTerms: true, birthday: '1990-01-15', recoveryEmail: 'recovery@example.org', phone: '+15555550123' });
   assert.equal(ps.status, 200); await sleep(1200);
   const r = await a.post('/api/admin/users', { domain, localPart: 'kim', name: 'Kim Lee', inviteEmail: ps.data.email });
   assert.equal(r.status, 200, JSON.stringify(r.data));

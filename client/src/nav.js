@@ -31,6 +31,7 @@ export function sectionForFolder(folder, folders) {
   if (folder === 'INBOX') return 'inbox';
   if (folder === '@scheduled') return 'scheduled';
   if (folder === '@quarantine') return 'quarantine';
+  if (folder === '@all') return 'all';
   const f = folders.find((x) => x.path === folder);
   for (const [s, use] of Object.entries(SPECIAL_SECTIONS)) if (f?.specialUse === use) return s;
   return `folder/${encodeURIComponent(folder)}`;
@@ -39,6 +40,7 @@ export function folderForSection(section, arg, folders) {
   if (section === 'inbox') return 'INBOX';
   if (section === 'scheduled') return '@scheduled';
   if (section === 'quarantine') return '@quarantine';
+  if (section === 'all') return '@all';
   if (section === 'folder') return arg || 'INBOX';
   const use = SPECIAL_SECTIONS[section];
   if (use) return folders.find((x) => x.specialUse === use)?.path || null;

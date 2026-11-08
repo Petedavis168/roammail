@@ -9,6 +9,8 @@ import { requireAuth } from './session.js';
 import { audit } from './db.js';
 import { withMailbox, userTransport } from './imap.js';
 import { checkSendQuota } from './abuse.js';
+import multer from 'multer';
+import { rateLimit } from './shared.js';
 import { discover, listCollections, createCalendar, report, putResource, deleteResource, getResource, assertOwnHref, xmlEscape } from './dav.js';
 
 const wrap = (fn) => (req, res, next) => Promise.resolve(fn(req, res, next)).catch(next);
@@ -203,6 +205,42 @@ function validate(body, me) {
   f.attendees = atts;
   return f;
 }
+
+// Import a calendar (.ics) exported from Google, Outlook or Apple. Each event is rebuilt from clean fields (title, times,
+// place, notes, simple repeats); attendees and alarms from the file are dropped and nobody is emailed.
+const icsUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 10 * 1024 * 1024, files: 1 } });
+const FREQ_TO_REPEAT = Object.fromEntries(Object.entries(RRULES).map(([k, v]) => [v, k]));
+calendar.post('/calendar/import', rateLimit({ windowMs: 60 * 60 * 1000, limit: 10 }), icsUpload.single('file'), wrap(async (req, res) => {
+  if (!req.file) throw fail(400, 'Choose an .ics file');
+  const d = await discover(req.user);
+  const cals = await listCollections(req.user, 'calendar');
+  const cal = String(req.body.calendar || cals[0]?.href || '');
+  assertOwnHref(cal, d.calHome);
+  let comp;
+  try { comp = new ICAL.Component(ICAL.parse(req.file.buffer.toString('utf8'))); } catch { throw fail(400, "That file isn't a calendar (.ics)"); }
+  const events = comp.getAllSubcomponents('vevent').filter((v) => !v.hasProperty('recurrence-id')).slice(0, 5000);
+  let imported = 0; let skipped = 0; let existing = 0;
+  for (const v of events) {
+    try {
+      const e = new ICAL.Event(v);
+      if (!e.startDate) { skipped++; continue; }
+      const allDay = e.startDate.isDate;
+      const toIso = (t) => (allDay ? t.toString().slice(0, 10) : t.toJSDate().toISOString());
+      const end = e.endDate || e.startDate;
+      const rr = v.getFirstPropertyValue('rrule');
+      const rrs = rr ? `FREQ=${rr.freq}${rr.parts?.BYDAY ? `;BYDAY=${rr.parts.BYDAY.join(',')}` : ''}` : '';
+      const f = validate({ title: e.summary || '(no title)', location: e.location || '', description: e.description || '', allDay, start: toIso(e.startDate), end: toIso(end), repeat: FREQ_TO_REPEAT[rrs] || 'none' }, req.user.email);
+      f.attendees = [];
+      f.uid = `${crypto.createHash('sha256').update(`${req.user.email}|${e.uid || crypto.randomUUID()}`).digest('hex').slice(0, 32)}@roammail`; // same file twice = same events, no duplicates
+      f.sequence = 0;
+      const href = `${cal.replace(/\/?$/, '/')}${f.uid.split('@')[0]}.ics`;
+      await putResource(req.user, href, buildEvent(f, { organizer: null }), 'text/calendar; charset=utf-8');
+      imported++;
+    } catch (err) { if (err.status === 409) existing++; else skipped++; } // 409: imported before (same UID)
+  }
+  await audit(req.user.email, null, 'calendar.import', { imported, skipped });
+  res.json({ ok: true, imported, existing, skipped, total: events.length });
+}));
 
 calendar.post('/calendar/events', wrap(async (req, res) => {
   const d = await discover(req.user);

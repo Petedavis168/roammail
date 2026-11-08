@@ -26,7 +26,7 @@ class Browser {
   }
 }
 async function signup(b, username, name = 'Test Person') {
-  const r = await b.req('POST', '/api/signup', { name, username, password: PW, acceptTerms: true });
+  const r = await b.req('POST', '/api/signup', { name, username, password: PW, acceptTerms: true, birthday: '1990-01-15', recoveryEmail: 'recovery@example.org', phone: '+15555550123' });
   assert.equal(r.status, 200, JSON.stringify(r.data));
   await sleep(1200);
   return r.data;
@@ -47,6 +47,13 @@ test('free accounts get a random 8-digit mailbox ID; pages check ownership and a
   assert.equal((await a.req('GET', `/${ra.mailboxId}/nonsense`)).status, 404);
   assert.equal((await a.req('GET', '/login')).location, `/${ra.mailboxId}/inbox`, 'signed in: the sign-in page goes to the inbox');
   assert.equal((await a.req('GET', '/login?add=1')).status, 200, 'unless adding another account');
+  // installed app (PWA) start URL and home-screen shortcuts
+  assert.equal((await a.req('GET', '/app')).location, `/${ra.mailboxId}/inbox`);
+  assert.equal((await a.req('GET', '/app?compose=1')).location, `/${ra.mailboxId}/inbox?compose=1`);
+  assert.equal((await a.req('GET', '/app?view=calendar')).location, `/${ra.mailboxId}/calendar`);
+  assert.equal((await new Browser().req('GET', '/app')).location, '/login', 'not signed in: sign-in page');
+  const mf = await a.req('GET', '/manifest.webmanifest');
+  assert.equal(mf.status, 200); assert.equal(mf.data.start_url, '/app');
 
   const b = new Browser(); const rb = await signup(b, `rb${run}`);
   assert.notEqual(rb.mailboxId, ra.mailboxId);
@@ -81,9 +88,37 @@ test('several mailboxes signed in at once; the ID in the path picks one; signing
   assert.deepEqual(me1.accounts.map((a) => a.mailboxId).sort(), [one.mailboxId, two.mailboxId].sort());
   for (const id of [one.mailboxId, two.mailboxId]) assert.equal((await br.req('GET', `/${id}/inbox`)).status, 200);
 
+  // Item 10: compose From another signed-in account (X-Mailbox-Id of that account), All inboxes, unread badges
+  const send = async (asId, to, subject) => {
+    const fd = new FormData(); fd.append('to', to); fd.append('subject', subject); fd.append('text', 'hi');
+    const r = await fetch(`${BASE}/api/send`, { method: 'POST', headers: { 'X-Requested-With': 'mailcow-client', 'X-Forwarded-For': br.ip, Cookie: br.cookie, 'X-Mailbox-Id': asId }, body: fd });
+    return r.status;
+  };
+  assert.equal(await send(two.mailboxId, `m1${run}@free.test`, `to-one-${run}`), 200, 'sent as mailbox two from the same browser');
+  assert.equal(await send(one.mailboxId, `m2${run}@free.test`, `to-two-${run}`), 200);
+  await sleep(1500);
+  const all = (await br.req('GET', '/api/all-inboxes')).data;
+  const mine = all.messages.filter((m) => m.subject?.endsWith(run));
+  assert.deepEqual(mine.map((m) => m.mailboxId).sort(), [one.mailboxId, two.mailboxId].sort(), 'one message from each inbox');
+  assert.ok(mine.every((m) => m.account && m.uid));
+  const sum = (await br.req('GET', '/api/accounts/summary')).data.accounts;
+  assert.equal(sum.length, 2); assert.ok(sum.every((a) => a.unread >= 1), JSON.stringify(sum));
+  // the summary only covers this browser's own sessions
+  assert.equal((await other.req('GET', '/api/accounts/summary')).data.accounts.length, 1);
+
   assert.equal((await br.req('POST', '/api/logout', {}, { 'X-Mailbox-Id': one.mailboxId })).status, 200);
   assert.equal((await br.req('GET', `/${one.mailboxId}/inbox`)).status, 404, 'signed out of mailbox one');
   assert.equal((await br.req('GET', `/${two.mailboxId}/inbox`)).status, 200, 'still signed in to mailbox two');
+});
+
+test('"Keep me signed in": a 30-day cookie; without it the normal session length', async () => {
+  const b = new Browser(); await signup(b, `kk${run}`);
+  const plain = new Browser(); const p = await plain.req('POST', '/api/login', { email: `kk${run}@free.test`, password: b.password || PW });
+  const days = (r) => (new Date(/Expires=([^;]+)/i.exec(r.headers.get('set-cookie'))[1]) - Date.now()) / 864e5;
+  assert.equal(p.status, 200); assert.ok(days(p) < 8, `default ${days(p)}`);
+  const kept = new Browser(); const k = await kept.req('POST', '/api/login', { email: `kk${run}@free.test`, password: b.password || PW, remember: true });
+  assert.equal(k.status, 200); assert.ok(days(k) > 29 && days(k) <= 30.01, `remember ${days(k)}`);
+  assert.equal((await kept.req('GET', '/api/me')).status, 200);
 });
 
 // ---------------------------------------------------------------- host routing (needs an instance with ROOT_DOMAIN)
@@ -103,6 +138,18 @@ test('hosts: www/app redirect to the root, sign-in host keeps to sign-in, health
   assert.equal((await get('login.roammail.test', '/')).status, 200, 'sign-in page');
   const anon = await get('roammail.test', '/12345678/inbox');
   assert.deepEqual([anon.status, anon.location], [302, 'https://login.roammail.test/']);
+});
+
+test('polish: favicon.ico, robots.txt, real 404s for made-up paths, share image', async () => {
+  const fav = await fetch(`${BASE}/favicon.ico`);
+  assert.equal(fav.status, 200); assert.equal(fav.headers.get('content-type'), 'image/x-icon');
+  assert.deepEqual([...new Uint8Array(await fav.arrayBuffer()).slice(0, 4)], [0, 0, 1, 0], 'an ICO file');
+  const robots = await fetch(`${BASE}/robots.txt`);
+  assert.match(robots.headers.get('content-type'), /text\/plain/); assert.match(await robots.text(), /User-agent: \*/);
+  for (const p of ['/wp-login.php', '/nope', '/.env', '/admin.php']) assert.equal((await fetch(BASE + p)).status, 404, p);
+  for (const p of ['/login', '/signup']) assert.equal((await fetch(BASE + p)).status, 200, p);
+  const og = await fetch(`${BASE}/assets/og-image.png`);
+  assert.equal(og.status, 200); assert.equal(og.headers.get('content-type'), 'image/png');
 });
 
 test('public website: home page and pages from the site, sign-up links, assets', async () => {

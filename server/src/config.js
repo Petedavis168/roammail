@@ -61,9 +61,11 @@ config.mailHostname = env.MAIL_HOSTNAME || config.imap.host;
 config.signup = {
   enabled: (env.SIGNUP_ENABLED ?? 'true') === 'true',
   domain: (env.SIGNUP_DOMAIN || config.rootDomain || '').toLowerCase(), // free addresses: @roammail.net
-  // Mailbox size for free accounts. FREE_MAILBOX_QUOTA_GB (or SIGNUP_QUOTA_MB). Pending final decision; the site says 20 GB.
+  // Mailbox size for free accounts. FREE_MAILBOX_QUOTA_GB (or SIGNUP_QUOTA_MB). The site says 10 GB (item 1).
   quotaMb: env.FREE_MAILBOX_QUOTA_GB ? Number(env.FREE_MAILBOX_QUOTA_GB) * 1024 : Number(env.SIGNUP_QUOTA_MB || 10240),
   perIpPerDay: Number(env.SIGNUP_PER_IP_PER_DAY || 3),
+  requireDetails: (env.SIGNUP_REQUIRE_DETAILS ?? 'true') === 'true', // birthday, recovery email and mobile number at sign-up
+  minAge: Number(env.SIGNUP_MIN_AGE || 13),
 };
 config.business = {
   maxMailboxes: Number(env.ORG_MAX_MAILBOXES || 50),
@@ -107,7 +109,7 @@ config.requireAdmin2fa = (env.REQUIRE_ADMIN_2FA ?? 'true') === 'true';
 // ---------- abuse limits (webmail; SMTP from other apps is limited by mailcow's rate limit) ----------
 config.limits = {
   freePerDay: Number(env.FREE_SENDS_PER_DAY || 150),
-  newAccountPerDay: Number(env.NEW_ACCOUNT_SENDS_PER_DAY || 25),   // free accounts younger than 48 hours
+  newAccountPerDay: Number(env.NEW_ACCOUNT_SENDS_PER_DAY || 150),  // free accounts in their first 7 days (send ramp 5a: 25/h, 150/day)
   businessPerDay: Number(env.BUSINESS_SENDS_PER_DAY || 2000),
   freeRecipientsPerMessage: Number(env.FREE_MAX_RECIPIENTS || 20),
   businessRecipientsPerMessage: Number(env.BUSINESS_MAX_RECIPIENTS || 100),

@@ -31,7 +31,11 @@ export async function markChosen(email) {
 /** A mailbox signing in for the first time that the app didn't create (e.g. made directly in mailcow): treat its password as temporary. */
 export async function ensureSetupRow(email) {
   const e = String(email).toLowerCase();
-  if (!(await row(e))) await q.run("INSERT INTO account_setup(email, must_change_password, source, created_at) VALUES(?, 1, 'external', ?) ON CONFLICT(email) DO NOTHING", e, Date.now());
+  if (await row(e)) return;
+  // Signed up through the app before setup tracking existed: the person chose this password
+  const selfSignup = await q.get('SELECT 1 FROM signups WHERE email = ?', e);
+  await q.run('INSERT INTO account_setup(email, must_change_password, source, created_at) VALUES(?, ?, ?, ?) ON CONFLICT(email) DO NOTHING',
+    e, selfSignup ? 0 : 1, selfSignup ? 'self' : 'external', Date.now());
 }
 
 async function twoFactorRequired(email) {
@@ -84,7 +88,8 @@ setupApi.post('/setup/password', wrap(async (req, res) => {
   const pw = String(req.body.password || '');
   if (pw.length < 10 || !/[A-Za-z]/.test(pw) || !/\d/.test(pw)) throw fail(400, 'Use at least 10 characters with letters and numbers');
   if (pw === req.user.password) throw fail(400, 'Choose a new password, not the temporary one');
-  if (pw.toLowerCase().includes(req.user.email.split('@')[0].toLowerCase())) throw fail(400, 'Your password must not contain your email name');
+  const local = req.user.email.split('@')[0].toLowerCase();
+  if (local.length >= 4 && pw.toLowerCase().includes(local)) throw fail(400, 'Your password must not contain your email name'); // short names (al, emp) are inside ordinary words
   await assertNotBreached(pw, req.user.email);
   await mailcow.editMailbox(req.user.email, { password: pw, password2: pw });
   await updateSessionPassword(req.user.sid, pw);

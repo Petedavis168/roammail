@@ -53,7 +53,7 @@ export function folderIcon(f) {
 }
 export const SPECIAL_ORDER = ['\\Inbox', '\\Drafts', '\\Sent', '\\Archive', '\\Junk', '\\Trash'];
 export function folderLabel(f) {
-  const names = { '\\Inbox': 'Inbox', '\\Sent': 'Sent Items', '\\Drafts': 'Drafts', '\\Trash': 'Deleted Items', '\\Junk': 'Junk Email', '\\Archive': 'Archive' };
+  const names = { '\\Inbox': 'Inbox', '\\Sent': 'Sent', '\\Drafts': 'Drafts', '\\Trash': 'Deleted', '\\Junk': 'Junk', '\\Archive': 'Archive' };
   return names[f.specialUse] || f.name;
 }
 

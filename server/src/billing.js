@@ -37,11 +37,16 @@ export async function stripe(method, path, body, idempotencyKey) {
 }
 
 // ---------------------------------------------------------------- plan math
+// Complimentary (fee waiver, item 2): a super-admin can make every mailbox of a business free, forever or until a date.
+export const COMP_FOREVER = 32503680000000; // year 3000
+export const COMP_GRACE_DAYS = 7;
+const compActive = (o) => Number(o.comp_until || 0) > Date.now();
 export async function orgBilling(orgId) {
-  const o = await q.get('SELECT id, name, owner_email, plan, billing_interval, billing_status, paid_seats, stripe_customer, stripe_subscription, canceled_at FROM orgs WHERE id = ?', orgId);
+  const o = await q.get('SELECT id, name, owner_email, plan, billing_interval, billing_status, paid_seats, stripe_customer, stripe_subscription, canceled_at, comp_until, comp_note FROM orgs WHERE id = ?', orgId);
   if (!o) return null;
-  const free = o.plan === 'friendly' ? B.friendlyFreeMailboxes : B.standardFreeMailboxes;
-  return { ...o, free, friendly: o.plan === 'friendly', enabled: B.enabled };
+  const comped = compActive(o);
+  const free = comped ? 100000 : o.plan === 'friendly' ? B.friendlyFreeMailboxes : B.standardFreeMailboxes;
+  return { ...o, free, friendly: o.plan === 'friendly', comped, compForever: Number(o.comp_until || 0) >= COMP_FOREVER, enabled: B.enabled };
 }
 async function mailboxCount(orgId) {
   let n = 0;
@@ -206,7 +211,8 @@ billing.get('/billing/:orgId', wrap(async (req, res) => {
   const id = await requireOrgAdmin(req, req.params.orgId);
   const b = await orgBilling(id);
   const used = await mailboxCount(id);
-  res.json({ plan: b.plan, friendly: b.friendly, status: b.billing_status, interval: b.billing_interval, paidSeats: b.paid_seats, free: b.free,
+  res.json({ plan: b.plan, friendly: b.friendly, comp: b.comped ? { until: b.compForever ? null : Number(b.comp_until), forever: b.compForever } : null,
+    status: b.billing_status, interval: b.billing_interval, paidSeats: b.paid_seats, free: b.comped ? used : b.free,
     used, billable: Math.max(0, used - b.free), perUser: price(b.billing_interval || 'month'), currency: B.currency, enabled: B.enabled,
     needsPayment: await needsPaymentToActivate(id), canceledAt: b.canceled_at });
 }));
@@ -314,11 +320,49 @@ billing.patch('/super/orgs/:id/plan', wrap(async (req, res) => {
   res.json({ ok: true });
 }));
 
+// Super-admin: complimentary account (same provisioning path; billing just treats every mailbox as free)
+billing.put('/super/orgs/:id/comp', wrap(async (req, res) => {
+  await requireSuper(req);
+  const id = Number(req.params.id);
+  if (!(await q.get('SELECT 1 FROM orgs WHERE id = ?', id))) throw fail(404, 'Organization not found');
+  const mode = String(req.body.mode || '');
+  const note = String(req.body.note || '').trim().slice(0, 500);
+  let until = null;
+  if (mode === 'forever') until = COMP_FOREVER;
+  else if (mode === 'until') {
+    until = new Date(String(req.body.until || '')).getTime();
+    if (!Number.isFinite(until) || until <= Date.now()) throw fail(400, 'Pick a date in the future');
+  } else if (mode === 'months') {
+    const n = Number(req.body.months);
+    if (!Number.isInteger(n) || n < 1 || n > 120) throw fail(400, 'Months must be 1 to 120');
+    const d = new Date(); d.setMonth(d.getMonth() + n); until = d.getTime();
+  } else if (mode !== 'off') throw fail(400, 'Choose forever, until a date, a number of months, or off');
+  if (mode !== 'off' && note.length < 3) throw fail(400, 'Add a short note saying why (kept in the audit log)');
+  await q.run('UPDATE orgs SET comp_until = ?, comp_note = ?, comp_by = ?, comp_warned = 0 WHERE id = ?', until, mode === 'off' ? null : note, req.user.email, id);
+  await audit(req.user.email, id, mode === 'off' ? 'billing.comp_removed' : 'billing.comp_set', { mode, until, note });
+  res.json({ ok: true, comp: until ? { until: until >= COMP_FOREVER ? null : until, forever: until >= COMP_FOREVER, note } : null });
+}));
+
 // ---------------------------------------------------------------- canceled subscriptions: pause after the grace period
 export function startBillingChecks(suspendOrg) {
   if (!config.runsBackground) return;
   const run = async () => {
     if (!B.enabled) return;
+    // Complimentary period ending: warn admins a week before; after it ends, a 7-day grace before unpaid mailboxes pause
+    const now = Date.now();
+    for (const o of await q.all('SELECT id, comp_until FROM orgs WHERE comp_until IS NOT NULL AND comp_until < ? AND comp_until > ? AND comp_warned = 0', COMP_FOREVER, now)) {
+      if (Number(o.comp_until) - now > 7 * 864e5) continue;
+      const claim = await q.run('UPDATE orgs SET comp_warned = 1 WHERE id = ? AND comp_warned = 0', o.id);
+      if (claim.changes !== 1) continue;
+      await tellAdmins(o.id, 'Your complimentary Roammail plan ends soon', `<p>Your complimentary plan ends on <b>${esc(new Date(Number(o.comp_until)).toDateString())}</b>.</p><p>To keep every mailbox working, add a payment method in <b>Admin → Billing</b> before then. After it ends you have ${COMP_GRACE_DAYS} more days before mailboxes over the free allowance are paused. Nothing is deleted.</p>`);
+      await audit('billing', o.id, 'billing.comp_warning');
+    }
+    for (const o of await q.all("SELECT id FROM orgs WHERE comp_until IS NOT NULL AND comp_until < ? AND suspended = 0 AND (billing_status IS NULL OR billing_status NOT IN ('active', 'past_due', 'trialing'))", now - COMP_GRACE_DAYS * 864e5)) {
+      const b = await orgBilling(o.id);
+      if ((await mailboxCount(o.id)) <= b.free) continue;
+      await suspendOrg(o.id).catch((e) => console.warn('suspend failed', e.message));
+      await audit('billing', o.id, 'billing.suspended_comp_ended');
+    }
     const due = await q.all("SELECT id FROM orgs WHERE billing_status = 'canceled' AND suspended = 0 AND canceled_at < datetime('now', ?)", `-${B.graceDays} days`);
     for (const o of due) {
       // Friendly customers whose mailboxes all fit in the free allowance keep working

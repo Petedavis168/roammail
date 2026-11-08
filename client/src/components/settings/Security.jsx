@@ -20,10 +20,11 @@ export default function Security({ me }) {
   const [pw, setPw] = useState({ current: '', next: '', confirm: '' });
   const [recovery, setRecovery] = useState('');
   const [vcode, setVcode] = useState('');
+  const [det, setDet] = useState({ phone: '', birthday: '' });
   const [devices, setDevices] = useState([]);
   const load = () => {
     api.get('/api/security/sessions').then(setDevices).catch(() => {});
-    return api.get('/api/security').then((d) => { setS(d); setRecovery(d.recoveryEmail); });
+    return api.get('/api/security').then((d) => { setS(d); setRecovery(d.recoveryEmail); setDet({ phone: d.phone || '', birthday: d.birthday || '' }); });
   };
   useEffect(() => { load(); }, []);
   if (!s) return <div className="spinner" />;
@@ -78,6 +79,14 @@ export default function Security({ me }) {
           <button className="link" onClick={() => run(() => api.post('/api/security/recovery-email/resend'), 'New code sent')}>Resend</button>
         </div>
       )}
+
+      <h3>Mobile number and date of birth</h3>
+      <p className="muted small">Used only to protect and recover your account. Never shown to anyone.</p>
+      <div className="pick-time">
+        <input type="tel" inputMode="tel" autoComplete="tel" placeholder="+1 555 123 4567" value={det.phone} onChange={(e) => setDet({ ...det, phone: e.target.value })} />
+        <input type="date" autoComplete="bday" value={det.birthday} onChange={(e) => setDet({ ...det, birthday: e.target.value })} />
+        <button className="btn" onClick={() => { const pw = prompt('Enter your password to change these details'); if (pw) run(() => api.put('/api/security/details', { ...det, password: pw }), 'Details saved').then(load); }}>Save</button>
+      </div>
 
       <h3>Change password</h3>
       <form className="form narrow" onSubmit={async (e) => {

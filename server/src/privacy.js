@@ -44,7 +44,7 @@ legalPages.get('/legal/:doc', async (req, res) => {
   res.setHeader('Cache-Control', 'public, max-age=3600');
   res.send(`<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>${esc(DOCS[doc])} · ${esc(config.appName)}</title><link rel="icon" href="/favicon.png">
-<style>table{border-collapse:collapse;width:100%;margin:10px 0;font-size:14px}th,td{border:1px solid #ddd;padding:6px 8px;text-align:left;vertical-align:top}th{background:#f0f3f6}body{margin:0;font:16px/1.6 -apple-system,Segoe UI,Roboto,Arial,sans-serif;color:#242424;background:#f5f5f5}
+<style>table{border-collapse:collapse;width:100%;margin:10px 0;font-size:14px}th,td{border:1px solid #ddd;padding:6px 8px;text-align:left;vertical-align:top;overflow-wrap:anywhere}@media(max-width:600px){table{font-size:13px}th,td{padding:5px}}th{background:#f0f3f6}body{margin:0;font:16px/1.6 -apple-system,Segoe UI,Roboto,Arial,sans-serif;color:#242424;background:#f5f5f5}
 main{max-width:760px;margin:0 auto;padding:32px 22px 60px;background:#fff;min-height:100vh}h1{font-size:28px;margin:0 0 4px}
 h2{font-size:18px;margin:26px 0 6px}a{color:#244960}nav{font-size:14px;margin-bottom:24px}nav a{margin-right:14px}.muted{color:#666;font-size:14px}</style></head>
 <body><main><a href="/" style="display:flex;align-items:center;gap:10px;text-decoration:none;color:#0a1e2e;font:700 22px Georgia,serif;margin-bottom:12px"><img src="/roammail-mark.png" alt="" style="width:40px;height:auto">${esc(config.appName)}</a><nav><a href="/">← Back to ${esc(config.appName)}</a>${Object.entries(DOCS).map(([k, v]) => `<a href="/legal/${k}">${esc(v)}</a>`).join('')}</nav>
@@ -100,7 +100,7 @@ privacy.post('/account/delete', wrap(async (req, res) => {
   await closeClient(req.user.sid);
   await mailcow.deleteMailbox(req.user.email);
   const e = req.user.email;
-  for (const t of ['user_security', 'user_settings', 'user_signatures', 'profiles', 'jobs', 'password_resets', 'setup_tokens']) await q.run(`DELETE FROM ${t} WHERE email = ?`, e);
+  for (const t of ['user_security', 'user_settings', 'user_signatures', 'profiles', 'jobs', 'password_resets', 'setup_tokens', 'tasks', 'notes', 'followups']) await q.run(`DELETE FROM ${t} WHERE email = ?`, e);
   await q.run('DELETE FROM members WHERE email = ?', e);
   await q.run("UPDATE signups SET recovery_email = NULL WHERE email = ?", e); // keep the row for sign-up abuse limits only
   await revokeSessions(e);

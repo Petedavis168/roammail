@@ -27,7 +27,7 @@ test('push: new mail triggers an encrypted web push; sign-out everywhere stops i
   const server = https.createServer({ key: fs.readFileSync(path.join(dir, 'k.pem')), cert: fs.readFileSync(path.join(dir, 'c.pem')) }, (req, res) => { let b = []; req.on('data', (c) => b.push(c)); req.on('end', () => { received.push({ headers: req.headers, body: Buffer.concat(b) }); res.writeHead(201); res.end(); }); });
   await new Promise((r) => server.listen(12999, '127.0.0.1', r));
   try {
-    const s = await call('POST', '/api/signup', { name: 'Pusher', username: `push${Date.now() % 1e6}`, password: PW, acceptTerms: true });
+    const s = await call('POST', '/api/signup', { name: 'Pusher', username: `push${Date.now() % 1e6}`, password: PW, acceptTerms: true, birthday: '1990-01-15', recoveryEmail: 'recovery@example.org', phone: '+15555550123' });
     assert.equal(s.status, 200);
     await call('POST', '/api/setup/2fa/remind', {}); await call('POST', '/api/setup/step', { step: 'done' });
     await sleep(1300);
@@ -37,6 +37,15 @@ test('push: new mail triggers an encrypted web push; sign-out everywhere stops i
     const subscription = { endpoint: 'https://127.0.0.1:12999/push/abc', keys: { p256dh: ecdh.getPublicKey().toString('base64url'), auth: crypto.randomBytes(16).toString('base64url') } };
     assert.equal((await call('POST', '/api/push/subscribe', { subscription: { ...subscription, endpoint: 'http://evil.example/x' } })).status, 400, 'only https push services');
     assert.equal((await call('POST', '/api/push/subscribe', { subscription })).status, 200);
+    // phone apps register a Firebase / Apple device token instead
+    assert.equal((await call('POST', '/api/push/native', { platform: 'ios', token: 'nothex' })).status, 400);
+    assert.equal((await call('POST', '/api/push/native', { platform: 'android', token: 'fcm-device-token-1234567890' })).status, 200);
+    assert.equal((await call('POST', '/api/push/native/unregister', { platform: 'android', token: 'fcm-device-token-1234567890' })).status, 200);
+    // notification preview: on by default, can hide sender and subject
+    assert.equal((await call('GET', '/api/push/preview')).data.on, true);
+    assert.equal((await call('PUT', '/api/push/preview', { on: false })).status, 200);
+    assert.equal((await call('GET', '/api/push/preview')).data.on, false);
+    assert.equal((await call('PUT', '/api/push/preview', { on: true })).status, 200);
     await sleep(5000); // worker starts watching
     const fd = new FormData(); fd.append('to', s.data.email); fd.append('subject', 'Ping'); fd.append('text', 'hello');
     assert.equal((await call('POST', '/api/send', fd)).status, 200);

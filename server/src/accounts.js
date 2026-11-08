@@ -1,7 +1,7 @@
 import { markChosen, markTemporary, setupState } from './setup.js';
 import { renameMailboxId, ensureMailboxId, inboxUrl } from './mailboxids.js';
 import { syncArchive } from './archive.js';
-import { applySendingRoute } from './outbound.js';
+import { applySendingRoute, applyRate, RAMP, BUSINESS_RATE } from './outbound.js';
 // Free sign-up, business domains, and the admin / super-admin portals.
 import express from 'express';
 import crypto from 'node:crypto';
@@ -9,7 +9,7 @@ import { rateLimit } from './shared.js';
 import { config } from './config.js';
 import { q, rolesFor, audit, setting, setSetting } from './db.js';
 import { mailcow } from './mailcow.js';
-import { setSession, requireAuth, revokeSessions } from './session.js';
+import { setSession, requireAuth, revokeSessions, seal } from './session.js';
 import { verifyRecord, requiredRecords, checkVerification, checkRecords } from './dns.js';
 import { findZone, applyRecords } from './route53.js';
 import { saveProfile, getProfile, deleteUserData } from './signatures.js';
@@ -20,9 +20,21 @@ import { applyDomainSpamDefaults } from './spam.js';
 import { assertNotBreached, topSenders } from './abuse.js';
 import { resetTwoFactor } from './recovery.js';
 import { syncOrgGroups } from './groups.js';
+import { tempPassword, TEMP_PASSWORD_RE } from './temppass.js';
+import { isBareFirstName, FIRST_NAME_HINT } from './names.js';
+import { phoneRequired, requireVerifiedPhone, normalizePhone, checkBirthday, phoneHash as hashPhone } from './phone.js';
+import { sendSystemMail } from './recovery.js';
 import { needsPaymentToActivate, seatCheck, shrinkSeats, onPaid, startBillingChecks, orgBilling, setSeats } from './billing.js';
 
 const wrap = (fn) => (req, res, next) => Promise.resolve(fn(req, res, next)).catch(next);
+// a@b.c shape without a regex (input is user-provided; keeps it linear-time and bounded)
+function looksLikeEmail(v) {
+  if (v.length > 254 || /\s/.test(v)) return false;
+  const at = v.indexOf('@');
+  if (at < 1 || at !== v.lastIndexOf('@')) return false;
+  const dom = v.slice(at + 1); const dot = dom.lastIndexOf('.');
+  return dot > 0 && dot < dom.length - 1;
+}
 const fail = (status, message) => Object.assign(new Error(message), { status });
 
 const RESERVED = new Set(['admin', 'administrator', 'root', 'postmaster', 'abuse', 'hostmaster', 'webmaster', 'security',
@@ -51,6 +63,8 @@ publicAccounts.get('/signup/config', async (req, res) => res.json({
   rootDomain: config.rootDomain || null, loginHost: config.loginHost || null,
   // mailbox sizes (config values, in MB)
   quota: { free: config.signup.quotaMb, business: config.business.defaultQuotaMb, businessMax: config.business.maxQuotaMb },
+  minAge: config.signup.minAge, requireDetails: config.signup.requireDetails,
+  phoneRequired: phoneRequired(), // 5b: free sign-ups verify a mobile number by SMS
 }));
 
 async function checkCaptcha(token, ip) {
@@ -62,8 +76,9 @@ async function checkCaptcha(token, ip) {
 }
 
 /** Is local@SIGNUP_DOMAIN free? Checks mailboxes, aliases/groups, and addresses of deleted accounts (never reused). */
-async function addressAvailable(local) {
+async function addressAvailable(local, { staff = false } = {}) {
   if (!LOCAL_RE.test(local) || RESERVED.has(local) || local.length < 3) return false;
+  if (!staff && isBareFirstName(local)) return false;
   const email = `${local}@${config.signup.domain}`;
   if (await q.get('SELECT 1 FROM signups WHERE email = ?', email)) return false;
   if (await q.get('SELECT 1 FROM groups WHERE address = ?', email)) return false;
@@ -78,25 +93,48 @@ async function aliasesCached() {
   }
   return aliasCache.set;
 }
-const usernameHint = (local) => (local.length < 3 ? 'Use at least 3 characters' : !LOCAL_RE.test(local) ? 'Use only letters, numbers, dots, dashes and underscores' : RESERVED.has(local) ? 'That name is reserved' : null);
+const usernameHint = (local) => (local.length < 3 ? 'Use at least 3 characters' : !LOCAL_RE.test(local) ? 'Use only letters, numbers, dots, dashes and underscores' : RESERVED.has(local) ? 'That name is reserved' : isBareFirstName(local) ? FIRST_NAME_HINT : null);
+
+// Address ideas from the person's name (and what they typed). Never a bare first name, a reserved word or a taken
+// address: addressAvailable() checks each one. If the obvious ones are gone, a number is added so there are always some.
+const normName = (s) => String(s || '').normalize('NFKD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/[^a-z0-9]/g, '').slice(0, 20);
+async function addressIdeas({ first, last, want, count = 3, shuffle = false }) {
+  const f = normName(first); const l = normName(last); const w = String(want || '').slice(0, 64).toLowerCase().replace(/[^a-z0-9._-]/g, '').replace(/^[._-]+/, '').replace(/[._-]+$/, '').slice(0, 30);
+  const yy = new Date().getFullYear() % 100;
+  const n2 = () => crypto.randomInt(10, 100); const n3 = () => crypto.randomInt(100, 1000);
+  let ideas = [
+    w && l && !w.includes(l) && `${w}.${l}`, w && l && !w.includes(l) && `${w}${l}`, w && l && !w.includes(l) && `${w}.${l[0]}`,
+    f && l && `${f}.${l}`, f && l && `${f}${l}`, f && l && `${f[0]}${l}`, f && l && `${f}.${l[0]}`, f && l && `${l}.${f}`, f && l && `${f}${l}${yy}`,
+    w && `${w}${n2()}`, w && `${w}.${n3()}`,
+    f && `${f}${l ? `.${l}` : ''}${n2()}`, f && `${f}${yy}`, f && l && `${f[0]}${l}${n2()}`, f && `${f}.${n3()}`,
+  ].filter((x) => x && x.length >= 3 && x.length <= 40);
+  ideas = [...new Set(ideas)];
+  if (shuffle) ideas.sort(() => crypto.randomInt(3) - 1);
+  const out = [];
+  for (const i of ideas) { if (out.length >= count) break; if (await addressAvailable(i)) out.push(i); }
+  // still short (very common name): keep adding numbers to the best base
+  const base = (l && f ? `${f}.${l}` : f || w || 'mail').slice(0, 30);
+  for (let tries = 0; out.length < count && tries < 12; tries++) {
+    const c = `${base}${tries < 6 ? n2() : n3()}`;
+    if (!out.includes(c) && await addressAvailable(c)) out.push(c);
+  }
+  return out;
+}
 
 publicAccounts.get('/signup/check', rateLimit({ windowMs: 60_000, limit: 60 }), wrap(async (req, res) => {
   const local = String(req.query.username || '').toLowerCase().trim();
   const hint = usernameHint(local);
-  if (hint) return res.json({ available: false, reason: hint });
-  res.json({ available: await addressAvailable(local) });
+  const available = !hint && await addressAvailable(local);
+  if (available) return res.json({ available: true });
+  // Not allowed or taken: offer alternatives built from their name and what they typed
+  const alternatives = await addressIdeas({ first: req.query.first, last: req.query.last, want: local });
+  res.json({ available: false, ...(hint ? { reason: hint } : {}), alternatives });
 }));
 
-// Gmail-style suggestions from the person's name
+// Gmail-style suggestions from the person's name; ?shuffle=1 for "Generate one for me"
 publicAccounts.get('/signup/suggest', rateLimit({ windowMs: 60_000, limit: 30 }), wrap(async (req, res) => {
-  const norm = (s) => String(s || '').normalize('NFKD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/[^a-z0-9]/g, '').slice(0, 20);
-  const f = norm(req.query.first); const l = norm(req.query.last);
-  const year = new Date().getFullYear();
-  const ideas = [...new Set([f && l && `${f}.${l}`, f && l && `${f}${l}`, f && l && `${f[0]}${l}`, f && l && `${f}.${l[0]}`, f && l && `${f}${l}${year % 100}`,
-    f && `${f}${l ? `.${l}` : ''}${Math.floor(10 + Math.random() * 89)}`, f && l && `${l}.${f}`, f && `${f}${year}`].filter(Boolean))];
-  const out = [];
-  for (const i of ideas) { if (out.length >= 3) break; if (await addressAvailable(i)) out.push(i); }
-  res.json({ domain: config.signup.domain, suggestions: out });
+  const suggestions = await addressIdeas({ first: req.query.first, last: req.query.last, count: Math.min(5, Number(req.query.count) || 3), shuffle: req.query.shuffle === '1' });
+  res.json({ domain: config.signup.domain, suggestions });
 }));
 
 publicAccounts.post('/signup', rateLimit({ windowMs: 60 * 60_000, limit: 10 }), wrap(async (req, res) => {
@@ -106,6 +144,7 @@ publicAccounts.post('/signup', rateLimit({ windowMs: 60 * 60_000, limit: 10 }), 
   const password = String(req.body.password || '');
   checkLocal(local);
   if (RESERVED.has(local)) throw fail(400, 'That username is reserved');
+  if (isBareFirstName(local)) throw fail(400, FIRST_NAME_HINT);
   if (local.length < 3) throw fail(400, 'Use at least 3 characters for your address');
   if (!name) throw fail(400, 'Please enter your name');
   checkPassword(password);
@@ -116,19 +155,45 @@ publicAccounts.post('/signup', rateLimit({ windowMs: 60 * 60_000, limit: 10 }), 
   if (lastHour >= config.limits.signupsPerHour) throw fail(429, 'Sign-ups are very busy right now. Please try again in a little while.');
   await assertNotBreached(password, `${local}@x`);
   await checkCaptcha(req.body.captcha, req.ip);
+  const phoneHash = await requireVerifiedPhone(req.body.phoneToken);
+  // Account details (both sign-ups): date of birth (age check), recovery email and mobile number, for recovery
+  let details = null;
+  if (config.signup.requireDetails || req.body.birthday || req.body.phone) {
+    const birthday = checkBirthday(req.body.birthday, config.signup.minAge);
+    const recovery = String(req.body.recoveryEmail || '').trim().toLowerCase();
+    if (!looksLikeEmail(recovery)) throw fail(400, 'Enter a recovery email address (a different account you can get into)');
+    if (recovery === `${local}@${config.signup.domain}`) throw fail(400, 'Use a different address than the new one for recovery');
+    details = { birthday, phone: normalizePhone(req.body.phone) };
+    // with SMS verification on, the number we keep must be the one they just confirmed
+    if (phoneHash && hashPhone(details.phone) !== phoneHash) throw fail(400, 'Use the mobile number you verified by text message');
+  }
+  // Business sign-up: their own domain and the address they want there (created once the domain is connected)
+  let biz = null;
+  if (req.body.business) {
+    const bdomain = await checkNewDomain(req.body.business.domain);
+    if (await mailcow.getDomain(bdomain)) throw fail(409, 'That domain already exists on this mail server');
+    const blocal = String(req.body.business.local || '').trim().toLowerCase();
+    if (!LOCAL_RE.test(blocal) || /\.\.|^[._-]|[._-]$/.test(blocal)) throw fail(400, 'Your address at your domain can use letters, numbers, dots and dashes');
+    biz = { domain: bdomain, local: blocal, orgName: String(req.body.business.orgName || '').trim() };
+  }
 
   const email = `${local}@${config.signup.domain}`;
   if (!(await addressAvailable(local))) throw fail(409, 'That address is taken. Try one of the suggestions.');
   await mailcow.addMailbox({ localPart: local, domain: config.signup.domain, name, password, quotaMb: config.signup.quotaMb });
   await markChosen(`${local}@${config.signup.domain}`);
-  const rl = /^(\d+)\/([smhd])$/.exec(config.signup.rateLimit);
-  if (rl) await mailcow.setMailboxRateLimit(email, rl[1], rl[2]).catch((e) => console.warn('rate limit not set:', e.message));
-  await q.run('INSERT INTO signups(email, ip, recovery_email, terms_version) VALUES(?, ?, ?, ?) ON CONFLICT(email) DO UPDATE SET ip = excluded.ip, recovery_email = excluded.recovery_email, terms_version = excluded.terms_version, created_at = excluded.created_at', email, req.ip, String(req.body.recoveryEmail || '').slice(0, 200) || null, config.legal.termsVersion);
-  await audit(email, null, 'signup', { ip: req.ip });
+  // Send ramp (5a): new free accounts start at 25/h; the daily job raises it as the account ages
+  if (config.signup.rateLimit) await applyRate(email, RAMP[0]).catch((e) => console.warn('rate limit not set:', e.message));
+  await q.run('INSERT INTO signups(email, ip, recovery_email, terms_version, phone_hash) VALUES(?, ?, ?, ?, ?) ON CONFLICT(email) DO UPDATE SET ip = excluded.ip, recovery_email = excluded.recovery_email, terms_version = excluded.terms_version, created_at = excluded.created_at, phone_hash = excluded.phone_hash', email, req.ip, String(req.body.recoveryEmail || '').slice(0, 200) || null, config.legal.termsVersion, phoneHash);
+  await audit(email, null, 'signup', { ip: req.ip, phoneVerified: !!phoneHash });
+  if (biz) await createOrgWithDomain(email, biz.domain, biz.orgName, biz.local);
   await saveProfile(email, { name });
   await setRecoveryEmail(email, String(req.body.recoveryEmail || '').trim());
+  if (details) {
+    await q.run('INSERT INTO user_security(email) VALUES(?) ON CONFLICT(email) DO NOTHING', email);
+    await q.run('UPDATE user_security SET birthday = ?, phone = ? WHERE email = ?', details.birthday, seal({ p: details.phone }), email); // phone stored encrypted
+  }
   deliverWelcome({ email, password, name }).catch(() => {});
-  await setSession(res, { email, password, name }, req);
+  await setSession(res, { email, password, name, remember: req.body.remember === true }, req); // phone apps stay signed in
   const mailboxId = await ensureMailboxId(email, { name });
   res.json({ email, mailboxId, redirect: inboxUrl(mailboxId), setupRequired: (await setupState(email)).setupRequired });
 }));
@@ -141,7 +206,7 @@ async function isOrgAdmin(user, orgId) {
   const r = await rolesFor(user.email);
   return r.superAdmin || r.orgs.some((o) => o.id === orgId && o.role === 'admin');
 }
-async function requireDomainAdmin(req, domain) {
+export async function requireDomainAdmin(req, domain) {
   const d = await orgOf(String(domain || '').toLowerCase());
   if (!d) throw fail(404, 'Domain not found');
   if (!await isOrgAdmin(req.user, d.org_id)) throw fail(403, 'You are not an admin of this domain');
@@ -216,13 +281,40 @@ accounts.get('/domains', wrap(async (req, res) => {
 }));
 
 // Step 1: claim a domain (creates the organization if needed)
-accounts.post('/domains', rateLimit({ windowMs: 60 * 60_000, limit: 20 }), wrap(async (req, res) => {
-  const domain = String(req.body.domain || '').trim().toLowerCase().replace(/^https?:\/\//, '').replace(/^www\./, '').replace(/\/.*$/, '');
+/** Is this a domain a business can bring? Returns the cleaned domain or throws with a plain-English reason. */
+async function checkNewDomain(input) {
+  // plain string cutting (no backtracking regexes) on a length-capped input
+  let domain = String(input || '').slice(0, 300).trim().toLowerCase();
+  for (const p of ['https://', 'http://']) if (domain.startsWith(p)) domain = domain.slice(p.length);
+  if (domain.startsWith('www.')) domain = domain.slice(4);
+  if (domain.includes('/')) domain = domain.slice(0, domain.indexOf('/'));
+  if (domain.includes('@')) domain = domain.slice(domain.lastIndexOf('@') + 1);
   if (!DOMAIN_RE.test(domain)) throw fail(400, 'That doesn\'t look like a domain name (e.g. mybusiness.com)');
   if (BLOCKED_DOMAINS.test(domain) || domain === config.signup.domain || domain.endsWith(`.${config.mailHostname}`) || domain === config.mailHostname) {
     throw fail(400, 'That domain can\'t be added');
   }
-  if (await q.get('SELECT 1 FROM domains WHERE domain = ?', domain)) throw fail(409, 'That domain is already registered here');
+  if (await q.get('SELECT 1 FROM domains WHERE domain = ?', domain)) throw fail(409, 'That domain is already registered here. If it\'s yours, sign in or contact support.');
+  return domain;
+}
+/** Create the business and its (pending) domain for an owner. */
+async function createOrgWithDomain(owner, domain, orgName, ownerLocal = null) {
+  const name = String(orgName || domain).trim().slice(0, 120) || domain;
+  const orgId = await q.insert('INSERT INTO orgs(name, owner_email, max_mailboxes) VALUES(?, ?, ?)', name, owner, config.business.maxMailboxes);
+  await q.run("INSERT INTO members(email, org_id, role) VALUES(?, ?, 'admin')", owner, orgId);
+  await audit(owner, orgId, 'org.create', { name });
+  const token = crypto.randomBytes(12).toString('hex');
+  await q.run('INSERT INTO domains(domain, org_id, verify_token, owner_local) VALUES(?, ?, ?, ?)', domain, orgId, token, ownerLocal);
+  await audit(owner, orgId, 'domain.add', { domain });
+  return { orgId, token };
+}
+
+// Sign-up page, business path: is the domain they typed one we can take?
+publicAccounts.get('/signup/domain-check', rateLimit({ windowMs: 60_000, limit: 30 }), wrap(async (req, res) => {
+  try { res.json({ ok: true, domain: await checkNewDomain(req.query.domain) }); } catch (e) { res.json({ ok: false, reason: e.message }); }
+}));
+
+accounts.post('/domains', rateLimit({ windowMs: 60 * 60_000, limit: 20 }), wrap(async (req, res) => {
+  const domain = await checkNewDomain(req.body.domain);
   const pending = (await q.get("SELECT COUNT(*) AS n FROM domains d JOIN orgs o ON o.id = d.org_id WHERE o.owner_email = ? AND d.status = 'pending'", req.user.email)).n;
   if (pending >= 5 && !(await rolesFor(req.user.email)).superAdmin) throw fail(429, 'Finish verifying your other domains first (5 pending at most)');
   const superAdmin = (await rolesFor(req.user.email)).superAdmin;
@@ -244,7 +336,9 @@ accounts.post('/domains', rateLimit({ windowMs: 60 * 60_000, limit: 20 }), wrap(
 accounts.get('/domains/:domain', wrap(async (req, res) => {
   const d = await requireDomainAdmin(req, req.params.domain);
   const superAdmin = (await rolesFor(req.user.email)).superAdmin;
-  const base = { domain: d.domain, orgId: d.org_id, orgName: d.org_name, status: d.status, mailHostname: config.mailHostname };
+  const base = { domain: d.domain, orgId: d.org_id, orgName: d.org_name, status: d.status, mailHostname: config.mailHostname,
+    // the address the owner asked for at sign-up (made for them once the domain is connected)
+    ownerMailbox: d.owner_local ? { address: `${d.owner_local}@${d.domain}`, created: !!d.owner_mailbox, mine: (await q.get('SELECT owner_email FROM orgs WHERE id = ?', d.org_id))?.owner_email === req.user.email } : null };
   const route53 = superAdmin && !!(await findZone(d.domain));
   if (d.status === 'verified') {
     const b = await orgBilling(d.org_id);
@@ -253,8 +347,34 @@ accounts.get('/domains/:domain', wrap(async (req, res) => {
   if (d.status === 'pending') {
     return res.json({ ...base, route53, verify: { ...verifyRecord(d.domain, d.verify_token), ok: await checkVerification(d.domain, d.verify_token) }, records: requiredRecords(d.domain, null) });
   }
-  const records = await checkRecords(d.domain, dkimOf(d));
-  res.json({ ...base, route53, records, ready: records.filter((r) => !r.optional).every((r) => r.ok) });
+  // 5i: "Sending: Direct / Trusted relay" comes from the mailcow domain's relayhost (set on the server by fwd-relay-sync)
+  const mc = await mailcow.getDomain(d.domain).catch(() => null);
+  const relay = !!(mc && Number(mc.relayhost || 0) > 0);
+  const records = await checkRecords(d.domain, dkimOf(d), { relay });
+  res.json({ ...base, route53, records, sending: relay ? 'relay' : 'direct', ready: records.filter((r) => !r.optional).every((r) => r.ok) });
+}));
+
+// Once the domain is live: create the owner's own address (bob@theirdomain.com) with the password they already use,
+// add it to this browser's signed-in accounts, and remember it so it's only done once.
+accounts.post('/domains/:domain/owner-mailbox', rateLimit({ windowMs: 60 * 60_000, limit: 10 }), wrap(async (req, res) => {
+  const d = await requireDomainAdmin(req, req.params.domain);
+  if (d.status !== 'active') throw fail(400, 'Your domain isn\'t connected yet');
+  if (!d.owner_local) throw fail(400, 'No address was requested at sign-up');
+  const owner = (await q.get('SELECT owner_email FROM orgs WHERE id = ?', d.org_id))?.owner_email;
+  if (owner !== req.user.email) throw fail(403, 'Only the person who signed up can do this');
+  const email = `${d.owner_local}@${d.domain}`;
+  if (!d.owner_mailbox) {
+    if (!(await mailcow.getMailbox(email))) {
+      const seat = await seatCheck(d.org_id);
+      if (!seat.ok) throw Object.assign(fail(402, 'Add a paid seat first'), { code: 'seat_required' });
+      await createUser(req, d, { localPart: d.owner_local, name: req.user.name || (await getProfile(req.user.email))?.name || d.owner_local, password: req.user.password, admin: true, welcome: false });
+    }
+    await markChosen(email); // same password they chose at sign-up: not a temporary one
+    await q.run('UPDATE domains SET owner_mailbox = ? WHERE domain = ?', email, d.domain);
+    await audit(req.user.email, d.org_id, 'domain.owner_mailbox', { email });
+  }
+  await setSession(res, { email, password: req.user.password, name: req.user.name || '' }, req);
+  res.json({ ok: true, email, mailboxId: await ensureMailboxId(email) });
 }));
 
 // Step 2: verify ownership -> domain is created in mailcow with a DKIM key
@@ -348,10 +468,12 @@ async function createUser(req, d, body) {
   const local = String(body.localPart || '').trim().toLowerCase();
   checkLocal(local);
   checkPassword(body.password);
-  await assertNotBreached(body.password, `${local}@x`);
+  // Temporary password (always replaced at first sign-in): the "contains your email name" rule applies to the one they choose
+  await assertNotBreached(body.password, TEMP_PASSWORD_RE.test(body.password) ? '' : `${local}@x`);
   const quotaMb = Math.max(256, Math.min(Number(body.quotaMb) || config.business.defaultQuotaMb, config.business.maxQuotaMb));
   const email = `${local}@${d.domain}`;
   await mailcow.addMailbox({ localPart: local, domain: d.domain, name: String(body.name || '').slice(0, 100), password: body.password, quotaMb });
+  await applyRate(`${local}@${d.domain}`, BUSINESS_RATE).catch((e) => console.warn('rate limit not set:', e.message)); // business: 100/h
   await markTemporary(`${local}@${d.domain}`, body.inviteEmail ? 'invite' : 'admin');
   await q.run('INSERT INTO members(email, org_id, role) VALUES(?, ?, ?) ON CONFLICT(email, org_id) DO UPDATE SET role = excluded.role', email, d.org_id, body.admin ? 'admin' : 'user');
   await saveProfile(email, { name: body.name || '', title: body.title, department: body.department, phone: body.phone, mobile: body.mobile });
@@ -420,7 +542,7 @@ accounts.post('/admin/users', wrap(async (req, res) => {
 /** Minimal RFC 4180 CSV parser (quotes, commas and line breaks inside quotes). */
 export function parseCsv(text) {
   const rows = []; let row = []; let field = ''; let quoted = false;
-  const s = String(text || '').replace(/^\uFEFF/, '');
+  const s = String(text || '').slice(0, 2_000_000).replace(/^\uFEFF/, ''); // bounded (requests are capped at 2 MB anyway)
   for (let i = 0; i < s.length; i++) {
     const c = s[i];
     if (quoted) {
@@ -436,7 +558,7 @@ export function parseCsv(text) {
 }
 const COLS = { name: ['name', 'full name', 'display name'], email: ['email', 'email address', 'username', 'user', 'address'], title: ['title', 'job title'],
   department: ['department', 'dept', 'team'], invite: ['personal email', 'invite email', 'invite', 'private email'], phone: ['phone', 'work phone'], mobile: ['mobile', 'cell', 'mobile phone'], admin: ['admin', 'is admin', 'role'], password: ['password'] };
-const genPassword = () => `${crypto.randomBytes(9).toString('base64url')}-${crypto.randomInt(10, 99)}`;
+const genPassword = tempPassword; // shown to the admin; the person must change it at first sign-in
 
 accounts.post('/admin/users/import', rateLimit({ windowMs: 3600e3, limit: 20 }), wrap(async (req, res) => {
   const d = await requireDomainAdmin(req, req.body.domain);
@@ -459,7 +581,7 @@ accounts.post('/admin/users/import', rateLimit({ windowMs: 3600e3, limit: 20 }),
     if (!error && existing.has(email)) error = 'Already exists';
     if (!error && seen.has(email)) error = 'Listed twice';
     seen.add(email);
-    const password = get('password') || genPassword();
+    const password = get('password') || genPassword(local);
     if (!error && get('password')) { try { checkPassword(password); } catch (e) { error = e.message; } }
     return { row: i + 2, email, localPart: local, name: get('name').slice(0, 100), title: get('title'), department: get('department'), phone: get('phone'), mobile: get('mobile'),
       admin: /^(yes|y|true|1|admin)$/i.test(get('admin')), password, generated: !get('password'), inviteEmail: get('invite').toLowerCase(), error };
@@ -519,6 +641,36 @@ accounts.patch('/admin/users', wrap(async (req, res) => {
   }
   await audit(req.user.email, d.org_id, 'user.update', { email, fields: Object.keys(req.body).filter((k) => k !== 'password' && k !== 'email'), passwordReset: !!req.body.password });
   res.json({ ok: true });
+}));
+
+// "Send temporary password" (4a): a new easy-to-type temporary password, emailed from no-reply to the person's own
+// recovery address. They must replace it at the next sign-in; every device using the old password is signed out.
+const maskEmail = (e) => e.replace(/^(.)(.*)(@.*)$/, (m, a, b, c) => `${a}${'•'.repeat(Math.min(6, b.length))}${c}`);
+accounts.post('/admin/users/temp-password', rateLimit({ windowMs: 3600e3, limit: 30 }), wrap(async (req, res) => {
+  const email = String(req.body.email || '').toLowerCase();
+  const d = await requireDomainAdmin(req, email.split('@')[1]);
+  if (email === req.user.email) throw fail(400, 'Change your own password in Settings → Security');
+  const sec = await q.get('SELECT recovery_email, recovery_verified FROM user_security WHERE email = ?', email);
+  const invite = await q.get("SELECT invite_to FROM password_resets WHERE email = ? AND kind = 'invite' AND invite_to IS NOT NULL ORDER BY expires DESC LIMIT 1", email);
+  // Only an address the person confirmed themselves, or the one their admin invited them at
+  const to = (sec?.recovery_verified && sec.recovery_email) || invite?.invite_to || null;
+  const password = tempPassword(email.split('@')[0]);
+  await mailcow.editMailbox(email, { password, password2: password });
+  await markTemporary(email, 'admin-reset');
+  await revokeSessions(email);
+  let sent = false;
+  if (to) {
+    const esc = (x) => String(x).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]);
+    sent = await sendSystemMail(to, `Your temporary ${config.appName} password`,
+      `<div style="font-family:Segoe UI,Arial,sans-serif;font-size:14px;color:#242424;max-width:560px"><h2 style="color:#173D56">Your temporary password</h2>
+      <p>An administrator of ${esc(d.org_name || d.domain)} set a temporary password for <b>${esc(email)}</b>:</p>
+      <p style="font:600 22px/1.4 ui-monospace,Menlo,Consolas,monospace;letter-spacing:1px;background:#F2F5F8;padding:12px 16px;border-radius:8px;display:inline-block">${esc(password)}</p>
+      <p>Sign in at <a href="${esc(config.publicUrl || '')}/app">${esc(config.appName)}</a>. You'll be asked to choose your own password straight away.</p>
+      <p style="color:#888;font-size:12px">If you didn't expect this, contact your administrator.</p></div>`).catch(() => false);
+  }
+  await audit(req.user.email, d.org_id, 'user.temp_password', { email, emailed: sent });
+  // Only when it couldn't be emailed is it shown to the admin (once) to hand over in person
+  res.json(sent ? { ok: true, sent: true, to: maskEmail(to) } : { ok: true, sent: false, password });
 }));
 
 accounts.delete('/admin/users', wrap(async (req, res) => {
@@ -588,6 +740,33 @@ accounts.patch('/super/settings', requireSuper, wrap(async (req, res) => {
   if (req.body.signupEnabled !== undefined) await setSetting('signupEnabled', !!req.body.signupEnabled);
   await audit(req.user.email, null, 'settings.update', req.body);
   res.json({ ok: true });
+}));
+
+// Staff addresses (anti-impersonation rule): only Roammail staff get a bare-first-name address on the free domain.
+// Created by a super-admin with a temporary password the person must replace at first sign-in.
+accounts.post('/super/staff-mailboxes', requireSuper, rateLimit({ windowMs: 3600e3, limit: 30 }), wrap(async (req, res) => {
+  if (!config.signup.domain) throw fail(400, 'No free domain is set up');
+  const local = String(req.body.localPart || '').trim().toLowerCase();
+  const name = String(req.body.name || '').trim().slice(0, 100);
+  checkLocal(local);
+  if (RESERVED.has(local)) throw fail(400, 'That name is reserved for system addresses');
+  if (!name) throw fail(400, "Enter the staff member's name");
+  if (!(await addressAvailable(local, { staff: true }))) throw fail(409, 'That address is taken (or belonged to someone before)');
+  const email = `${local}@${config.signup.domain}`;
+  const password = tempPassword(local);
+  await mailcow.addMailbox({ localPart: local, domain: config.signup.domain, name, password, quotaMb: config.business.defaultQuotaMb });
+  await markTemporary(email, 'staff');
+  await applyRate(email, BUSINESS_RATE).catch(() => {});
+  await q.run('INSERT INTO signups(email, ip, recovery_email, terms_version) VALUES(?, ?, ?, ?) ON CONFLICT(email) DO NOTHING', email, 'staff', null, config.legal.termsVersion);
+  await saveProfile(email, { name });
+  await audit(req.user.email, null, 'staff.mailbox_created', { email });
+  res.json({ ok: true, email, password });
+}));
+
+// Free accounts that are only a first name but were created by sign-up before the rule (not staff addresses)
+accounts.get('/super/first-name-accounts', requireSuper, wrap(async (req, res) => {
+  const rows = await q.all("SELECT email, created_at FROM signups WHERE (ip IS NULL OR ip != 'staff') ORDER BY created_at");
+  res.json(rows.filter((r) => r.email.endsWith(`@${config.signup.domain}`) && isBareFirstName(r.email.split('@')[0])));
 }));
 
 accounts.patch('/super/orgs/:id', requireSuper, wrap(async (req, res) => {

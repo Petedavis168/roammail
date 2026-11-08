@@ -20,10 +20,54 @@ const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '
 const EMAIL_RE = /^[^\s@<>"]+@[^\s@<>"]+\.[^\s@<>"]+$/;
 const env = process.env;
 export const limits = {
-  spamPerHour: Number(env.OUTBOUND_SPAM_PER_HOUR || 10),            // messages our own spam filter flagged, per sender
+  spamPerHour: Number(env.OUTBOUND_SPAM_PER_HOUR || 2),             // outgoing messages our spam filter rejected/flagged, per sender (5c)
   rateLimitHitsPerHour: Number(env.OUTBOUND_RATELIMIT_HITS || 3),   // times mailcow's send limit stopped them
+  bounceRate: Number(env.OUTBOUND_BOUNCE_RATE || 0.10),             // share of bounced recipients in the last hour (5c)
+  bounceMinSent: Number(env.OUTBOUND_BOUNCE_MIN || 10),             // ...once at least this many were sent
+  compromisedRecipients: Number(env.OUTBOUND_COMPROMISED_RCPTS || 40), // distinct recipients in an hour right after a new-device sign-in (5d)
   holdBusiness: env.OUTBOUND_HOLD_BUSINESS === 'true',
 };
+
+// ---------------------------------------------------------------- send ramp (5a)
+// Free accounts earn their sending limit: days 1-7 25/h (and 150/day), days 8-30 60/h, then 100/h. Business: 100/h.
+// mailcow enforces the hourly rate for every client (webmail, phones, Outlook); the app adds the daily cap for webmail.
+export const RAMP = [{ until: 7, value: 25, frame: 'h', perDay: 150 }, { until: 30, value: 60, frame: 'h' }, { until: Infinity, value: 100, frame: 'h' }];
+export const BUSINESS_RATE = { value: Number(env.BUSINESS_SEND_RATE || 100), frame: 'h' };
+export const PAUSED_RATE = { value: 1, frame: 'd' };
+export function rampFor(createdAtMs, now = Date.now()) {
+  const day = Math.floor((now - createdAtMs) / 864e5) + 1; // day 1 = the sign-up day
+  return { day, ...RAMP.find((t) => day <= t.until) };
+}
+const tierKey = (r) => `${r.value}/${r.frame}`;
+/** Set the mailbox's mailcow rate limit if it differs from what we last applied. */
+export async function applyRate(email, rate, { force = false } = {}) {
+  const e = email.toLowerCase(); const key = tierKey(rate);
+  const cur = await q.get('SELECT tier FROM send_tiers WHERE email = ?', e);
+  if (!force && cur?.tier === key) return false;
+  await mailcow.setMailboxRateLimit(e, rate.value, rate.frame);
+  await q.run('INSERT INTO send_tiers(email, tier, applied_at) VALUES(?, ?, ?) ON CONFLICT(email) DO UPDATE SET tier = excluded.tier, applied_at = excluded.applied_at', e, key, Date.now());
+  return true;
+}
+/** The rate an account should have right now (paused accounts stay at 1/day until a super-admin lifts the pause). */
+export async function rateFor(email) {
+  const e = email.toLowerCase();
+  if ((await sendingHold(e))?.status === 'held') return PAUSED_RATE;
+  if (!isFree(e)) return BUSINESS_RATE;
+  const su = await q.get('SELECT created_at FROM signups WHERE email = ?', e);
+  const created = su ? new Date(String(su.created_at).replace(' ', 'T') + (String(su.created_at).includes('Z') ? '' : 'Z')).getTime() : Date.now();
+  return rampFor(Number.isFinite(created) ? created : Date.now());
+}
+/** Daily job: move every free account to the step its age has earned. */
+export async function runSendRamp() {
+  const rows = await q.all("SELECT email FROM signups WHERE created_at > datetime('now', '-40 days')");
+  let changed = 0;
+  for (const r of rows) {
+    if (!isFree(r.email)) continue;
+    try { if (await applyRate(r.email, await rateFor(r.email))) changed++; } catch (e) { console.warn('send ramp', r.email, e.message); }
+  }
+  await setSetting('send_ramp_last_run', { at: Date.now(), checked: rows.length, changed });
+  return { checked: rows.length, changed };
+}
 
 // ---------------------------------------------------------------- holds
 export async function sendingHold(email) {
@@ -41,12 +85,15 @@ export async function hold(email, reason, evidence, actor = 'watchdog') {
   if (await sendingHold(e)) return false;
   const business = !isFree(e);
   const status = business && !limits.holdBusiness && actor === 'watchdog' ? 'flagged' : 'held';
-  if (status === 'held') await mailcow.editMailbox(e, { smtp_access: 0 }).catch((err) => console.error('APP_ERROR could not pause SMTP for', e, err.message));
+  // Pause (5c) = sending limited to 1 message a day in mailcow (every client), and blocked in the app
+  if (status === 'held') await applyRate(e, PAUSED_RATE, { force: true }).catch((err) => console.error('APP_ERROR could not pause sending for', e, err.message));
   await q.run(`INSERT INTO sending_holds(email, status, reason, evidence, at) VALUES(?, ?, ?, ?, ?)
     ON CONFLICT(email) DO UPDATE SET status = excluded.status, reason = excluded.reason, evidence = excluded.evidence, at = excluded.at, lifted_by = NULL`,
   e, status, reason, JSON.stringify(evidence || {}).slice(0, 4000), Date.now());
   await audit(actor, null, `outbound.${status}`, { email: e, reason });
-  console.warn(`SECURITY_OUTBOUND_${status.toUpperCase()} account=${e} reason=${reason}`);
+  // no forged log lines: line breaks removed from everything that came from outside
+  const logAccount = String(e).replace(/\n|\r/g, ''); const logReason = String(reason).replace(/\n|\r/g, '').slice(0, 300);
+  console.warn(`SECURITY_OUTBOUND_${status.toUpperCase()} account=${logAccount} reason=${logReason}`);
   const html = `<p>We ${status === 'held' ? 'paused sending from' : 'noticed unusual sending from'} <b>${esc(e)}</b>: ${esc(reason)}.</p>
 <p>This usually means someone else knows the password. Please <b>change your password</b> and turn on 2-step verification in Settings → Security.</p>
 ${status === 'held' ? '<p>You can still read your mail. Reply to this message or contact support to turn sending back on.</p>' : ''}`;
@@ -62,8 +109,9 @@ ${status === 'held' ? '<p>You can still read your mail. Reply to this message or
 
 export async function lift(email, actor) {
   const e = email.toLowerCase();
-  await mailcow.editMailbox(e, { smtp_access: 1 }).catch(() => {});
   await q.run("UPDATE sending_holds SET status = 'lifted', lifted_by = ? WHERE email = ?", actor, e);
+  await mailcow.editMailbox(e, { smtp_access: 1 }).catch(() => {}); // accounts paused by older versions
+  await applyRate(e, await rateFor(e), { force: true }).catch(() => {});
   await audit(actor, null, 'outbound.lifted', { email: e });
 }
 
@@ -72,9 +120,10 @@ const userOf = (x) => String(x.user || x.sasl_username || x.rl_name || '').toLow
 /** Look at the last hour of mailcow logs; hold senders over the limits. Returns what it found. */
 export async function scanOutbound(now = Date.now()) {
   const since = now / 1000 - 3600;
-  const [history, limited] = await Promise.all([
+  const [history, limited, postfix] = await Promise.all([
     mailcow.logs('rspamd-history', 2000).catch(() => []),
     mailcow.logs('ratelimited', 1000).catch(() => []),
+    mailcow.logs('postfix', 5000).catch(() => []),
   ]);
   const spam = new Map(); const rl = new Map();
   for (const x of history) {
@@ -87,7 +136,40 @@ export async function scanOutbound(now = Date.now()) {
     if (!EMAIL_RE.test(u) || Number(x.time || 0) < since) continue;
     rl.set(u, (rl.get(u) || 0) + 1);
   }
+  // Postfix log: who sent what (sasl_username per queue id) and how it was delivered
+  const sender = new Map(); const sent = new Map(); const bounced = new Map(); const rcpts = new Map();
+  const lines = [];
+  for (const x of postfix) {
+    if (Number(x.time || 0) < since) continue;
+    const m = /^([0-9A-F]{6,}|[0-9A-Za-z]{10,}): (.*)$/.exec(String(x.message || ''));
+    if (m) lines.push(m);
+  }
+  for (const [, qid, rest] of lines) { const sasl = /sasl_username=([^,\s]+)/.exec(rest); if (sasl) sender.set(qid, sasl[1].toLowerCase()); }
+  for (const [, qid, rest] of lines) {
+    const to = /to=<([^>]*)>.*status=(sent|bounced|deferred)/.exec(rest);
+    const u = sender.get(qid);
+    if (!to || !u || to[2] === 'deferred') continue;
+    sent.set(u, (sent.get(u) || 0) + 1);
+    if (to[2] === 'bounced') bounced.set(u, (bounced.get(u) || 0) + 1);
+    if (!rcpts.has(u)) rcpts.set(u, new Set());
+    rcpts.get(u).add(to[1].toLowerCase());
+  }
   const acted = [];
+  for (const [u, n] of bounced) {
+    const total = sent.get(u) || 0;
+    if (total >= limits.bounceMinSent && n / total > limits.bounceRate
+      && await hold(u, `${n} of ${total} messages sent in the last hour bounced`, { bounced: n, sent: total })) acted.push(u);
+  }
+  // 5d: compromised-account guard: a burst to many recipients right after a sign-in from a new device
+  for (const [u, set] of rcpts) {
+    if (set.size < limits.compromisedRecipients || acted.includes(u)) continue;
+    const newDevice = await q.get("SELECT 1 FROM audit WHERE actor = ? AND action = 'security.new_device' AND at > datetime('now', '-1 day')", u);
+    if (!newDevice) continue;
+    if (await hold(u, `sent to ${set.size} different people within an hour of a sign-in from a new device`, { recipients: set.size, sent: sent.get(u) || 0 })) {
+      acted.push(u);
+      await guardCompromised(u);
+    }
+  }
   for (const [u, n] of spam) {
     if (n >= limits.spamPerHour && await hold(u, `${n} outgoing messages in the last hour were flagged as spam`, { spamFlagged: n, rateLimited: rl.get(u) || 0 })) acted.push(u);
   }
@@ -96,6 +178,30 @@ export async function scanOutbound(now = Date.now()) {
   }
   await setSetting('outbound_last_scan', { at: now, checked: history.length + limited.length, acted });
   return { acted, spamFlagged: Object.fromEntries(spam), rateLimited: Object.fromEntries(rl) };
+}
+
+/** 5d: the password is probably stolen: sign every device out and require a new password at the next sign-in. */
+export async function guardCompromised(email) {
+  const { revokeSessions } = await import('./session.js');
+  const { markTemporary } = await import('./setup.js');
+  await markTemporary(email, 'compromised');
+  await revokeSessions(email);
+  await audit('watchdog', null, 'outbound.compromised', { email });
+}
+
+// ---------------------------------------------------------------- feedback loops (5c): a complaint pauses the sender
+/** An ARF report (RFC 5965) from a mailbox provider's feedback loop: pause the original sender if it's one of ours. */
+export async function handleComplaint(raw) {
+  const text = String(raw || '');
+  if (!/feedback-type:\s*abuse/i.test(text) && !/message\/feedback-report/i.test(text)) return null;
+  const from = [...text.matchAll(/^(?:From|Return-Path|X-Original-From|Original-Mail-From):\s*.*?<?([^\s<>@]+@[^\s<>]+?)>?\s*$/gim)].map((m) => m[1].toLowerCase());
+  const ours = from.find((a) => isFree(a) || a.endsWith(`@${config.rootDomain}`)) || null;
+  let business = null;
+  if (!ours) for (const a of from) if (await q.get("SELECT 1 FROM domains WHERE domain = ? AND status = 'active'", a.split('@')[1])) { business = a; break; }
+  const who = ours || business;
+  if (!who) return null;
+  await hold(who, 'a recipient reported a message as spam (feedback loop complaint)', { complaint: true });
+  return who;
 }
 
 // ---------------------------------------------------------------- blocklists
@@ -131,9 +237,32 @@ export async function applySendingRoute(domain) {
 
 export function startOutboundChecks() {
   if (!config.runsBackground) return;
+  const ramp = () => runSendRamp().catch((e) => console.error('APP_ERROR send ramp', e.message));
+  setTimeout(ramp, 45_000).unref();
+  setInterval(ramp, Number(env.SEND_RAMP_INTERVAL_MS || 6 * 3600e3)).unref(); // daily step changes, checked 4x a day
   const scan = () => scanOutbound().catch((e) => console.error('APP_ERROR outbound scan', e.message));
   setInterval(scan, 5 * 60 * 1000).unref();
   setTimeout(scan, 30_000).unref();
+  // Feedback loops (Microsoft JMRP/SNDS, Yahoo CFL, ...): their reports land in this mailbox; each one pauses the sender
+  if (env.FBL_MAILBOX && env.FBL_PASSWORD) {
+    const fbl = async () => {
+      const { makeClient } = await import('./imap.js');
+      const c = makeClient({ email: env.FBL_MAILBOX, password: env.FBL_PASSWORD });
+      await c.connect();
+      try {
+        const lock = await c.getMailboxLock('INBOX');
+        try {
+          const uids = (await c.search({ seen: false }, { uid: true })) || [];
+          for (const uid of uids.slice(0, 200)) {
+            const m = await c.fetchOne(String(uid), { source: true }, { uid: true });
+            if (m?.source) await handleComplaint(m.source.toString('utf8')).catch((e) => console.warn('fbl', e.message));
+            await c.messageFlagsAdd(String(uid), ['\\Seen'], { uid: true });
+          }
+        } finally { lock.release(); }
+      } finally { await c.logout().catch(() => {}); }
+    };
+    setInterval(() => fbl().catch((e) => console.error('APP_ERROR fbl', e.message)), 5 * 60 * 1000).unref();
+  }
   const bl = () => checkBlocklists().catch((e) => console.error('APP_ERROR blocklist check', e.message));
   setInterval(bl, 3600e3).unref();
   setTimeout(bl, 60_000).unref();
@@ -199,6 +328,11 @@ outboundAdmin.post('/super/abuse/hold', wrap(async (req, res) => {
   await q.run("DELETE FROM sending_holds WHERE email = ? AND status = 'flagged'", email);
   await hold(email, reason, { by: req.user.email }, req.user.email);
   res.json({ ok: true });
+}));
+// Paste a feedback-loop (ARF) complaint by hand; the worker also reads them from FBL_MAILBOX automatically
+outboundAdmin.post('/super/abuse/complaint', wrap(async (req, res) => {
+  const who = await handleComplaint(String(req.body.raw || '').slice(0, 2_000_000));
+  res.json({ ok: true, paused: who });
 }));
 outboundAdmin.post('/super/abuse/lift', wrap(async (req, res) => {
   await lift(String(req.body.email || ''), req.user.email);

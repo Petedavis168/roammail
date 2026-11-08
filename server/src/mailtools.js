@@ -136,50 +136,6 @@ mailtools.put('/rules', wrap(async (req, res) => {
   res.json(rules);
 }));
 
-// ---------------------------------------------------------------- import old mail
-export const PROVIDERS = {
-  gmail: { label: 'Gmail', host: 'imap.gmail.com', port: 993, help: 'Turn on 2-Step Verification in your Google account, then create an App Password at myaccount.google.com/apppasswords and paste it here.' },
-  outlook: { label: 'Outlook / Hotmail', host: 'outlook.office365.com', port: 993, help: 'Use an app password from account.microsoft.com/security (Advanced security options). Microsoft may require IMAP to be enabled in Outlook settings.' },
-  yahoo: { label: 'Yahoo', host: 'imap.mail.yahoo.com', port: 993, help: 'Create an app password in Yahoo Account Security → Generate app password.' },
-  icloud: { label: 'iCloud', host: 'imap.mail.me.com', port: 993, help: 'Create an app-specific password at appleid.apple.com → Sign-In and Security.' },
-  other: { label: 'Other (IMAP)', host: '', port: 993, help: 'Ask your provider for their IMAP server name.' },
-};
-
-mailtools.get('/imports', wrap(async (req, res) => {
-  const jobs = await mailcow.listSyncJobs(req.user.email);
-  res.json({ providers: PROVIDERS, jobs: jobs.map((j) => ({ id: j.id, host: j.host1, user: j.user1, active: Number(j.active) === 1,
-    running: Number(j.is_running) === 1, lastRun: j.last_run || null, success: j.success === null || j.success === undefined ? null : Number(j.success) === 1,
-    exitStatus: j.exit_status || null })) });
-}));
-
-mailtools.post('/imports', wrap(async (req, res) => {
-  const p = PROVIDERS[req.body.provider] || PROVIDERS.other;
-  const host = String(p.host || req.body.host || '').trim().toLowerCase();
-  if (!/^[a-z0-9.-]+\.[a-z]{2,}$/.test(host)) throw fail(400, 'Enter the IMAP server name');
-  await assertPublicHost(host, Number(req.body.port || p.port || 993));
-  const user = String(req.body.user || '').trim();
-  const password = String(req.body.password || '');
-  if (!user || !password) throw fail(400, 'Enter the email address and password of the old account');
-  if ((await mailcow.listSyncJobs(req.user.email)).length >= 5) throw fail(400, 'You can have up to 5 imports');
-  await mailcow.addSyncJob(req.user.email, { host, port: Number(req.body.port || p.port || 993), user, password });
-  await audit(req.user.email, null, 'import.add', { host, user });
-  res.json({ ok: true });
-}));
-
-mailtools.patch('/imports', wrap(async (req, res) => {
-  const j = (await mailcow.listSyncJobs(req.user.email)).find((x) => String(x.id) === String(req.body.id));
-  if (!j) throw fail(404, 'Import not found');
-  await mailcow.editSyncJob(j.id, { active: req.body.active ? 1 : 0 });
-  res.json({ ok: true });
-}));
-
-mailtools.delete('/imports', wrap(async (req, res) => {
-  const j = (await mailcow.listSyncJobs(req.user.email)).find((x) => String(x.id) === String(req.query.id));
-  if (!j) throw fail(404, 'Import not found');
-  await mailcow.deleteSyncJob(j.id);
-  res.json({ ok: true });
-}));
-
 // ---------------------------------------------------------------- advanced: all of the user's mailcow Sieve filters
 mailtools.get('/filters/server', wrap(async (req, res) => {
   res.json((await mailcow.listFilters(req.user.email)).map((f) => ({

@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import { isNative } from '../native.js';
 import { api } from '../api.js';
 import { Icon } from '../icons.jsx';
 
@@ -39,7 +40,7 @@ export default function Login({ onLogin, mode = 'signin' }) {
   const signupType = params.get('type') === 'domain' ? 'domain' : 'free';
   const billing = ['monthly', 'yearly'].includes(params.get('billing')) ? params.get('billing') : '';
   const [step, setStep] = useState(resetToken ? 'reset' : mode === 'signup' || params.get('signup') ? 'name' : 'email');
-  const [f, setF] = useState({ email: '', password: '', code: '', first: '', last: '', purpose: signupType === 'domain' ? 'business' : 'personal', username: '', custom: false, pw: '', pw2: '', recovery: '', terms: false });
+  const [f, setF] = useState({ email: '', password: '', code: '', first: '', last: '', purpose: signupType === 'domain' ? 'business' : 'personal', username: '', custom: false, pw: '', pw2: '', recovery: '', terms: false, phone: '', code: '', phoneToken: null, birthday: '', bizDomain: '', bizLocal: '', bizName: '', codeSent: false, remember: localStorage.getItem('remember') ? localStorage.getItem('remember') === '1' : isNative() }); // the phone apps keep you signed in by default
   const [show, setShow] = useState(false);
   const [error, setError] = useState('');
   const [info, setInfo] = useState('');
@@ -58,7 +59,7 @@ export default function Login({ onLogin, mode = 'signin' }) {
   useEffect(() => {
     if (step !== 'address' || !f.custom || !f.username) { setAvail(null); return; }
     clearTimeout(timer.current);
-    timer.current = setTimeout(() => api.get('/api/signup/check', { username: f.username.toLowerCase() }).then(setAvail).catch(() => setAvail(null)), 350);
+    timer.current = setTimeout(() => api.get('/api/signup/check', { username: f.username.toLowerCase(), first: f.first, last: f.last }).then(setAvail).catch(() => setAvail(null)), 350);
   }, [f.username, f.custom, step]);
   useEffect(() => {
     if (step !== 'review' || !cfg.turnstileSiteKey) return;
@@ -83,12 +84,15 @@ export default function Login({ onLogin, mode = 'signin' }) {
   if (step === 'password') return (
     <Shell>
       <Card title="Welcome" onSubmit={(e) => { e.preventDefault(); run(async () => {
-        const r = await api.login(fullEmail, f.password);
+        localStorage.setItem('remember', f.remember ? '1' : '0');
+        const r = await api.login(fullEmail, f.password, f.remember);
         if (r.twoFactor) { setTicket(r.ticket); go('code'); } else await onLogin(r);
       }); }} footer={<><button type="button" className="g-link" onClick={() => go('forgot')}>Forgot password?</button><button className="g-btn" disabled={busy}>{busy ? 'Signing in…' : 'Next'}</button></>}>
         <button type="button" className="g-chip" onClick={() => go('email')}><Icon name="mail" size={14} /> {fullEmail} <Icon name="down" size={12} /></button>
+        <input type="email" name="username" autoComplete="username" value={fullEmail} readOnly hidden />
         <Field label="Enter your password" type={show ? 'text' : 'password'} autoComplete="current-password" autoFocus value={f.password} onChange={set('password')} error={error} />
         <label className="g-check"><input type="checkbox" checked={show} onChange={(e) => setShow(e.target.checked)} /> Show password</label>
+        <label className="g-check" title="Stay signed in on this device for 30 days, renewed each time you use it. Don't use on shared computers."><input type="checkbox" checked={f.remember} onChange={set('remember')} /> Keep me signed in</label>
       </Card>
     </Shell>
   );
@@ -151,7 +155,9 @@ export default function Login({ onLogin, mode = 'signin' }) {
   if (step === 'name') return (
     <Shell>
       <Card title="Create a Roammail account" subtitle="Enter your name" onSubmit={(e) => { e.preventDefault(); if (!f.first.trim()) return setError('Enter your first name');
-        run(async () => { const r = await api.get('/api/signup/suggest', { first: f.first, last: f.last }); setSugg(r.suggestions); setF((x) => ({ ...x, username: r.suggestions[0] || '', custom: !r.suggestions.length })); go('address'); }); }}
+        run(async () => { const r = await api.get('/api/signup/suggest', { first: f.first, last: f.last }); setSugg(r.suggestions); setF((x) => ({ ...x, username: r.suggestions[0] || '', custom: !r.suggestions.length, bizLocal: x.bizLocal || (x.first || '').toLowerCase().replace(/[^a-z0-9]/g, '') }));
+          // Business: their own domain first; the @roammail.net sign-in is picked for them
+          go(f.purpose === 'business' && r.suggestions.length ? 'bizdomain' : 'address'); }); }}
         footer={<><button type="button" className="g-link" onClick={() => go('email')}>Sign in instead</button><button className="g-btn" disabled={busy}>Next</button></>}>
         {!cfg.enabled && <div className="g-info warn">New sign-ups are closed right now.</div>}
         <Field label="First name" autoComplete="given-name" autoFocus value={f.first} onChange={set('first')} error={error} />
@@ -161,6 +167,28 @@ export default function Login({ onLogin, mode = 'signin' }) {
             <label key={v} className={f.purpose === v ? 'on' : ''}><input type="radio" checked={f.purpose === v} onChange={() => setF({ ...f, purpose: v })} /><b>{l}</b><small>{d}</small></label>
           ))}
         </div>
+      </Card>
+    </Shell>
+  );
+  // Business sign-up: their own domain and the address they want on it
+  if (step === 'bizdomain') return (
+    <Shell>
+      <Card title="Your business email" subtitle="Enter the domain you own. We'll connect it in the next steps."
+        onSubmit={(e) => { e.preventDefault(); run(async () => {
+          if (!f.bizLocal.trim()) throw new Error('Choose your address at your domain');
+          const r = await api.get('/api/signup/domain-check', { domain: f.bizDomain });
+          if (!r.ok) throw new Error(r.reason);
+          setF((x) => ({ ...x, bizDomain: r.domain })); go('password-new');
+        }); }}
+        footer={<><button type="button" className="g-link" onClick={() => go('name')}>Back</button><button className="g-btn" disabled={busy}>Next</button></>}>
+        <Field label="Business name" autoComplete="organization" autoFocus value={f.bizName} onChange={set('bizName')} />
+        <Field label="Your domain" inputMode="url" autoCapitalize="off" spellCheck="false" value={f.bizDomain} onChange={set('bizDomain')} error={error} hint="Like marleymusic.com (without www)" />
+        <div className="g-addr">
+          <Field label="Your address" autoCapitalize="off" spellCheck="false" value={f.bizLocal} onChange={set('bizLocal')} />
+          <span className="g-domain">@{(f.bizDomain || 'yourdomain.com').trim().toLowerCase().replace(/^https?:\/\//, '').replace(/^www\./, '').replace(/\/.*$/, '')}</span>
+        </div>
+        <p className="g-note">Until your domain is connected you'll sign in as <b>{username}@{cfg.domain}</b>. As soon as it's live we create <b>{f.bizLocal || 'you'}@{f.bizDomain || 'yourdomain.com'}</b> with the same password.</p>
+        <button type="button" className="g-link left" onClick={() => setF({ ...f, purpose: 'personal' }) || go('address')}>I don't have a domain yet</button>
       </Card>
     </Shell>
   );
@@ -183,6 +211,17 @@ export default function Login({ onLogin, mode = 'signin' }) {
             <span className="g-domain">@{cfg.domain}</span>
           </div>
         )}
+        {f.custom && avail && !avail.available && avail.alternatives?.length > 0 && (
+          <div className="g-alts" aria-live="polite">
+            <small>Try one of these instead:</small>
+            {avail.alternatives.map((a) => <button type="button" key={a} className="g-chip" onClick={() => setF((x) => ({ ...x, username: a }))}>{a}@{cfg.domain}</button>)}
+          </div>
+        )}
+        <button type="button" className="g-link left" disabled={busy} onClick={() => run(async () => {
+          const r = await api.get('/api/signup/suggest', { first: f.first, last: f.last, shuffle: 1, count: 3 });
+          if (!r.suggestions.length) throw new Error("Couldn't think of one. Try typing your own.");
+          setSugg(r.suggestions); setF((x) => ({ ...x, custom: false, username: r.suggestions[0] }));
+        })}>Generate one for me</button>
       </Card>
     </Shell>
   );
@@ -192,8 +231,8 @@ export default function Login({ onLogin, mode = 'signin' }) {
       <Shell>
         <Card title="Create a strong password" subtitle="Use 10 or more characters. A few random words work great."
           onSubmit={(e) => { e.preventDefault(); if (f.pw.length < 10) return setError('Use 10 characters or more'); if (f.pw !== f.pw2) return setError('Those passwords didn\'t match'); go('recovery'); }}
-          footer={<><button type="button" className="g-link" onClick={() => go('address')}>Back</button><button className="g-btn">Next</button></>}>
-          <button type="button" className="g-chip" onClick={() => go('address')}><Icon name="mail" size={14} /> {username}@{cfg.domain}</button>
+          footer={<><button type="button" className="g-link" onClick={() => go(f.purpose === 'business' && f.bizDomain ? 'bizdomain' : 'address')}>Back</button><button className="g-btn">Next</button></>}>
+          <button type="button" className="g-chip" onClick={() => go(f.purpose === 'business' && f.bizDomain ? 'bizdomain' : 'address')}><Icon name="mail" size={14} /> {f.purpose === 'business' && f.bizDomain ? `${f.bizLocal}@${f.bizDomain}` : `${username}@${cfg.domain}`}</button>
           <Field label="Password" type={show ? 'text' : 'password'} autoComplete="new-password" autoFocus value={f.pw} onChange={set('pw')} />
           {f.pw && <div className={`g-meter s${st}`}><div /><small>{STRENGTH[st]}</small></div>}
           <Field label="Confirm" type={show ? 'text' : 'password'} autoComplete="new-password" value={f.pw2} onChange={set('pw2')} error={error} />
@@ -202,12 +241,42 @@ export default function Login({ onLogin, mode = 'signin' }) {
       </Shell>
     );
   }
+  // Account details (both sign-ups): date of birth, recovery email, mobile number
   if (step === 'recovery') return (
     <Shell>
-      <Card title="Add a recovery email" subtitle="If you ever forget your password, we'll send a reset link here."
-        onSubmit={(e) => { e.preventDefault(); if (f.recovery && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(f.recovery)) return setError('Enter a valid email address'); go('review'); }}
-        footer={<><button type="button" className="g-link" onClick={() => { setF({ ...f, recovery: '' }); go('review'); }}>Skip</button><button className="g-btn">Next</button></>}>
-        <Field label="Recovery email" type="email" autoFocus value={f.recovery} onChange={set('recovery')} error={error} />
+      <Card title="Your details" subtitle="These keep your account safe and let you get back in if you ever forget your password."
+        onSubmit={(e) => { e.preventDefault(); setError('');
+          const b = f.birthday ? new Date(`${f.birthday}T00:00:00`) : null; const now = new Date();
+          const age = b ? now.getFullYear() - b.getFullYear() - (now < new Date(now.getFullYear(), b.getMonth(), b.getDate()) ? 1 : 0) : -1;
+          if (!b || Number.isNaN(b.getTime()) || age > 120 || age < 0) return setError('Enter your date of birth');
+          if (age < (cfg.minAge || 13)) return setError(`You need to be at least ${cfg.minAge || 13} to create an account`);
+          if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(f.recovery)) return setError('Enter a recovery email address (a different account you can get into)');
+          if (f.recovery.trim().toLowerCase() === `${username}@${cfg.domain}`) return setError('Use a different address than your new one');
+          const ph = f.phone.trim().replace(/[\s().-]/g, '').replace(/^00/, '+');
+          if (!/^\+[1-9]\d{7,14}$/.test(ph)) return setError('Enter your mobile number with the country code, like +1 555 123 4567');
+          setF((x) => ({ ...x, phone: ph }));
+          go(cfg.phoneRequired && !f.phoneToken ? 'phone' : 'review'); }}
+        footer={<><button type="button" className="g-link" onClick={() => go('password-new')}>Back</button><button className="g-btn">Next</button></>}>
+        <Field label="Date of birth" type="date" autoComplete="bday" autoFocus value={f.birthday} onChange={set('birthday')} max={new Date().toISOString().slice(0, 10)} />
+        <Field label="Recovery email" type="email" autoComplete="email" value={f.recovery} onChange={set('recovery')} hint="Another email you use. We'll send a code to confirm it." />
+        <Field label="Mobile number" type="tel" inputMode="tel" autoComplete="tel" value={f.phone} onChange={set('phone')} hint="With country code, like +1 555 123 4567" error={error} />
+        <p className="g-note">We only use these to protect and recover your account. They're never shown to anyone or used for marketing.</p>
+      </Card>
+    </Shell>
+  );
+  // 5b: free sign-ups confirm a mobile number by text message (one free account per number)
+  if (step === 'phone') return (
+    <Shell>
+      <Card title="Verify your phone" subtitle="We'll text you a code. This keeps spammers out; your number isn't shown to anyone or used for marketing."
+        onSubmit={(e) => { e.preventDefault(); run(async () => {
+          if (!f.codeSent) { await api.post('/api/signup/phone/start', { phone: f.phone }); setF((x) => ({ ...x, codeSent: true })); return; }
+          const r = await api.post('/api/signup/phone/check', { phone: f.phone, code: f.code });
+          setF((x) => ({ ...x, phoneToken: r.token })); go('review');
+        }); }}
+        footer={<>{f.codeSent && <button type="button" className="g-link" onClick={() => setF({ ...f, codeSent: false, code: '' })}>Change number</button>}<button className="g-btn" disabled={busy}>{f.codeSent ? 'Verify' : 'Send code'}</button></>}>
+        {!f.codeSent
+          ? <Field label="Mobile number" type="tel" inputMode="tel" autoComplete="tel" autoFocus value={f.phone} onChange={set('phone')} error={error} hint="Include your country code, e.g. +1 555 123 4567" />
+          : <Field label="6-digit code" inputMode="numeric" autoComplete="one-time-code" autoFocus value={f.code} onChange={set('code')} error={error} hint={`Sent to ${f.phone}`} />}
       </Card>
     </Shell>
   );
@@ -215,7 +284,8 @@ export default function Login({ onLogin, mode = 'signin' }) {
     <Shell>
       <Card title="Privacy and Terms" subtitle={`Almost done, ${f.first}.`}
         onSubmit={(e) => { e.preventDefault(); if (!f.terms) return setError('Please agree to continue'); run(async () => {
-          const r = await api.signup({ name: `${f.first} ${f.last}`.trim(), username, password: f.pw, recoveryEmail: f.recovery, captcha, acceptTerms: true });
+          const r = await api.signup({ name: `${f.first} ${f.last}`.trim(), username, password: f.pw, recoveryEmail: f.recovery, captcha, acceptTerms: true, phoneToken: f.phoneToken, birthday: f.birthday, phone: f.phone, remember: isNative(),
+            ...(f.purpose === 'business' && f.bizDomain ? { business: { domain: f.bizDomain, local: f.bizLocal, orgName: f.bizName } } : {}) });
           // Own-domain sign-ups go straight on to connecting the domain (and choosing monthly/yearly)
           if (f.purpose === 'business') localStorage.setItem('startBusiness', '1');
           onLogin({ ...r, redirect: f.purpose === 'business' ? `${r.redirect}?setup=domain${billing ? `&billing=${billing}` : ''}` : r.redirect });

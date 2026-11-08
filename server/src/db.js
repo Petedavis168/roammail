@@ -185,6 +185,31 @@ CREATE TABLE IF NOT EXISTS account_setup (
   twofa_snooze_until INTEGER NOT NULL DEFAULT 0, onboarded_at INTEGER, source TEXT, created_at INTEGER NOT NULL
 );
 CREATE TABLE IF NOT EXISTS send_counts (email TEXT NOT NULL, day TEXT NOT NULL, count INTEGER NOT NULL DEFAULT 0, PRIMARY KEY (email, day));
+CREATE TABLE IF NOT EXISTS tasks (
+  id INTEGER PRIMARY KEY AUTOINCREMENT, email TEXT NOT NULL, title TEXT NOT NULL, details TEXT NOT NULL DEFAULT '',
+  due_at INTEGER, remind_at INTEGER, reminded INTEGER NOT NULL DEFAULT 0, done_at INTEGER,
+  msg_key TEXT, msg_subject TEXT, msg_mailbox TEXT, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS tasks_email ON tasks(email, done_at);
+CREATE INDEX IF NOT EXISTS tasks_remind ON tasks(remind_at, reminded);
+CREATE TABLE IF NOT EXISTS notes (
+  id INTEGER PRIMARY KEY AUTOINCREMENT, email TEXT NOT NULL, body TEXT NOT NULL, contact TEXT, thread TEXT, thread_subject TEXT,
+  created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS notes_email ON notes(email, contact);
+CREATE TABLE IF NOT EXISTS followups (
+  id INTEGER PRIMARY KEY AUTOINCREMENT, email TEXT NOT NULL, message_id TEXT NOT NULL, subject TEXT, recipients TEXT,
+  creds TEXT NOT NULL, remind_at INTEGER NOT NULL, status TEXT NOT NULL DEFAULT 'waiting', checked_at INTEGER,
+  created_at INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS followups_due ON followups(status, remind_at);
+CREATE TABLE IF NOT EXISTS import_records (
+  id INTEGER PRIMARY KEY AUTOINCREMENT, email TEXT NOT NULL, kind TEXT NOT NULL, provider TEXT, remote_user TEXT, remote_host TEXT,
+  syncjob_id TEXT, creds TEXT, state TEXT, status TEXT NOT NULL DEFAULT 'active', messages_found INTEGER, messages_copied INTEGER,
+  last_error TEXT, first_done_at INTEGER, next_run INTEGER, created_at INTEGER NOT NULL, stop_at INTEGER NOT NULL, created_by TEXT
+);
+CREATE INDEX IF NOT EXISTS import_records_email ON import_records(email, status);
+CREATE TABLE IF NOT EXISTS send_tiers (email TEXT PRIMARY KEY, tier TEXT NOT NULL, applied_at INTEGER NOT NULL);
 `;
 
 // Columns added after the first release: [table, column, definition]
@@ -193,7 +218,7 @@ const MIGRATIONS = [['orgs', 'require_2fa', 'INTEGER NOT NULL DEFAULT 0'], ['org
   ['orgs', 'stripe_subscription', 'TEXT'], ['orgs', 'billing_status', "TEXT NOT NULL DEFAULT 'none'"], ['orgs', 'paid_seats', 'INTEGER NOT NULL DEFAULT 0'],
   ['orgs', 'canceled_at', 'TEXT'],
   ['user_security', 'recovery_verified', 'INTEGER NOT NULL DEFAULT 0'], ['user_security', 'recovery_pending', 'TEXT'],
-  ['user_security', 'recovery_code', 'TEXT'], ['user_security', 'recovery_code_exp', 'INTEGER'], ['user_security', 'recovery_code_tries', 'INTEGER NOT NULL DEFAULT 0'], ['jobs', 'claimed_at', 'INTEGER'], ['shared_mailboxes', 'kind', "TEXT NOT NULL DEFAULT 'shared'"], ['orgs', 'account_no', 'TEXT'], ['password_resets', 'kind', "TEXT NOT NULL DEFAULT 'reset'"], ['password_resets', 'invite_to', 'TEXT'], ['sessions', 'user_id', 'TEXT']];
+  ['user_security', 'recovery_code', 'TEXT'], ['user_security', 'recovery_code_exp', 'INTEGER'], ['user_security', 'recovery_code_tries', 'INTEGER NOT NULL DEFAULT 0'], ['jobs', 'claimed_at', 'INTEGER'], ['shared_mailboxes', 'kind', "TEXT NOT NULL DEFAULT 'shared'"], ['orgs', 'account_no', 'TEXT'], ['password_resets', 'kind', "TEXT NOT NULL DEFAULT 'reset'"], ['password_resets', 'invite_to', 'TEXT'], ['sessions', 'user_id', 'TEXT'], ['sessions', 'remember', 'INTEGER NOT NULL DEFAULT 0'], ['signups', 'phone_hash', 'TEXT'], ['orgs', 'comp_until', 'INTEGER'], ['orgs', 'comp_note', 'TEXT'], ['orgs', 'comp_by', 'TEXT'], ['orgs', 'comp_warned', 'INTEGER NOT NULL DEFAULT 0'], ['domains', 'owner_local', 'TEXT'], ['domains', 'owner_mailbox', 'TEXT'], ['user_security', 'birthday', 'TEXT'], ['user_security', 'phone', 'TEXT'], ['user_security', 'push_preview', 'INTEGER NOT NULL DEFAULT 1']];
 
 // Indexes on migrated columns (run after MIGRATIONS)
 const AFTER = ['CREATE UNIQUE INDEX IF NOT EXISTS orgs_account_no ON orgs(account_no)'];

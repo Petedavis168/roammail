@@ -1,3 +1,4 @@
+import { createPortal } from 'react-dom';
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { api, mailUrl } from '../api.js';
 import { messageKey, parseMessageKey, sectionForFolder, folderForSection, loginHref } from '../nav.js';
@@ -11,6 +12,7 @@ import Ribbon from './Ribbon.jsx';
 import ComposeManager, { replyDraft } from './Compose.jsx';
 import SettingsPanel from './Settings.jsx';
 import ShortcutsHelp from './ShortcutsHelp.jsx';
+import TasksPanel from './TasksPanel.jsx';
 const Admin = lazy(() => import('./admin/Admin.jsx'));
 import { initials, avatarColor, folderLabel } from '../util.js';
 import { useSignatures } from '../signatures.js';
@@ -45,14 +47,48 @@ export default function Mail({ me, route, refreshMe, theme, setTheme, onLogout }
   const [composers, setComposers] = useState([]);
   const [showSettings, setShowSettings] = useState(false);
   const [showHelp, setShowHelp] = useState(false);
-  const [sidebarOpen, setSidebarOpen] = useState(window.innerWidth > 900);
+  // Sidebar (item 11): 240 px by default, drag to 200-320 px, collapses to a 64 px rail ( [ key ),
+  // collapses automatically under 1280 px and becomes a slide-in drawer under 900 px.
+  const [vw, setVw] = useState(window.innerWidth);
+  useEffect(() => { const on = () => setVw(window.innerWidth); window.addEventListener('resize', on); return () => window.removeEventListener('resize', on); }, []);
+  const [navCollapsed, setNavCollapsed] = useState(() => localStorage.getItem('navCollapsed') === '1');
+  const [navWidth, setNavWidth] = useState(() => Math.min(320, Math.max(200, Number(localStorage.getItem('navWidth')) || 240)));
+  const [navPeek, setNavPeek] = useState(false); // expanded over the content on medium screens / drawer open on small ones
+  const navMode = vw < 900 ? 'drawer' : (vw < 1280 || navCollapsed) && !navPeek ? 'rail' : 'full';
+  const toggleNav = () => {
+    if (vw < 1280) setNavPeek((p) => !p);
+    else setNavCollapsed((c) => { localStorage.setItem('navCollapsed', c ? '0' : '1'); return !c; });
+  };
+  const startResize = (e) => {
+    e.preventDefault();
+    const x0 = e.clientX; const w0 = navWidth;
+    const move = (ev) => setNavWidth(Math.min(320, Math.max(200, w0 + ev.clientX - x0)));
+    const up = (ev) => { window.removeEventListener('pointermove', move); window.removeEventListener('pointerup', up); localStorage.setItem('navWidth', String(Math.min(320, Math.max(200, w0 + ev.clientX - x0)))); };
+    window.addEventListener('pointermove', move); window.addEventListener('pointerup', up);
+  };
   const [userMenu, setUserMenu] = useState(false);
+  const [opsHelp, setOpsHelp] = useState(false);
+  const [importMsg] = useState(() => new URLSearchParams(location.search).get('import')); // back from Microsoft sign-in
+  // Item 9: tasks / notes / follow-ups panel
+  const [panel, setPanel] = useState(() => { const p = new URLSearchParams(location.search).get('panel'); return ['tasks', 'notes', 'followups'].includes(p) ? p : null; });
+  const [panelTab, setPanelTab] = useState(() => new URLSearchParams(location.search).get('panel') || 'tasks');
+  const [taskSeed, setTaskSeed] = useState(null);
+  const [openThreadMsg, setOpenThreadMsg] = useState(null); // full message (with Message-ID) shown in the reading pane
   const searchRef = useRef();
   const goPending = useRef(0);
   const [sigData, reloadSigs] = useSignatures();
   const [snoozeMap, setSnoozeMap] = useState({});
   const [snoozeFor, setSnoozeFor] = useState(null); // uids awaiting a snooze time
   const [qCount, setQCount] = useState(0);
+  // Item 10: every signed-in account with its unread count (rail avatars, All inboxes)
+  const [accounts, setAccounts] = useState(me.accounts || []);
+  const multi = (me.accounts || []).length > 1;
+  useEffect(() => {
+    if (!multi) return undefined;
+    const get = () => api.get('/api/accounts/summary').then((r) => setAccounts(r.accounts)).catch(() => {});
+    get(); const t = setInterval(get, 60_000);
+    return () => clearInterval(t);
+  }, [multi]);
   useEffect(() => { api.get('/api/spam').then((r) => setQCount(r.quarantineCount)).catch(() => {}); }, []);
   const reqId = useRef(0);
 
@@ -63,6 +99,7 @@ export default function Mail({ me, route, refreshMe, theme, setTheme, onLogout }
   const activeMsg = msgs.find((m) => m.uid === active) || null;
   const special = (use) => folders.find((f) => f.specialUse === use)?.path;
   const currentFolderObj = folders.find((f) => f.path === folder);
+  const folderUse = currentFolderObj?.specialUse;
 
   // ---------- loading ----------
   const loadFolders = useCallback(() => api.folders().then(setFolders).catch(() => {}), []);
@@ -71,7 +108,9 @@ export default function Mail({ me, route, refreshMe, theme, setTheme, onLogout }
     const id = ++reqId.current;
     if (!quiet) setList((l) => ({ ...l, loading: true, ...(append ? {} : { messages: page ? l.messages : [] }) }));
     try {
-      const r = search ? await api.search(search, folder) : await api.messages(folder, page, filter);
+      const r = folder === '@all' && !search
+        ? await api.get('/api/all-inboxes').then((x) => ({ ...x, messages: x.messages.map((m) => ({ ...m, origUid: m.uid, uid: `${m.mailboxId}:${m.uid}` })) }))
+        : await api.messages(folder, page, filter);
       if (id !== reqId.current) return;
       setList((l) => ({
         messages: append ? [...l.messages, ...r.messages.filter((m) => !l.messages.some((x) => x.uid === m.uid))] : r.messages,
@@ -100,7 +139,7 @@ export default function Mail({ me, route, refreshMe, theme, setTheme, onLogout }
     return !fl.length ? false : (setFolder('INBOX'), true);
   }, []);
   const routeApplied = useRef(false);
-  useEffect(() => { if (!routeApplied.current && (folders.length || ['inbox', 'folder', 'calendar', 'contacts', 'settings', 'admin', 'message', 'scheduled', 'quarantine'].includes(route.section))) routeApplied.current = applyRoute(route, folders); }, [folders, applyRoute]);
+  useEffect(() => { if (!routeApplied.current && (folders.length || ['inbox', 'folder', 'calendar', 'contacts', 'settings', 'admin', 'message', 'scheduled', 'quarantine', 'all'].includes(route.section))) routeApplied.current = applyRoute(route, folders); }, [folders, applyRoute]);
   useEffect(() => {
     const onPop = () => {
       const m = /^\/[^/]+\/(.*)$/.exec(location.pathname);
@@ -118,7 +157,7 @@ export default function Mail({ me, route, refreshMe, theme, setTheme, onLogout }
     const path = `/${route.id}/${section}`;
     if (location.pathname !== path) history[active || showSettings ? 'replaceState' : 'pushState'](null, '', path);
   }, [view, folder, active, showSettings, folders]);
-  useEffect(() => { setSelected(new Set()); setActive(null); if (!folder.startsWith('@')) load(); }, [load]);
+  useEffect(() => { setSelected(new Set()); setActive(null); if (!folder.startsWith('@') || folder === '@all') load(); }, [load]);
   const loadSnoozed = useCallback(() => api.get('/api/snoozed').then((jobs) => {
     const m = {};
     for (const j of jobs) for (const u of j.summary.uids || []) m[u] = j;
@@ -155,7 +194,7 @@ export default function Mail({ me, route, refreshMe, theme, setTheme, onLogout }
   // Page title with unread count
   useEffect(() => {
     const inbox = folders.find((f) => f.specialUse === '\\Inbox');
-    document.title = `${inbox?.unread ? `(${inbox.unread}) ` : ''}${view === 'admin' ? 'Admin' : folder === '@scheduled' ? 'Scheduled' : folder === '@quarantine' ? 'Spam quarantine' : folderLabel(currentFolderObj || { name: 'Inbox' })} - ${me.email}`;
+    document.title = `${inbox?.unread ? `(${inbox.unread}) ` : ''}${view === 'admin' ? 'Admin' : folder === '@scheduled' ? 'Scheduled' : folder === '@quarantine' ? 'Spam quarantine' : folder === '@all' ? 'All inboxes' : folderLabel(currentFolderObj || { name: 'Inbox' })} - ${me.email}`;
   }, [folders, currentFolderObj, me.email, view]);
 
   // ---------- helpers ----------
@@ -218,7 +257,7 @@ export default function Mail({ me, route, refreshMe, theme, setTheme, onLogout }
         const r = await api.remove(from, uids);
         loadFolders();
         const newUids = uids.map((u) => r.uidMap?.[u]).filter(Boolean);
-        toast(r.permanent ? 'Permanently deleted' : `${uids.length > 1 ? `${uids.length} conversations` : 'Conversation'} moved to Deleted Items`, {
+        toast(r.permanent ? 'Permanently deleted' : `${uids.length > 1 ? `${uids.length} conversations` : 'Conversation'} moved to Deleted`, {
           action: newUids.length ? 'Undo' : undefined,
           onAction: async () => { await api.move(r.to, newUids, from); loadFolders(); load({ quiet: true }); },
         });
@@ -269,9 +308,25 @@ export default function Mail({ me, route, refreshMe, theme, setTheme, onLogout }
     if (c.length >= 3) { toast('Close a draft before opening another'); return c; }
     return [...c, { id: Date.now() + Math.random(), initial }];
   });
+  // Home-screen shortcut "New mail" (/app?compose=1)
+  useEffect(() => { if (new URLSearchParams(location.search).get('compose') === '1') { compose(); history.replaceState(null, '', location.pathname); } }, []);
+  const addTaskFrom = (m) => {
+    if (!m) { setPanel('tasks'); setPanelTab('tasks'); return; }
+    setTaskSeed({ title: m.subject && m.subject !== '(no subject)' ? m.subject : '', message: { key: messageKey(m.folder || listFolder, m.uid), subject: m.subject, mailboxId: route.id } });
+    setPanelTab('tasks'); setPanel('tasks');
+  };
+  const followUp = async (m, days) => {
+    const at = new Date(); at.setDate(at.getDate() + days); at.setHours(9, 0, 0, 0);
+    try {
+      await api.post('/api/followups', { messageId: m.messageId, subject: m.subject, recipients: (m.to || []).map((a) => a.name || a.address).join(', '), remindAt: at.getTime() });
+      toast(`We'll remind you ${days === 1 ? 'tomorrow' : `in ${days} days`} if nobody replies`, { action: 'View', onAction: () => { setPanelTab('followups'); setPanel('followups'); } });
+    } catch (e) { toast(e.message, { error: true }); }
+  };
   const reply = (msg, mode) => compose(replyDraft({ folder: listFolder, ...msg }, mode, me.email));
 
   const openMessage = (m) => {
+    // All inboxes: open the message in its own account
+    if (m.mailboxId && m.origUid) { location.assign(`/${m.mailboxId}/message/${messageKey('INBOX', m.origUid)}`); return; }
     if (m.draft || listFolder === special('\\Drafts')) {
       api.get('/api/message', { folder: listFolder, uid: m.uid }).then((full) => compose({
         to: full.to, cc: full.cc, bcc: full.bcc, subject: full.subject === '(no subject)' ? '' : full.subject,
@@ -305,6 +360,7 @@ export default function Mail({ me, route, refreshMe, theme, setTheme, onLogout }
       }
       if (e.ctrlKey || e.metaKey || e.altKey) {
         if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'n') { e.preventDefault(); compose(); }
+        if ((e.ctrlKey || e.metaKey) && !e.shiftKey && !e.altKey && /^[1-9]$/.test(e.key) && accounts[Number(e.key) - 1]) { e.preventDefault(); switchMailbox(accounts[Number(e.key) - 1].mailboxId); }
         return;
       }
       const idx = msgs.findIndex((m) => m.uid === active);
@@ -320,7 +376,8 @@ export default function Mail({ me, route, refreshMe, theme, setTheme, onLogout }
         s: () => act.flag(), b: () => act.snooze(), u: () => setActive(null), Escape: () => { setActive(null); setSelected(new Set()); },
         I: () => act.read(true), U: () => act.read(false), q: () => act.read(true),
         x: () => active && setSelected((s) => { const n = new Set(s); n.has(active) ? n.delete(active) : n.add(active); return n; }),
-        '/': () => searchRef.current?.focus(), '?': () => setShowHelp(true),
+        '/': () => searchRef.current?.focus(), '?': () => setShowHelp(true), '[': () => toggleNav(),
+        t: () => setPanel((p) => (p ? null : panelTab)), T: () => addTaskFrom(openThreadMsg || activeMsg),
       };
       if (map[k]) { e.preventDefault(); map[k](); }
     };
@@ -328,31 +385,35 @@ export default function Mail({ me, route, refreshMe, theme, setTheme, onLogout }
     return () => window.removeEventListener('keydown', onKey);
   });
 
-  const paneClass = `pane-${active ? prefs.readingPane : prefs.readingPane === 'off' ? 'off' : prefs.readingPane}`;
+  const paneClass = folder === '@all' ? 'pane-off' : `pane-${active ? prefs.readingPane : prefs.readingPane === 'off' ? 'off' : prefs.readingPane}`;
 
   return (
     <div className={`app density-${prefs.density}`}>
       <header className="topbar">
-        <button className="icon-btn on-dark" onClick={() => setSidebarOpen((o) => !o)} aria-label="Toggle navigation"><Icon name="menu" /></button>
+        <button className="icon-btn on-dark" onClick={toggleNav} aria-label="Toggle navigation" title="Collapse or expand navigation ([)" aria-expanded={navMode === 'full' || (navMode === 'drawer' && navPeek)}><Icon name="menu" /></button>
         <div className="brand" onClick={() => { setView('mail'); setFolder('INBOX'); clearSearch(); }}><img src="/roammail-mark-white.png" alt="" /> <span>Roammail</span></div>
         {view === 'mail' ? (
           <form className="search" onSubmit={(e) => { e.preventDefault(); runSearch(searchInput); }}>
             <Icon name="search" />
-            <input ref={searchRef} value={searchInput} onChange={(e) => setSearchInput(e.target.value)}
-              placeholder="Search mail  (from:  to:  subject:  has:attachment  is:unread  newer_than:7d)" aria-label="Search mail" />
+            <input ref={searchRef} value={searchInput} onChange={(e) => setSearchInput(e.target.value)} placeholder="Search mail" aria-label="Search mail" />
             {search && <button type="button" className="icon-btn" onClick={clearSearch} aria-label="Clear search"><Icon name="close" /></button>}
+            <div className="dd">
+              <button type="button" className="icon-btn" onClick={() => setOpsHelp((o) => !o)} title="Search tips" aria-label="Search tips"><Icon name="filter" /></button>
+              {opsHelp && (
+                <div className="menu right search-help" onMouseLeave={() => setOpsHelp(false)}>
+                  <div className="menu-note">Search tips</div>
+                  {[['from:ann', 'From a person'], ['to:bob', 'Sent to'], ['subject:invoice', 'Words in the subject'], ['has:attachment', 'With files'], ['is:unread', 'Unread only'], ['newer_than:7d', 'Last 7 days']].map(([op, l]) => (
+                    <button type="button" key={op} onClick={() => { setSearchInput((v) => `${v ? `${v} ` : ''}${op.split(':')[0]}:`); setOpsHelp(false); searchRef.current?.focus(); }}><code>{op}</code><span className="muted">{l}</span></button>
+                  ))}
+                </div>
+              )}
+            </div>
           </form>
         ) : <div className="spacer" />}
         <div className="topbar-right">
-          {(isAdmin || !inOrg) && (
-            <button className={`top-btn ${view === 'admin' ? 'on' : ''}`} onClick={() => setView(view === 'admin' ? 'mail' : 'admin')} title="Admin & business email">
-              <Icon name={view === 'admin' ? 'mail' : 'shield'} /> <span>{view === 'admin' ? 'Back to mail' : isAdmin ? 'Admin' : 'Business email'}</span>
-            </button>
-          )}
-          <button className="icon-btn on-dark" onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')} title="Toggle dark mode"><Icon name={theme === 'dark' ? 'sun' : 'moon'} /></button>
-          <a className="icon-btn on-dark" href="/help" target="_blank" rel="noreferrer" title="Help" aria-label="Help" style={{ fontWeight: 700, textDecoration: 'none' }}>?</a>
-          <button className="icon-btn on-dark" onClick={() => setShowSettings(true)} title="Settings"><Icon name="settings" /></button>
-          <button className="icon-btn on-dark" onClick={() => setShowHelp(true)} title="Keyboard shortcuts (?)">?</button>
+          {view === 'admin' && <button className="top-btn" aria-label="Back to mail" onClick={() => setView('mail')}><Icon name="mail" /> <span>Back to mail</span></button>}
+          <button className={`icon-btn on-dark ${panel ? 'pressed' : ''}`} onClick={() => setPanel((p) => (p ? null : panelTab))} title="Tasks, notes and follow-ups (T)" aria-label="Tasks, notes and follow-ups" aria-pressed={!!panel}><Icon name="check" /></button>
+          <button className="icon-btn on-dark" onClick={() => setShowSettings(true)} title="Settings" aria-label="Settings"><Icon name="settings" /></button>
           <div className="user-menu-wrap">
             <button className="avatar sm" style={{ background: avatarColor(me.email) }} onClick={() => setUserMenu((u) => !u)} title={me.email}>
               {initials({ name: prefs.displayName || me.name, address: me.email })}
@@ -361,6 +422,9 @@ export default function Mail({ me, route, refreshMe, theme, setTheme, onLogout }
               <div className="menu right" onMouseLeave={() => setUserMenu(false)}>
                 <div className="menu-head"><b>{prefs.displayName || me.name || me.email.split('@')[0]}</b><small>{me.email}</small></div>
                 <button onClick={() => { setShowSettings(true); setUserMenu(false); }}><Icon name="settings" /> Settings</button>
+                <button onClick={() => { setTheme(theme === 'dark' ? 'light' : 'dark'); setUserMenu(false); }}><Icon name={theme === 'dark' ? 'sun' : 'moon'} /> {theme === 'dark' ? 'Light mode' : 'Dark mode'}</button>
+                <button onClick={() => { setShowHelp(true); setUserMenu(false); }}><Icon name="key" /> Keyboard shortcuts</button>
+                <a className="menu-link" href="/help" target="_blank" rel="noreferrer"><Icon name="external" /> Help center</a>
                 {(isAdmin || !inOrg) && <button onClick={() => { setView('admin'); setUserMenu(false); }}><Icon name="shield" /> {isAdmin ? 'Admin portal' : 'Set up business email'}</button>}
                 {(me.accounts || []).filter((a) => a.mailboxId !== me.mailboxId).length > 0 && <div className="menu-note">Your other accounts</div>}
                 {(me.accounts || []).filter((a) => a.mailboxId !== me.mailboxId).map((a) => (
@@ -380,6 +444,18 @@ export default function Mail({ me, route, refreshMe, theme, setTheme, onLogout }
         {[['mail', 'mail', 'Mail'], ['calendar', 'calendar', 'Calendar'], ['contacts', 'users', 'Contacts']].map(([v, i, l]) => (
           <button key={v} className={view === v ? 'on' : ''} onClick={() => setView(v)} title={l} aria-label={l}><Icon name={i} size={20} /><small>{l}</small></button>
         ))}
+        {multi && (
+          <div className="rail-accounts" aria-label="Accounts">
+            {accounts.map((a, i) => (
+              <button key={a.mailboxId} className={`rail-acct ${a.mailboxId === route.id ? 'on' : ''}`} onClick={() => switchMailbox(a.mailboxId)}
+                title={`${a.name || a.email}\n${a.email}${i < 9 ? `  (Ctrl/⌘+${i + 1})` : ''}`} aria-label={`Switch to ${a.email}${a.unread ? `, ${a.unread} unread` : ''}`}>
+                <span className="avatar" style={{ background: avatarColor(a.email) }}>{initials({ name: a.name, address: a.email })}</span>
+                {a.unread > 0 && <span className="rail-badge">{a.unread > 99 ? '99+' : a.unread}</span>}
+              </button>
+            ))}
+            {accounts.length < 10 && <a className="rail-acct add" href={loginHref('?add=1')} title="Add another account" aria-label="Add another account"><Icon name="plus" size={18} /></a>}
+          </div>
+        )}
       </nav>
       {view === 'admin' ? (
         <Suspense fallback={<div className="spinner" />}><Admin me={me} refreshMe={refreshMe} onExit={() => setView('mail')} /></Suspense>
@@ -389,41 +465,56 @@ export default function Mail({ me, route, refreshMe, theme, setTheme, onLogout }
         <Suspense fallback={<div className="spinner" />}><Contacts me={me} onEmail={(c) => { compose({ to: [{ name: c.name, address: c.email }] }); setView('mail'); }} /></Suspense>
       ) : (
         <div className="body">
-          {sidebarOpen && (
-            <Sidebar folders={folders} current={search ? null : folder} onCompose={() => compose()} reload={loadFolders}
+          {navPeek && vw < 1280 && <div className={`nav-backdrop ${navMode === 'drawer' ? '' : 'clear'}`} onClick={() => setNavPeek(false)} />}
+          {(navMode !== 'drawer' || navPeek) && (
+            <Sidebar mode={navMode} width={navWidth} onResizeStart={startResize} overlay={navPeek && vw < 1280} folders={folders} current={search ? null : folder} onCompose={() => compose()} reload={loadFolders}
               me={me} mailboxes={sharedBoxes} mailbox={mailbox} onMailbox={switchMailbox}
-              onSelect={(p) => { setFolder(p); clearSearch(); setFilter(''); if (window.innerWidth <= 900) setSidebarOpen(false); }}
+              onSelect={(p) => { setFolder(p); clearSearch(); setFilter(''); if (vw < 1280) setNavPeek(false); }}
               onDropMessages={(dest, uids) => act.move(dest, uids)} onScheduled={() => { setFolder('@scheduled'); clearSearch(); }} onQuarantine={() => { setFolder('@quarantine'); clearSearch(); }} qCount={qCount}
+              allInboxes={multi ? accounts.reduce((n, a) => n + (a.unread || 0), 0) : null} onAllInboxes={() => { setFolder('@all'); clearSearch(); }}
               categories={prefs.categories} onCategory={(c) => runSearch(`label:${catKeyword(c.name).slice(4)}`)} />
           )}
-          <main className={`main ${paneClass}`}>
-            <Ribbon
-              hasSelection={!!(selected.size || active)} folderUse={currentFolderObj?.specialUse} folders={folders}
-              onCompose={() => compose()} act={act} categories={prefs.categories}
-              onReply={(mode) => activeMsg && reply(activeMsg, mode)} canReply={!!activeMsg}
+          <main className={`main ${paneClass} ${active ? 'has-active' : ''}`}>
+            {(folderUse === '\\Junk' || folder === '@quarantine') && !search && (
+              <div className="tabs" role="tablist">
+                <button role="tab" aria-selected={folder !== '@quarantine'} className={folder !== '@quarantine' ? 'on' : ''} onClick={() => special('\\Junk') && setFolder(special('\\Junk'))}>Junk</button>
+                <button role="tab" aria-selected={folder === '@quarantine'} className={folder === '@quarantine' ? 'on' : ''} onClick={() => setFolder('@quarantine')} title="Definite spam held back by the server">Quarantine{qCount > 0 ? ` (${qCount})` : ''}</button>
+              </div>
+            )}
+            {!folder.startsWith('@') && <Ribbon
+              hasSelection={!!(selected.size || active)} count={selected.size} folderUse={folderUse} folders={folders}
+              act={act} categories={prefs.categories}
               onRefresh={() => { load(); loadFolders(); }}
               readingPane={prefs.readingPane} setReadingPane={(v) => setPrefs({ readingPane: v })}
-            />
+              density={prefs.density} setDensity={(v) => setPrefs({ density: v })}
+            />}
             <div className="panes">
               {folder === '@quarantine' && !search ? <QuarantineList onChanged={setQCount} /> : folder === '@scheduled' && !search ? <ScheduledList onCompose={compose} /> : <MessageList
                 snoozeMap={folder.toLowerCase() === 'snoozed' ? snoozeMap : null}
-                list={list} title={search ? `Results for "${search}"` : folderLabel(currentFolderObj || { name: folder })}
+                list={list} title={search ? `Results for "${search}"` : folder === '@all' ? 'All inboxes' : folderLabel(currentFolderObj || { name: folder })}
                 search={search} onClearSearch={clearSearch}
                 folderUse={currentFolderObj?.specialUse} filter={filter} setFilter={setFilter}
                 selected={selected} setSelected={setSelected} active={active} onOpen={openMessage}
-                act={act} categories={prefs.categories} density={prefs.density}
+                act={act} categories={prefs.categories} density={prefs.density} allInboxes={folder === '@all'}
                 onLoadMore={() => !search && list.messages.length < list.total && !list.loading && load({ page: list.page + 1, append: true })}
                 onEmpty={act.emptyFolder} onMarkAllRead={act.markAllRead}
               />}
-              {!folder.startsWith('@') && (prefs.readingPane !== 'off' || active) ? (
+              {(!folder.startsWith('@')) && (prefs.readingPane !== 'off' || active) ? (
                 <ReadingPane
                   key={`${listFolder}:${active}`} folder={listFolder} msg={activeMsg} me={me} prefs={prefs} setPrefs={setPrefs}
                   conversation={prefs.conversation} onReply={reply} act={act} categories={prefs.categories}
                   onClose={() => setActive(null)} isJunk={currentFolderObj?.specialUse === '\\Junk'} orgDomains={me.orgDomains || []}
+                  onAddTask={addTaskFrom} onFollowUp={followUp} onThread={setOpenThreadMsg}
                 />
               ) : null}
             </div>
+            {!active && createPortal(<button className="compose-fab" onClick={() => compose()} aria-label="New mail" title="New mail"><Icon name="pen" /></button>, document.body)}
           </main>
+          {panel && (
+            <TasksPanel tab={panelTab} setTab={(t) => { setPanelTab(t); setPanel(t); }} onClose={() => setPanel(null)}
+              context={active ? openThreadMsg : null} seed={taskSeed} onSeedUsed={() => setTaskSeed(null)}
+              onOpenMessage={(m) => (m.mailboxId && m.mailboxId !== route.id ? location.assign(`/${m.mailboxId}/message/${m.key}`) : (() => { const k = parseMessageKey(m.key); if (k) { setView('mail'); setFolder(k.folder); setTimeout(() => setActive(k.uid), 0); } })())} />
+          )}
         </div>
       )}
       </div>
@@ -431,7 +522,7 @@ export default function Mail({ me, route, refreshMe, theme, setTheme, onLogout }
       {snoozeFor && <SnoozeMenu onPick={act.doSnooze} onClose={() => setSnoozeFor(null)} />}
       <ComposeManager composers={composers} setComposers={setComposers} me={me} prefs={prefs} sigData={sigData}
         onSent={() => { loadFolders(); if (listFolder === special('\\Sent') || listFolder === special('\\Drafts')) load({ quiet: true }); }} />
-      {showSettings && <SettingsPanel prefs={prefs} setPrefs={setPrefs} me={me} folders={folders} sigData={sigData} reloadSigs={reloadSigs} onClose={() => setShowSettings(false)} />}
+      {showSettings && <SettingsPanel prefs={prefs} setPrefs={setPrefs} me={me} folders={folders} sigData={sigData} reloadSigs={reloadSigs} onClose={() => setShowSettings(false)} initialTab={importMsg ? 'import' : undefined} importMsg={importMsg} />}
       {showHelp && <ShortcutsHelp onClose={() => setShowHelp(false)} />}
     </div>
   );

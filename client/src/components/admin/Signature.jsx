@@ -72,12 +72,12 @@ export default function OrgSignature({ org, users }) {
         </div>
         <RichEditor key={key} value={html} onChange={setHtml} placeholders={s.placeholders} minHeight={140} />
         <div className="sig-head"><h3>Preview</h3><div className="spacer" />
-          <select value={who} onChange={(e) => setWho(e.target.value)}>
+          <select aria-label="Preview the signature for" value={who} onChange={(e) => setWho(e.target.value)}>
             <option value="">Sample person</option>
             {users.map((u) => <option key={u.email} value={u.email}>{u.name || u.email}</option>)}
           </select>
         </div>
-        <div className="sig-preview big" dangerouslySetInnerHTML={{ __html: preview ? safeHtml(preview) : '<span style="color:#999">Your signature preview appears here</span>' }} />
+        <div className="sig-preview big" dangerouslySetInnerHTML={{ __html: preview ? safeHtml(preview) : '<span style="color:#666">Your signature preview appears here</span>' }} />
         <p className="muted small">Signatures are added to mail sent from this webmail. For Outlook desktop or phone apps, each person can copy their filled-in signature from <b>Settings → Signatures</b>.</p>
       </div>
       <div className="step-actions sticky-save"><button className="btn primary" onClick={save}>Save company signature</button></div>

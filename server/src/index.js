@@ -9,9 +9,14 @@ import { config } from './config.js';
 import { api } from './routes.js';
 import { sharedboxes } from './sharedboxes.js';
 import { archive } from './archive.js';
-import { push, startPush, pushStats } from './push.js';
+import { push, startPush, pushStats, notify } from './push.js';
+import { tasksApi, startReminders, setReminderNotifier } from './tasks.js';
+import { importsApi, importsPublic, startImports, setImportNotifier } from './imports.js';
+import { phoneApi } from './phone.js';
+import { reputationApi, startReputationReport } from './reputation.js';
+import { sendSystemMail } from './recovery.js';
 import { help } from './help.js';
-import { hosts, siteRouter } from './hosts.js';
+import { hosts, siteRouter, ID_PATH, notFound } from './hosts.js';
 import { requireAuth } from './session.js';
 import { setupApi, requireSetupApi } from './setup.js';
 import { abuseDesk, outboundAdmin, startOutboundChecks } from './outbound.js';
@@ -25,6 +30,7 @@ import { spam } from './spam.js';
 import { startJobs } from './jobs.js';
 import { deviceSetup, deviceSetupApi } from './devicesetup.js';
 import { legalPages, privacy, startRetention } from './privacy.js';
+import { appLinks } from './nativepush.js';
 import { calendar } from './calendar.js';
 import { contacts } from './contacts.js';
 import { groups } from './groups.js';
@@ -69,6 +75,7 @@ app.use('/api', (req, res, next) => {
   next();
 });
 app.get('/healthz', (req, res) => res.json({ ok: true }));
+app.use(appLinks); // before host routing: these must be served on every host, never redirected
 app.use(hosts);
 app.use(ops);
 app.use(abuseDesk);
@@ -83,10 +90,12 @@ app.use(publicAssets);
 app.use(deviceSetup);
 app.use(legalPages);
 app.use('/api', publicSecurity);
+app.use('/api', importsPublic); // Microsoft sign-in callback for imports (no session: sealed state)
 app.use('/api', publicRecovery);
 app.use('/api', requireSetupApi); // server tool may call with a signed request (no session)
 app.use('/api/setup', requireAuth);
 app.use('/api', setupApi);
+app.use('/api', phoneApi);
 app.use('/api', publicAccounts);
 app.use('/api', api);
 app.use('/api', accounts);
@@ -96,6 +105,9 @@ app.use('/api', mailtools);
 app.use('/api', spam);
 app.use('/api', deviceSetupApi);
 app.use('/api', privacy);
+app.use('/api', tasksApi);
+app.use('/api', reputationApi);
+app.use('/api', importsApi);
 app.use('/api', calendar);
 app.use('/api', contacts);
 app.use('/api', groups);
@@ -119,13 +131,53 @@ const site = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../s
 if (fs.existsSync(site)) app.use(siteRouter(site));
 
 const dist = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../client/dist');
+// Polish: a real favicon.ico (the PNG inside an ICO wrapper) and robots.txt on every host
+let favicon = null;
+const staticLimiter = rateLimit({ windowMs: 60 * 1000, limit: 300, standardHeaders: true, legacyHeaders: false });
+app.get('/favicon.ico', staticLimiter, (req, res) => {
+  if (!favicon) {
+    const png = fs.readFileSync(path.join(dist, 'favicon.png'));
+    const head = Buffer.alloc(22);
+    head.writeUInt16LE(0, 0); head.writeUInt16LE(1, 2); head.writeUInt16LE(1, 4); // ICO, 1 image
+    const w = png.readUInt32BE(16); const h = png.readUInt32BE(20);
+    head.writeUInt8(w >= 256 ? 0 : w, 6); head.writeUInt8(h >= 256 ? 0 : h, 7);
+    head.writeUInt16LE(1, 10); head.writeUInt16LE(32, 12); head.writeUInt32LE(png.length, 14); head.writeUInt32LE(22, 18);
+    favicon = Buffer.concat([head, png]);
+  }
+  res.type('image/x-icon').set('Cache-Control', 'public, max-age=86400').send(favicon);
+});
+app.get('/robots.txt', staticLimiter, (req, res) => {
+  const host = String(req.hostname || '').toLowerCase();
+  const body = config.loginHost && host === config.loginHost
+    ? 'User-agent: *\nAllow: /$\nAllow: /signup\nDisallow: /\n' // sign-in host: only the sign-in and sign-up pages
+    : 'User-agent: *\nDisallow: /api/\nDisallow: /app\nDisallow: /help/contact\n'; // the website; mailbox pages need a sign-in anyway
+  res.type('text/plain').set('Cache-Control', 'public, max-age=86400').send(body);
+});
 if (fs.existsSync(dist)) {
   app.use(express.static(dist, { index: false, maxAge: '1h' }));
-  app.get(/^\/(?!api\/).*/, (req, res) => res.sendFile(path.join(dist, 'index.html')));
+  // Only real app pages get the app; anything else is a real 404 (no soft-404s for scanners and search engines)
+  app.get(/^\/(?!api\/).*/, staticLimiter, (req, res) => {
+    if (/^\/(login|signup)?\/?$/.test(req.path) || ID_PATH.test(req.path)) return res.sendFile(path.join(dist, 'index.html'));
+    return notFound(res);
+  });
 }
 
 startOutboundChecks();
 startPush();
+// Task reminders and follow-ups: a push to the person's devices; email if they have none
+setReminderNotifier(async (email, n) => {
+  if (await notify(email, { title: n.title, body: n.body, tag: `${n.kind}-${Date.now()}`, url: n.url })) return;
+  const esc = (x) => String(x).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]);
+  await sendSystemMail(email, n.title, `<p style="font-family:Segoe UI,Arial,sans-serif;font-size:14px">${esc(n.body)}</p><p><a href="${esc(config.publicUrl || '')}${n.url}">Open ${esc(config.appName)}</a></p>`);
+});
+startReminders();
+setImportNotifier(async (email, n) => {
+  if (await notify(email, { title: n.title, body: n.body, tag: `import-${Date.now()}`, url: n.url })) return;
+  const esc = (x) => String(x).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]);
+  await sendSystemMail(email, n.title, `<p style="font-family:Segoe UI,Arial,sans-serif;font-size:14px">${esc(n.body)}</p>`);
+});
+startImports();
+startReputationReport();
 gauge('push_watchers', () => pushStats().watching);
 if (config.runsBackground) {
   await startJobs();

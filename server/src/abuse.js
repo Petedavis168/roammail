@@ -16,7 +16,7 @@ export async function accountKind(email) {
   if (org) return { business: true, orgId: org.org_id };
   const s = await q.get('SELECT created_at FROM signups WHERE email = ?', e);
   const ageH = s ? (Date.now() - Date.parse(`${s.created_at.replace(' ', 'T')}Z`)) / 3600e3 : 1e9;
-  return { business: false, newAccount: ageH < 48 };
+  return { business: false, newAccount: ageH < 7 * 24, ageDays: ageH / 24 }; // first week: the send ramp's daily cap (5a)
 }
 
 /** Check and count a webmail send. Throws 429 when over the daily quota or recipient limit. */
@@ -29,7 +29,7 @@ export async function checkSendQuota(email, recipientCount) {
   const day = new Date().toISOString().slice(0, 10);
   const row = await q.get('SELECT count FROM send_counts WHERE email = ? AND day = ?', email, day);
   if ((row?.count || 0) + 1 > perDay) {
-    throw fail(429, k.newAccount ? `New accounts can send ${perDay} messages a day for the first 48 hours. This protects everyone from spammers.`
+    throw fail(429, k.newAccount ? `New accounts can send ${perDay} messages a day in their first week. This protects everyone from spammers.`
       : `You've reached today's limit of ${perDay} messages. It resets at midnight UTC.`);
   }
   await q.run('INSERT INTO send_counts(email, day, count) VALUES(?, ?, 1) ON CONFLICT(email, day) DO UPDATE SET count = send_counts.count + 1', email, day);
@@ -87,7 +87,7 @@ function looksCommon(pw) {
 export async function assertNotBreached(password, email) {
   const lower = String(password).toLowerCase();
   const local = String(email || '').split('@')[0].toLowerCase();
-  if (local.length >= 3 && lower.includes(local)) throw fail(400, 'Your password must not contain your email name');
+  if (local.length >= 4 && lower.includes(local)) throw fail(400, 'Your password must not contain your email name');
   if (/^(.)\1+$/.test(password) || looksCommon(password)) throw fail(400, 'That password is too common and easy to guess. Try three or four random words.');
   if (!config.limits.checkBreachedPasswords) return;
   const hash = crypto.createHash('sha1').update(String(password)).digest('hex').toUpperCase();
