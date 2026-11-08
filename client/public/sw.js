@@ -60,7 +60,9 @@ self.addEventListener('fetch', (e) => {
 
 // The page asks us to keep the app shell after it loads (its first load happens before we're in control)
 async function keepShell(path) {
-  const res = await fetch(path, { credentials: 'same-origin' });
+  const url = new URL(path, self.location.origin);
+  if (url.origin !== self.location.origin || !/^\/(\d{8}|\d{6}-\d{3}-[A-Z]{2})\//.test(url.pathname)) return; // only our own app pages
+  const res = await fetch(url.href, { credentials: 'same-origin' });
   if (!res.ok || !(res.headers.get('content-type') || '').includes('text/html')) return;
   const html = await res.clone().text();
   const c = await caches.open(SHELL);
@@ -69,6 +71,9 @@ async function keepShell(path) {
   await Promise.all(assets.map(async (a) => { if (!(await c.match(a))) { const r = await fetch(a); if (r.ok) await c.put(a, r); } }));
 }
 self.addEventListener('message', (e) => {
+  // only from Roammail's own pages
+  let from = ''; try { from = new URL(e.source?.url || '').origin; } catch { return; }
+  if (from !== self.location.origin) return;
   if (e.data?.type === 'signout') e.waitUntil(Promise.all([caches.delete(DATA), caches.delete(SHELL)]));
   if (e.data?.type === 'shell' && /^\/[\w/-]*$/.test(e.data.path || '')) e.waitUntil(keepShell(e.data.path).catch(() => {}));
 });
