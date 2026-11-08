@@ -105,6 +105,9 @@ jobs:
       - name: Offline mode tests (service worker, Outbox)
         working-directory: server
         run: npm run test:offline
+      - name: Spanish tests
+        working-directory: server
+        run: npm run test:i18n
 
       - name: Logs on failure
         if: failure()
