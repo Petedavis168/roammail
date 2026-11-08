@@ -31,6 +31,7 @@ import { startJobs } from './jobs.js';
 import { deviceSetup, deviceSetupApi } from './devicesetup.js';
 import { legalPages, privacy, startRetention } from './privacy.js';
 import { appLinks } from './nativepush.js';
+import { clientErrors } from './clienterrors.js';
 import { calendar } from './calendar.js';
 import { contacts } from './contacts.js';
 import { groups } from './groups.js';
@@ -89,6 +90,7 @@ if (config.runsBackground) startDbBackups();
 app.use(publicAssets);
 app.use(deviceSetup);
 app.use(legalPages);
+app.use('/api', clientErrors); // browser and phone-app error reports (no sign-in needed)
 app.use('/api', publicSecurity);
 app.use('/api', importsPublic); // Microsoft sign-in callback for imports (no session: sealed state)
 app.use('/api', publicRecovery);
