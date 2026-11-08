@@ -90,6 +90,9 @@ jobs:
           npm i --no-save playwright@1
           npx playwright install --with-deps chromium
           npm run test:e2e
+      - name: Phone app tests (faked native shell)
+        working-directory: server
+        run: npm run test:mobile
 
       - name: Logs on failure
         if: failure()
