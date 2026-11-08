@@ -1087,3 +1087,5 @@ details.card summary { cursor: pointer; }
 .premium-perks li { display: flex; align-items: center; gap: 8px; padding: 5px 0; }
 .premium-buy { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
 .premium-buy p { flex-basis: 100%; }
+
+a.g-passkey { text-decoration: none; color: inherit; box-sizing: border-box; }

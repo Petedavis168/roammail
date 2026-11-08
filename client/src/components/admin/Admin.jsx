@@ -204,6 +204,46 @@ function ImportUsers({ domain, onClose }) {
   );
 }
 
+// Sign in with Microsoft 365 or Google Workspace: the admin connects the company once, then each person links their account
+const SSO_ADMIN_MSG = { connected: 'Connected. People can now link their work accounts in Settings → Security.', 'personal-account': 'That’s a personal account. Sign in with an admin account from your company’s Microsoft 365 or Google Workspace.', cancelled: 'Cancelled.', failed: 'Something went wrong. Please try again.', expired: 'That took too long. Please try again.' };
+const SSO_NAMES = { microsoft: 'Microsoft 365', google: 'Google Workspace' };
+function WorkSignInAdmin({ org }) {
+  const toast = useToast();
+  const [s, setS] = useState(null);
+  const load = () => api.get(`/api/sso/org/${org.id}`).then(setS).catch(() => setS(null));
+  useEffect(() => {
+    load();
+    const m = new URLSearchParams(location.search).get('sso');
+    if (m && SSO_ADMIN_MSG[m]) { toast(SSO_ADMIN_MSG[m], { error: m !== 'connected' }); history.replaceState(null, '', location.pathname); }
+  }, [org.id]);
+  if (!s || (!s.available.microsoft && !s.available.google)) return null;
+  const connect = async (provider) => { try { location.href = (await api.post(`/api/sso/org/${org.id}/connect`, { provider })).url; } catch (e) { toast(e.message, { error: true }); } };
+  const disconnect = async () => {
+    if (!confirm(`Turn off ${SSO_NAMES[s.provider]} sign-in for ${org.name}? Everyone's linked accounts are removed; they sign in with their password.`)) return;
+    try { await api.del(`/api/sso/org/${org.id}`); toast('Turned off'); load(); } catch (e) { toast(e.message, { error: true }); }
+  };
+  return (
+    <div className="card">
+      <h3>Sign in with Microsoft or Google</h3>
+      {s.provider ? (
+        <>
+          <p><Icon name="check" size={14} /> Connected to your company's <b>{SSO_NAMES[s.provider]}</b> ({s.tenant}). {s.linked} {s.linked === 1 ? 'person has' : 'people have'} linked their account.</p>
+          <small className="muted">Each person links their work account once in Settings → Security, then signs in with one click. Only accounts from your company can be used, and your company's own sign-in rules apply. Removing someone in {SSO_NAMES[s.provider]} stops them signing in here.</small>
+          <div className="row-actions"><button className="btn" onClick={disconnect}>Turn off</button></div>
+        </>
+      ) : (
+        <>
+          <small className="muted">Let people sign in with their Microsoft 365 or Google Workspace work account. Sign in with an admin account from your company to connect it.</small>
+          <div className="row-actions">
+            {s.available.microsoft && <button className="btn" onClick={() => connect('microsoft')}>Connect Microsoft 365</button>}
+            {s.available.google && <button className="btn" onClick={() => connect('google')}>Connect Google Workspace</button>}
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
 function Users({ org, domains }) {
   const toast = useToast();
   const active = domains.filter((d) => d.status === 'active');
@@ -433,6 +473,7 @@ function OrgSecurity({ org, reload }) {
           Allow people in {org.name} to use AI help</label>
         <small className="muted">AI help (thread summaries, suggested replies, "what needs my reply") is off until each person turns it on, and it sends only the emails they choose to Anthropic (Claude). Turn this off if your company doesn't allow AI tools.</small>
       </div>
+      <WorkSignInAdmin org={org} />
       <div className="card">
         <h3>Automatic forwarding</h3>
         <label className="check big"><input type="checkbox" checked={!!org.allow_external_forward} onChange={(e) => set({ allowExternalForward: e.target.checked }, 'Saved')} />

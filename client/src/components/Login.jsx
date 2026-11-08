@@ -11,6 +11,12 @@ function strength(pw) {
   if (/[a-z]/.test(pw) && /[A-Z]/.test(pw)) s++; if (/\d/.test(pw)) s++; if (/[^A-Za-z0-9]/.test(pw)) s++;
   return Math.min(4, s);
 }
+const SSO_LOGIN_MSG = {
+  'not-linked': 'That work account isn’t linked to a Roammail mailbox. Sign in with your password, then link it in Settings → Security.',
+  'password-changed': 'Your password has changed since you linked your work account. Sign in with your password, then link it again.',
+  blocked: 'Too many failed attempts. Try again later.', cancelled: 'Sign-in was cancelled.', expired: 'That took too long. Please try again.',
+  unavailable: 'That sign-in option isn’t available.', failed: 'Something went wrong. Please try again.',
+};
 const STRENGTH = ['Too weak', 'Weak', 'Fair', 'Good', 'Strong'];
 
 function Card({ title, subtitle, children, onSubmit, footer }) {
@@ -46,6 +52,10 @@ export default function Login({ onLogin, mode = 'signin' }) {
   const [show, setShow] = useState(false);
   const [error, setError] = useState('');
   const [info, setInfo] = useState('');
+  // Sign in with Microsoft / Google (for companies that turned it on); ?sso= says why we came back
+  const [sso, setSso] = useState({});
+  const [ssoErr] = useState(() => new URLSearchParams(location.search).get('sso'));
+  useEffect(() => { api.get('/api/sso/options').then(setSso).catch(() => {}); }, []);
   const [busy, setBusy] = useState(false);
   const [ticket, setTicket] = useState(null);
   const [sugg, setSugg] = useState([]);
@@ -83,6 +93,9 @@ export default function Login({ onLogin, mode = 'signin' }) {
           <button type="button" className="g-passkey" disabled={busy} onClick={() => run(async () => { const r = await signInWithPasskey(f.remember); await onLogin(r); })}>
             <Icon name="lock" size={16} />{' '}{t("Sign in with a passkey")}{' '}</button>
         )}
+        {!isNative() && sso.microsoft && <a className="g-passkey" href={`/api/sso/login/microsoft?remember=${f.remember ? 1 : 0}`}>{t("Sign in with Microsoft")}</a>}
+        {!isNative() && sso.google && <a className="g-passkey" href={`/api/sso/login/google?remember=${f.remember ? 1 : 0}`}>{t("Sign in with Google")}</a>}
+        {ssoErr && <div className="g-info warn">{t(SSO_LOGIN_MSG[ssoErr] || SSO_LOGIN_MSG.failed)}</div>}
         {info && <div className="g-info">{info}</div>}
       </Card>
     </Shell>

@@ -108,6 +108,9 @@ jobs:
       - name: Spanish tests
         working-directory: server
         run: npm run test:i18n
+      - name: Microsoft / Google sign-in tests
+        working-directory: server
+        run: npm run test:sso
 
       - name: Logs on failure
         if: failure()

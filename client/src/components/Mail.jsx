@@ -70,6 +70,7 @@ export default function Mail({ me, route, refreshMe, theme, setTheme, onLogout }
   const [userMenu, setUserMenu] = useState(false);
   const [opsHelp, setOpsHelp] = useState(false);
   const [importMsg] = useState(() => new URLSearchParams(location.search).get('import')); // back from Microsoft sign-in
+  const [ssoMsg] = useState(() => new URLSearchParams(location.search).get('sso')); // back from linking a work account
   const [premiumMsg] = useState(() => new URLSearchParams(location.search).get('premium')); // back from Premium checkout
   // Item 9: tasks / notes / follow-ups panel
   const [panel, setPanel] = useState(() => { const p = new URLSearchParams(location.search).get('panel'); return ['tasks', 'notes', 'followups'].includes(p) ? p : null; });
@@ -524,7 +525,7 @@ export default function Mail({ me, route, refreshMe, theme, setTheme, onLogout }
       {snoozeFor && <SnoozeMenu onPick={act.doSnooze} onClose={() => setSnoozeFor(null)} />}
       <ComposeManager composers={composers} setComposers={setComposers} me={me} prefs={prefs} sigData={sigData}
         onSent={() => { loadFolders(); if (listFolder === special('\\Sent') || listFolder === special('\\Drafts')) load({ quiet: true }); }} />
-      {showSettings && <SettingsPanel prefs={prefs} setPrefs={setPrefs} me={me} folders={folders} sigData={sigData} reloadSigs={reloadSigs} onClose={() => setShowSettings(false)} initialTab={importMsg ? 'import' : premiumMsg ? 'premium' : undefined} importMsg={importMsg} premiumMsg={premiumMsg} />}
+      {showSettings && <SettingsPanel prefs={prefs} setPrefs={setPrefs} me={me} folders={folders} sigData={sigData} reloadSigs={reloadSigs} onClose={() => setShowSettings(false)} initialTab={importMsg ? 'import' : premiumMsg ? 'premium' : ssoMsg ? 'security' : undefined} importMsg={importMsg} premiumMsg={premiumMsg} ssoMsg={ssoMsg} />}
       {showHelp && <ShortcutsHelp onClose={() => setShowHelp(false)} />}
     </div>
   );
