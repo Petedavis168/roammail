@@ -3,6 +3,7 @@ import { api } from '../api.js';
 import { Icon } from '../icons.jsx';
 import { folderIcon, folderLabel, SPECIAL_ORDER } from '../util.js';
 import { useToast } from './Toast.jsx';
+import { t } from '../i18n.js';
 
 export default function Sidebar({ folders, current, onSelect, onCompose, reload, onDropMessages, categories, onCategory, onScheduled, onQuarantine, qCount, me, mailboxes = [], mailbox = '', onMailbox, mode = 'full', width = 240, onResizeStart, overlay, allInboxes = null, onAllInboxes }) {
   const toast = useToast();
@@ -34,7 +35,7 @@ export default function Sidebar({ folders, current, onSelect, onCompose, reload,
     } catch (e) { toast(e.message, { error: true }); }
   };
   const rename = async (f) => {
-    const name = prompt('Rename folder', f.name);
+    const name = prompt(t("Rename folder"), f.name);
     if (!name?.trim() || name === f.name) return;
     const newPath = f.parent ? `${f.parent}${f.delimiter || '/'}${name.trim()}` : name.trim();
     try { await api.patch('/api/folders', { path: f.path, newPath }); reload(); } catch (e) { toast(e.message, { error: true }); }
@@ -76,12 +77,12 @@ export default function Sidebar({ folders, current, onSelect, onCompose, reload,
   };
 
   return (
-    <nav className={`sidebar ${mode} ${overlay ? 'overlay' : ''}`} style={mode === 'rail' ? undefined : { width }} onClick={() => setMenu(null)} aria-label="Folders">
-      <button className="compose-btn" onClick={onCompose} title="New mail (c)"><Icon name="pen" /> <span>New mail</span></button>
+    <nav className={`sidebar ${mode} ${overlay ? 'overlay' : ''}`} style={mode === 'rail' ? undefined : { width }} onClick={() => setMenu(null)} aria-label={t("Folders")}>
+      <button className="compose-btn" onClick={onCompose} title={t("New mail (c)")}><Icon name="pen" /> <span>{t("New mail")}</span></button>
       {mailboxes.length > 0 && (
-        <label className="mailbox-pick" title="Switch between your accounts and shared mailboxes">
+        <label className="mailbox-pick" title={t("Switch between your accounts and shared mailboxes")}>
           <Icon name="users" size={14} />
-          <select value={mailbox} onChange={(e) => onMailbox(e.target.value)} aria-label="Mailbox">
+          <select value={mailbox} onChange={(e) => onMailbox(e.target.value)} aria-label={t("Mailbox")}>
             {(me?.accounts || []).map((a) => <option key={a.mailboxId} value={a.mailboxId}>{a.email}</option>)}
             {mailboxes.map((b) => <option key={b.mailboxId} value={b.mailboxId}>{b.name ? `${b.name} (${b.email})` : b.email}{b.archive ? ' (archive, read only)' : b.canSend ? '' : ' (read only)'}</option>)}
           </select>
@@ -89,30 +90,30 @@ export default function Sidebar({ folders, current, onSelect, onCompose, reload,
       )}
       <div className="nav-section">
         {allInboxes !== null && (
-          <div className={`folder ${current === '@all' ? 'on' : ''}`} style={{ paddingLeft: 10 }} onClick={onAllInboxes} role="button" tabIndex={0} title="All inboxes">
-            <span className="twisty" /><Icon name="users" /><span className="fname">All inboxes</span>{allInboxes > 0 && <span className="count">{allInboxes}</span>}
+          <div className={`folder ${current === '@all' ? 'on' : ''}`} style={{ paddingLeft: 10 }} onClick={onAllInboxes} role="button" tabIndex={0} title={t("All inboxes")}>
+            <span className="twisty" /><Icon name="users" /><span className="fname">{t("All inboxes")}</span>{allInboxes > 0 && <span className="count">{allInboxes}</span>}
           </div>
         )}
         {specials.map((f) => <Row key={f.path} f={f} />)}
-        <div className={`folder ${current === '@scheduled' ? 'on' : ''}`} style={{ paddingLeft: 10 }} onClick={onScheduled} role="button" tabIndex={0} title="Scheduled">
-          <span className="twisty" /><Icon name="clock" /><span className="fname">Scheduled</span>
+        <div className={`folder ${current === '@scheduled' ? 'on' : ''}`} style={{ paddingLeft: 10 }} onClick={onScheduled} role="button" tabIndex={0} title={t("Scheduled")}>
+          <span className="twisty" /><Icon name="clock" /><span className="fname">{t("Scheduled")}</span>
         </div>
         {snoozedFolder && <Row f={snoozedFolder} />}
         {!specials.some((f) => f.specialUse === '\\Junk') && (
           <div className={`folder ${current === '@quarantine' ? 'on' : ''}`} style={{ paddingLeft: 10 }} onClick={onQuarantine} role="button" tabIndex={0}>
-            <span className="twisty" /><Icon name="shield" /><span className="fname">Quarantine</span>{qCount > 0 && <span className="count muted">{qCount}</span>}
+            <span className="twisty" /><Icon name="shield" /><span className="fname">{t("Quarantine")}</span>{qCount > 0 && <span className="count muted">{qCount}</span>}
           </div>
         )}
       </div>
-      {(tree.get('') || []).length > 0 && <div className="nav-title">Folders</div>}
+      {(tree.get('') || []).length > 0 && <div className="nav-title">{t("Folders")}</div>}
       <div className="nav-section">
         {(tree.get('') || []).map((f) => <Row key={f.path} f={f} />)}
-        <div className="folder add-row" title="New folder" style={{ paddingLeft: 10 }} onClick={() => createFolder(null)} role="button" tabIndex={0}>
-          <span className="twisty" /><Icon name="plus" /><span className="fname">New folder</span>
+        <div className="folder add-row" title={t("New folder")} style={{ paddingLeft: 10 }} onClick={() => createFolder(null)} role="button" tabIndex={0}>
+          <span className="twisty" /><Icon name="plus" /><span className="fname">{t("New folder")}</span>
         </div>
       </div>
       <button className="nav-title toggle" onClick={() => toggle('@labels')} aria-expanded={collapsed['@labels'] === false}>
-        <span>Labels</span><Icon name={collapsed['@labels'] === false ? 'down' : 'chevron'} size={12} />
+        <span>{t("Labels")}</span><Icon name={collapsed['@labels'] === false ? 'down' : 'chevron'} size={12} />
       </button>
       {collapsed['@labels'] === false && (
         <div className="nav-section">
@@ -123,12 +124,12 @@ export default function Sidebar({ folders, current, onSelect, onCompose, reload,
           ))}
         </div>
       )}
-      {mode === 'full' && onResizeStart && <div className="nav-resize" onPointerDown={onResizeStart} role="separator" aria-orientation="vertical" aria-label="Resize navigation" />}
+      {mode === 'full' && onResizeStart && <div className="nav-resize" onPointerDown={onResizeStart} role="separator" aria-orientation="vertical" aria-label={t("Resize navigation")} />}
       {menu && (
         <div className="menu" style={{ position: 'fixed', left: menu.x, top: menu.y }}>
-          <button onClick={() => createFolder(menu.f)}><Icon name="plus" /> New subfolder</button>
-          {!menu.f.specialUse && <button onClick={() => rename(menu.f)}><Icon name="pen" /> Rename</button>}
-          {!menu.f.specialUse && <button onClick={() => remove(menu.f)}><Icon name="trash" /> Delete folder</button>}
+          <button onClick={() => createFolder(menu.f)}><Icon name="plus" />{' '}{t("New subfolder")}</button>
+          {!menu.f.specialUse && <button onClick={() => rename(menu.f)}><Icon name="pen" />{' '}{t("Rename")}</button>}
+          {!menu.f.specialUse && <button onClick={() => remove(menu.f)}><Icon name="trash" />{' '}{t("Delete folder")}</button>}
         </div>
       )}
     </nav>

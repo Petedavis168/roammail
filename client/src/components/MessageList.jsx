@@ -3,6 +3,7 @@ import { Icon } from '../icons.jsx';
 import { fmtDate, dateGroup, personName, avatarColor, initials } from '../util.js';
 import { fmtWhen } from '../snooze.js';
 import NeedsReply from './NeedsReply.jsx';
+import { t } from '../i18n.js';
 
 export default function MessageList({ list, title, search, onClearSearch, folderUse, filter, setFilter, selected, setSelected,
   active, onOpen, act, categories, density, onLoadMore, onEmpty, onMarkAllRead, snoozeMap, allInboxes, isInbox }) {
@@ -57,12 +58,12 @@ export default function MessageList({ list, title, search, onClearSearch, folder
   return (
     <section className="list">
       <div className="list-head">
-        <label className="chk" title="Select all">
+        <label className="chk" title={t("Select all")}>
           <input type="checkbox" checked={allSelected} onChange={() => setSelected(allSelected ? new Set() : new Set(messages.map((m) => m.uid)))} />
         </label>
         <h2 title={title}>{title}</h2>
         {search ? (
-          <button className="link" onClick={onClearSearch}>Clear</button>
+          <button className="link" onClick={onClearSearch}>{t("Clear")}</button>
         ) : allInboxes ? null : (
           <div className="filters">
             {[['', 'All'], ['unread', 'Unread'], ['flagged', 'Flagged'], ['attachments', 'Files']].map(([v, l]) => (
@@ -75,18 +76,18 @@ export default function MessageList({ list, title, search, onClearSearch, folder
       {selected.size > 0 && !allInboxes && (
         <div className="selbar">
           <b>{selected.size} selected</b>
-          <button onClick={() => act.archive()}><Icon name="archive" size={16} /> Archive</button>
-          <button onClick={() => act.del()}><Icon name="trash" size={16} /> Delete</button>
-          <button onClick={() => act.read(true)}><Icon name="mailOpen" size={16} /> Read</button>
-          <button onClick={() => act.read(false)}><Icon name="mail" size={16} /> Unread</button>
-          <button onClick={() => setSelected(new Set())}>Cancel</button>
+          <button onClick={() => act.archive()}><Icon name="archive" size={16} />{' '}{t("Archive")}</button>
+          <button onClick={() => act.del()}><Icon name="trash" size={16} />{' '}{t("Delete")}</button>
+          <button onClick={() => act.read(true)}><Icon name="mailOpen" size={16} />{' '}{t("Read")}</button>
+          <button onClick={() => act.read(false)}><Icon name="mail" size={16} />{' '}{t("Unread")}</button>
+          <button onClick={() => setSelected(new Set())}>{t("Cancel")}</button>
         </div>
       )}
       {(folderUse === '\\Trash' || folderUse === '\\Junk') && messages.length > 0 && !search && (
-        <div className="banner">Items here can be removed permanently. <button className="link" onClick={onEmpty}>Empty folder now</button></div>
+        <div className="banner">{t("Items here can be removed permanently.")}{' '}<button className="link" onClick={onEmpty}>{t("Empty folder now")}</button></div>
       )}
       <div className="rows" ref={ref} onScroll={onScroll}>
-        <div role="list" aria-label="Messages">
+        <div role="list" aria-label={t("Messages")}>
         {messages.map((m) => {
           const group = dateGroup(m.date);
           const header = group !== lastGroup ? <div className="group-head" role="listitem" key={`g-${group}-${m.uid}`}>{group}</div> : null;
@@ -102,7 +103,7 @@ export default function MessageList({ list, title, search, onClearSearch, folder
                 {density === 'compact' ? null : (
                   <span className="avatar" style={{ background: avatarColor(person.address) }}>{initials(person)}</span>
                 )}
-                <input type="checkbox" checked={selected.has(m.uid)} readOnly tabIndex={-1} aria-label="Select" />
+                <input type="checkbox" checked={selected.has(m.uid)} readOnly tabIndex={-1} aria-label={t("Select")} />
               </div>
               <div className="row-main">
                 <div className="row-top">
@@ -111,22 +112,22 @@ export default function MessageList({ list, title, search, onClearSearch, folder
                     {m.hasAttachments && <Icon name="clip" size={14} />}
                     {m.answered && <Icon name="reply" size={14} />}
                   </span>
-                  {snoozeMap?.[m.uid] ? <span className="date snoozed" title="Snoozed until"><Icon name="clock" size={12} /> {fmtWhen(snoozeMap[m.uid].run_at)}</span>
+                  {snoozeMap?.[m.uid] ? <span className="date snoozed" title={t("Snoozed until")}><Icon name="clock" size={12} /> {fmtWhen(snoozeMap[m.uid].run_at)}</span>
                     : <span className="date">{fmtDate(m.date)}</span>}
                 </div>
                 <div className="row-sub">
-                  {!m.seen && <span className="unread-dot" role="img" aria-label="Unread" />}
-                  <span className="subject">{m.draft && <span className="draft-tag">[Draft] </span>}{m.subject}</span>
+                  {!m.seen && <span className="unread-dot" role="img" aria-label={t("Unread")} />}
+                  <span className="subject">{m.draft && <span className="draft-tag">{t("[Draft]")}{' '}</span>}{m.subject}</span>
                   {density !== 'compact' && m.snippet && <span className="snippet"> — {m.snippet}</span>}
                   {m.categories?.map((c) => <span key={c} className="cat" style={{ '--c': catColor(c) }}>{c}</span>)}
                 </div>
                 {allInboxes && <div className="acct-tag">{m.account}</div>}
               </div>
               {!allInboxes && <><div className="row-actions" onClick={(e) => e.stopPropagation()}>
-                {snoozeMap?.[m.uid] ? <button title="Unsnooze now" onClick={() => act.unsnooze(m.uid)}><Icon name="inbox" size={16} /></button>
-                  : <button title="Snooze" onClick={() => act.snooze(m.uid)}><Icon name="clock" size={16} /></button>}
-                <button title="Archive" onClick={() => act.archive(m.uid)}><Icon name="archive" size={16} /></button>
-                <button title="Delete" onClick={() => act.del(m.uid)}><Icon name="trash" size={16} /></button>
+                {snoozeMap?.[m.uid] ? <button title={t("Unsnooze now")} onClick={() => act.unsnooze(m.uid)}><Icon name="inbox" size={16} /></button>
+                  : <button title={t("Snooze")} onClick={() => act.snooze(m.uid)}><Icon name="clock" size={16} /></button>}
+                <button title={t("Archive")} onClick={() => act.archive(m.uid)}><Icon name="archive" size={16} /></button>
+                <button title={t("Delete")} onClick={() => act.del(m.uid)}><Icon name="trash" size={16} /></button>
                 <button title={m.seen ? 'Mark unread' : 'Mark read'} onClick={() => act.read(!m.seen, m.uid)}><Icon name={m.seen ? 'mail' : 'mailOpen'} size={16} /></button>
               </div>
               <button className={`flag-btn ${m.flagged ? 'on' : ''}`} title={m.flagged ? 'Unflag' : 'Flag'} onClick={(e) => { e.stopPropagation(); act.flag(m.uid); }}>
@@ -142,12 +143,12 @@ export default function MessageList({ list, title, search, onClearSearch, folder
             <Icon name={search ? 'search' : filter ? 'filter' : folderUse === '\\Junk' ? 'shield' : 'inbox'} size={40} />
             <b>{search ? 'No results' : filter ? 'Nothing matches this filter' : folderUse === '\\Inbox' ? "You're all caught up" : folderUse === '\\Junk' ? 'No junk' : folderUse === '\\Drafts' ? 'No drafts' : folderUse === '\\Sent' ? 'Nothing sent yet' : 'This folder is empty'}</b>
             <p className="muted">{search ? 'Try fewer words, or a search tip like from: or has:attachment.' : filter ? 'Switch back to All to see everything.' : folderUse === '\\Inbox' ? 'New mail will show up here.' : folderUse === '\\Junk' ? 'Suspected spam lands here, so your inbox stays clean.' : ''}</p>
-            {filter && !search && <button className="btn sm" onClick={() => setFilter('')}>Show all</button>}
+            {filter && !search && <button className="btn sm" onClick={() => setFilter('')}>{t("Show all")}</button>}
           </div>
         )}
         {!loading && !search && messages.length > 0 && messages.length >= total && <div className="list-msg muted">{total} message{total === 1 ? '' : 's'}</div>}
         {!loading && !search && folderUse === '\\Inbox' && messages.some((m) => !m.seen) && (
-          <div className="list-msg"><button className="link" onClick={onMarkAllRead}>Mark all as read</button></div>
+          <div className="list-msg"><button className="link" onClick={onMarkAllRead}>{t("Mark all as read")}</button></div>
         )}
       </div>
     </section>

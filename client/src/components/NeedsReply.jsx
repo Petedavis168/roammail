@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { api } from '../api.js';
 import { Icon } from '../icons.jsx';
 import { aiStatus, onAiChange } from '../ai.js';
+import { t } from '../i18n.js';
 
 /** Inbox: "What needs my reply?" (AI looks at unread mail and lists what people are waiting on). */
 export default function NeedsReply({ messages, onOpen }) {
@@ -22,14 +23,14 @@ export default function NeedsReply({ messages, onOpen }) {
       {res && (
         <div>
           <div className="nr-head"><b>{res.length ? `${res.length} ${res.length === 1 ? 'person is' : 'people are'} waiting for your reply` : 'Nothing in your unread mail is waiting for a reply.'}</b>
-            <button className="icon-btn xs" aria-label="Close" title="Close" onClick={() => setRes(null)}><Icon name="close" size={14} /></button></div>
+            <button className="icon-btn xs" aria-label={t("Close")} title={t("Close")} onClick={() => setRes(null)}><Icon name="close" size={14} /></button></div>
           <ul>
             {res.map((x) => (
               <li key={x.uid}><button className="link" onClick={() => onOpen(messages.find((m) => m.uid === x.uid) || { uid: x.uid })}>
                 <b>{x.from?.name || x.from?.address || ''}</b> · {x.subject} <span className="muted">· {x.reason}</span></button></li>
             ))}
           </ul>
-          <p className="muted small">AI-generated from sender, subject and first lines.</p>
+          <p className="muted small">{t("AI-generated from sender, subject and first lines.")}</p>
         </div>
       )}
     </div>

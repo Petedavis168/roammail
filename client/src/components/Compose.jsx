@@ -9,6 +9,7 @@ import { safeHtml, onSafePaste } from '../safehtml.js';
 import { presets, fmtWhen, localInputValue } from '../snooze.js';
 import { queue, flushOutbox, isOffline } from '../outbox.js';
 import { offlineAllowed } from '../api.js';
+import { t } from '../i18n.js';
 
 const sigBlock = (html) => (html ? `<div class="signature" data-sig="1"><br>${safeHtml(html)}</div>` : '');
 
@@ -145,7 +146,7 @@ function Composer({ c, me, prefs, sigData, identities, onClose, onSend, focusInd
 
   const close = async () => {
     const hasContent = to.length || subject || (editor.current?.innerText || '').trim().replace(/^--[\s\S]*$/, '').trim();
-    if (hasContent && dirty.current) { await saveDraft(); toast('Draft saved'); }
+    if (hasContent && dirty.current) { await saveDraft(); toast(t("Draft saved")); }
     onClose();
   };
   const discard = async () => {
@@ -153,24 +154,24 @@ function Composer({ c, me, prefs, sigData, identities, onClose, onSend, focusInd
     onClose();
   };
   const send = (sendAt) => {
-    if (!to.length && !cc.length && !bcc.length) return toast('Add at least one recipient', { error: true });
+    if (!to.length && !cc.length && !bcc.length) return toast(t("Add at least one recipient"), { error: true });
     const bad = [...to, ...cc, ...bcc].find((a) => !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(a.address));
     if (bad) return toast(`"${bad.address}" isn't a valid email address`, { error: true });
-    if (!subject.trim() && !confirm('Send this message without a subject?')) return;
+    if (!subject.trim() && !confirm(t("Send this message without a subject?"))) return;
     const text = (editor.current?.innerText || '').toLowerCase();
-    if (/\b(attached|attachment|enclosed)\b/.test(text.split('wrote:')[0]) && !files.length && !init.forwardUid && !confirm('You mentioned an attachment but none is attached. Send anyway?')) return;
+    if (/\b(attached|attachment|enclosed)\b/.test(text.split('wrote:')[0]) && !files.length && !init.forwardUid && !confirm(t("You mentioned an attachment but none is attached. Send anyway?"))) return;
     onSend({ ...payload(), sendAt: typeof sendAt === 'number' ? sendAt : undefined });
   };
 
   const addFiles = (list) => {
     const arr = [...list];
     const total = [...files, ...arr].reduce((s, f) => s + f.size, 0);
-    if (total > 25 * 1024 * 1024) return toast('Attachments are limited to 25 MB in total', { error: true });
+    if (total > 25 * 1024 * 1024) return toast(t("Attachments are limited to 25 MB in total"), { error: true });
     setFiles((f) => [...f, ...arr]);
   };
 
   const exec = (cmd, val) => { editor.current?.focus(); document.execCommand(cmd, false, val); markDirty(); };
-  const addLink = () => { const url = prompt('Link address (https://…)'); if (url) exec('createLink', /^\w+:/.test(url) ? url : `https://${url}`); };
+  const addLink = () => { const url = prompt(t("Link address (https://…)")); if (url) exec('createLink', /^\w+:/.test(url) ? url : `https://${url}`); };
 
   const title = subject || (init.mode === 'forward' ? 'Forward' : init.mode ? 'Reply' : 'New message');
   return (
@@ -182,35 +183,35 @@ function Composer({ c, me, prefs, sigData, identities, onClose, onSend, focusInd
       onDrop={(e) => { if (e.dataTransfer.files.length) { e.preventDefault(); setDragging(false); addFiles(e.dataTransfer.files); } }}>
       <div className="composer-bar" onClick={() => state === 'min' && setState('normal')}>
         <span className="ctitle">{title}</span>
-        <button className="icon-btn on-dark xs" title="Minimize" onClick={(e) => { e.stopPropagation(); setState(state === 'min' ? 'normal' : 'min'); }}><Icon name="min" size={14} /></button>
+        <button className="icon-btn on-dark xs" title={t("Minimize")} onClick={(e) => { e.stopPropagation(); setState(state === 'min' ? 'normal' : 'min'); }}><Icon name="min" size={14} /></button>
         <button className="icon-btn on-dark xs" title={state === 'max' ? 'Exit full screen' : 'Full screen'} onClick={(e) => { e.stopPropagation(); setState(state === 'max' ? 'normal' : 'max'); }}><Icon name="max" size={14} /></button>
-        <button className="icon-btn on-dark xs" title="Save & close" onClick={(e) => { e.stopPropagation(); close(); }}><Icon name="close" size={14} /></button>
+        <button className="icon-btn on-dark xs" title={t("Save & close")} onClick={(e) => { e.stopPropagation(); close(); }}><Icon name="close" size={14} /></button>
       </div>
       <div className="composer-body" style={{ display: state === 'min' ? 'none' : undefined }}>
         {fromChoices.length > 1 && (
-          <div className="rcpt from-row"><span className="rcpt-label">From</span>
+          <div className="rcpt from-row"><span className="rcpt-label">{t("From")}</span>
             <select value={fromAddress} onChange={(e) => { setFromAddress(e.target.value); markDirty(); }}>
               {fromChoices.map((i) => <option key={i.address} value={i.address}>{i.group ? `${i.name} <${i.address}>` : i.other ? `${i.address} (other account)` : i.address}</option>)}
             </select></div>
         )}
-        <RecipientInput label="To" value={to} onChange={setTo} autoFocus={!to.length}
-          right={!showCc && <button type="button" className="link small" onClick={() => setShowCc(true)}>Cc Bcc</button>} />
-        {showCc && <RecipientInput label="Cc" value={cc} onChange={setCc} />}
-        {showCc && <RecipientInput label="Bcc" value={bcc} onChange={setBcc} />}
-        <input className="subject-input" placeholder="Subject" value={subject} onChange={(e) => setSubject(e.target.value)} aria-label="Subject" />
+        <RecipientInput label={t("To")} value={to} onChange={setTo} autoFocus={!to.length}
+          right={!showCc && <button type="button" className="link small" onClick={() => setShowCc(true)}>{t("Cc Bcc")}</button>} />
+        {showCc && <RecipientInput label={t("Cc")} value={cc} onChange={setCc} />}
+        {showCc && <RecipientInput label={t("Bcc")} value={bcc} onChange={setBcc} />}
+        <input className="subject-input" placeholder={t("Subject")} value={subject} onChange={(e) => setSubject(e.target.value)} aria-label={t("Subject")} />
         <div className="editor-wrap">
           {!ready && <div className="list-msg"><div className="spinner" /></div>}
-          <div ref={editor} className="editor" contentEditable suppressContentEditableWarning onInput={markDirty} aria-label="Message body" role="textbox" aria-multiline="true"
+          <div ref={editor} className="editor" contentEditable suppressContentEditableWarning onInput={markDirty} aria-label={t("Message body")} role="textbox" aria-multiline="true"
             onPaste={(e) => {
               const imgs = [...e.clipboardData.files].filter((f) => f.type.startsWith('image/'));
               if (imgs.length) { e.preventDefault(); addFiles(imgs); return; }
               onSafePaste(e, markDirty);
             }} />
-          {dragging && <div className="drop-zone">Drop files to attach</div>}
+          {dragging && <div className="drop-zone">{t("Drop files to attach")}</div>}
         </div>
         {enforced && (
-          <div className="enforced-sig" title="Your organization adds this signature to every email">
-            <small className="muted">Added automatically by {enforced.company || 'your organization'}</small>
+          <div className="enforced-sig" title={t("Your organization adds this signature to every email")}>
+            <small className="muted">{t("Added automatically by")}{' '}{enforced.company || 'your organization'}</small>
             <div dangerouslySetInnerHTML={{ __html: safeHtml(enforced.html) }} />
           </div>
         )}
@@ -218,70 +219,70 @@ function Composer({ c, me, prefs, sigData, identities, onClose, onSend, focusInd
           <div className="c-files">
             {files.map((f, i) => (
               <span key={i} className="c-file"><Icon name="clip" size={14} /> {f.name} <small>({fmtSize(f.size)})</small>
-                <button type="button" onClick={() => setFiles(files.filter((_, j) => j !== i))} aria-label="Remove attachment">×</button></span>
+                <button type="button" onClick={() => setFiles(files.filter((_, j) => j !== i))} aria-label={t("Remove attachment")}>×</button></span>
             ))}
           </div>
         )}
-        {init.forwardUid && <div className="muted small c-note">Original attachments will be included.</div>}
+        {init.forwardUid && <div className="muted small c-note">{t("Original attachments will be included.")}</div>}
         <div className="composer-foot">
           <div className="split-send dd">
-            <button className="btn primary" onClick={() => send()} title="Send (Ctrl+Enter)"><Icon name="send" size={16} /> Send</button>
-            <button className="btn primary caret" title="Schedule send" onClick={() => setSendMenu((x) => !x)}><Icon name="down" size={14} /></button>
+            <button className="btn primary" onClick={() => send()} title={t("Send (Ctrl+Enter)")}><Icon name="send" size={16} />{' '}{t("Send")}</button>
+            <button className="btn primary caret" title={t("Schedule send")} onClick={() => setSendMenu((x) => !x)}><Icon name="down" size={14} /></button>
             {sendMenu && (
               <div className="menu up" onMouseLeave={() => { setSendMenu(false); setPickTime(false); }}>
-                <div className="menu-head"><b>Schedule send</b></div>
+                <div className="menu-head"><b>{t("Schedule send")}</b></div>
                 {presets('send').map(([l, d]) => (
                   <button key={l} onClick={() => { setSendMenu(false); send(d.getTime()); }}>{l}<small className="muted right">{fmtWhen(d)}</small></button>
                 ))}
-                {!pickTime ? <button onClick={() => setPickTime(true)}><Icon name="draft" /> Pick date &amp; time</button> : (
+                {!pickTime ? <button onClick={() => setPickTime(true)}><Icon name="draft" />{' '}{t("Pick date & time")}</button> : (
                   <div className="pick-time">
                     <input type="datetime-local" value={customTime} min={localInputValue(new Date())} onChange={(e) => setCustomTime(e.target.value)} />
-                    <button className="btn primary sm" onClick={() => { const t = new Date(customTime).getTime(); if (t > Date.now() + 60000) { setSendMenu(false); send(t); } else toast('Pick a time in the future', { error: true }); }}>Schedule</button>
+                    <button className="btn primary sm" onClick={() => { const t = new Date(customTime).getTime(); if (t > Date.now() + 60000) { setSendMenu(false); send(t); } else toast(t("Pick a time in the future"), { error: true }); }}>{t("Schedule")}</button>
                   </div>
                 )}
               </div>
             )}
           </div>
           <div className="fmt">
-            <button type="button" className="icon-btn" title="Attach files" onClick={() => fileInput.current.click()}><Icon name="clip" size={16} /></button>
-            <button type="button" className="icon-btn" title="Bold" onMouseDown={(e) => { e.preventDefault(); exec('bold'); }}><Icon name="bold" size={16} /></button>
-            <button type="button" className="icon-btn" title="Italic" onMouseDown={(e) => { e.preventDefault(); exec('italic'); }}><Icon name="italic" size={16} /></button>
-            <button type="button" className="icon-btn" title="Underline" onMouseDown={(e) => { e.preventDefault(); exec('underline'); }}><Icon name="underline" size={16} /></button>
-            <button type="button" className="icon-btn" title="Bulleted list" onMouseDown={(e) => { e.preventDefault(); exec('insertUnorderedList'); }}><Icon name="list" size={16} /></button>
-            <button type="button" className="icon-btn" title="Insert link" onMouseDown={(e) => { e.preventDefault(); addLink(); }}><Icon name="link" size={16} /></button>
-            <button type="button" className={`icon-btn ${important ? 'on-red' : ''}`} title="High importance" onClick={() => setImportant((x) => !x)}>!</button>
+            <button type="button" className="icon-btn" title={t("Attach files")} onClick={() => fileInput.current.click()}><Icon name="clip" size={16} /></button>
+            <button type="button" className="icon-btn" title={t("Bold")} onMouseDown={(e) => { e.preventDefault(); exec('bold'); }}><Icon name="bold" size={16} /></button>
+            <button type="button" className="icon-btn" title={t("Italic")} onMouseDown={(e) => { e.preventDefault(); exec('italic'); }}><Icon name="italic" size={16} /></button>
+            <button type="button" className="icon-btn" title={t("Underline")} onMouseDown={(e) => { e.preventDefault(); exec('underline'); }}><Icon name="underline" size={16} /></button>
+            <button type="button" className="icon-btn" title={t("Bulleted list")} onMouseDown={(e) => { e.preventDefault(); exec('insertUnorderedList'); }}><Icon name="list" size={16} /></button>
+            <button type="button" className="icon-btn" title={t("Insert link")} onMouseDown={(e) => { e.preventDefault(); addLink(); }}><Icon name="link" size={16} /></button>
+            <button type="button" className={`icon-btn ${important ? 'on-red' : ''}`} title={t("High importance")} onClick={() => setImportant((x) => !x)}>!</button>
             <div className="dd">
-              <button type="button" className="icon-btn" title="Insert a template" onClick={openTemplates}>📄</button>
+              <button type="button" className="icon-btn" title={t("Insert a template")} onClick={openTemplates}>📄</button>
               {tplMenu && (
                 <div className="menu up" onMouseLeave={() => setTplMenu(false)}>
-                  <div className="menu-head"><b>Templates</b></div>
-                  {!templates && <div className="menu-note">Loading…</div>}
-                  {templates?.company?.length > 0 && <div className="menu-note">Company</div>}
+                  <div className="menu-head"><b>{t("Templates")}</b></div>
+                  {!templates && <div className="menu-note">{t("Loading…")}</div>}
+                  {templates?.company?.length > 0 && <div className="menu-note">{t("Company")}</div>}
                   {templates?.company?.map((t) => <button key={`c${t.id}`} onClick={() => useTemplate(t)}><span className="ic-space" /> {t.name}</button>)}
-                  {templates?.company?.length > 0 && templates?.personal?.length > 0 && <div className="menu-note">Mine</div>}
+                  {templates?.company?.length > 0 && templates?.personal?.length > 0 && <div className="menu-note">{t("Mine")}</div>}
                   {templates?.personal?.map((t) => <button key={t.id} onClick={() => useTemplate(t)}><span className="ic-space" /> {t.name}</button>)}
-                  {templates && !templates.personal.length && !templates.company.length && <div className="menu-note">Create templates in Settings → Templates.</div>}
+                  {templates && !templates.personal.length && !templates.company.length && <div className="menu-note">{t("Create templates in Settings → Templates.")}</div>}
                 </div>
               )}
             </div>
             <div className="dd">
-              <button type="button" className="icon-btn" title="Signature" onClick={() => setSigMenu((x) => !x)}><Icon name="pen" size={16} /></button>
+              <button type="button" className="icon-btn" title={t("Signature")} onClick={() => setSigMenu((x) => !x)}><Icon name="pen" size={16} /></button>
               {sigMenu && (
                 <div className="menu up" onMouseLeave={() => setSigMenu(false)}>
-                  <div className="menu-head"><b>Signature</b></div>
-                  <button onClick={() => chooseSignature(null)}>{!sigChoice ? <Icon name="check" /> : <span className="ic-space" />} No signature</button>
+                  <div className="menu-head"><b>{t("Signature")}</b></div>
+                  <button onClick={() => chooseSignature(null)}>{!sigChoice ? <Icon name="check" /> : <span className="ic-space" />}{' '}{t("No signature")}</button>
                   {sigData?.org?.mode === 'default' && <button onClick={() => chooseSignature('company')}>{sigChoice === 'company' ? <Icon name="check" /> : <span className="ic-space" />} {sigData.org.company || 'Company'} signature</button>}
                   {(sigData?.personal?.signatures || []).map((x) => (
                     <button key={x.id} onClick={() => chooseSignature(x.id)}>{sigChoice === x.id ? <Icon name="check" /> : <span className="ic-space" />} {x.name}</button>
                   ))}
-                  {!(sigData?.personal?.signatures || []).length && <div className="menu-note">Create signatures in Settings → Signatures.</div>}
+                  {!(sigData?.personal?.signatures || []).length && <div className="menu-note">{t("Create signatures in Settings → Signatures.")}</div>}
                 </div>
               )}
             </div>
             <input ref={fileInput} type="file" multiple hidden onChange={(e) => { addFiles(e.target.files); e.target.value = ''; }} />
           </div>
           <span className="muted small saving">{saving}</span>
-          <button className="icon-btn" title="Discard draft" onClick={discard}><Icon name="trash" size={16} /></button>
+          <button className="icon-btn" title={t("Discard draft")} onClick={discard}><Icon name="trash" size={16} /></button>
         </div>
       </div>
     </div>
@@ -328,11 +329,11 @@ export default function ComposeManager({ composers, setComposers, me, prefs, sig
       const form = toForm(payload);
       try {
         await api.form('/api/send', form, payload.asMailbox);
-        toast('Message sent');
+        toast(t("Message sent"));
         onSent();
       } catch (e) {
         if (isOffline(e) && offlineAllowed()) { // no connection: keep it on this device and send it when we're back online
-          try { await queue(form, payload.asMailbox, payload.subject || '(no subject)'); toast('You’re offline. Saved to your Outbox; it will send when you reconnect.'); return; } catch { /* fall through */ }
+          try { await queue(form, payload.asMailbox, payload.subject || '(no subject)'); toast(t("You’re offline. Saved to your Outbox; it will send when you reconnect.")); return; } catch { /* fall through */ }
         }
         toast(`Couldn't send: ${e.message}`, { error: true, duration: 8000 });
         setComposers((cs) => [...cs, { id: Date.now(), initial: { ...c.initial, ...payload, html: payload.html, draftUid: payload.draftUid } }]);
@@ -345,7 +346,7 @@ export default function ComposeManager({ composers, setComposers, me, prefs, sig
     const delay = Number(prefs.undoSeconds) || 0;
     if (!delay) return doSend();
     const timer = setTimeout(doSend, delay * 1000);
-    toast('Sending…', {
+    toast(t("Sending…"), {
       duration: delay * 1000,
       action: 'Undo',
       onAction: () => {

@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { api } from '../../api.js';
 import { Icon } from '../../icons.jsx';
 import { useToast } from '../Toast.jsx';
+import { t } from '../../i18n.js';
 
 const blankRow = (type) => ({ value: '', type });
 export default function ContactEditor({ contact, onClose, onSaved }) {
@@ -34,7 +35,7 @@ export default function ContactEditor({ contact, onClose, onSaved }) {
           {f[k].length > 1 && <button type="button" className="icon-btn" onClick={() => setF({ ...f, [k]: f[k].filter((_, j) => j !== i) })}><Icon name="close" size={14} /></button>}
         </div>
       ))}
-      <button type="button" className="link left" onClick={() => setF({ ...f, [k]: [...f[k], blankRow(types[0])] })}>+ Add {k === 'emails' ? 'email' : 'phone'}</button>
+      <button type="button" className="link left" onClick={() => setF({ ...f, [k]: [...f[k], blankRow(types[0])] })}>{t("+ Add")}{' '}{k === 'emails' ? 'email' : 'phone'}</button>
     </>
   );
   return (
@@ -43,30 +44,30 @@ export default function ContactEditor({ contact, onClose, onSaved }) {
         <div className="modal-head"><h2>{isNew ? 'New contact' : 'Edit contact'}</h2><button type="button" className="icon-btn" onClick={onClose}><Icon name="close" /></button></div>
         <div className="form">
           <div className="two-col">
-            <label>First name<input value={f.first} onChange={set('first')} autoFocus /></label>
-            <label>Last name<input value={f.last} onChange={set('last')} /></label>
-            <label>Company<input value={f.company} onChange={set('company')} /></label>
-            <label>Job title<input value={f.title} onChange={set('title')} /></label>
+            <label>{t("First name")}<input value={f.first} onChange={set('first')} autoFocus /></label>
+            <label>{t("Last name")}<input value={f.last} onChange={set('last')} /></label>
+            <label>{t("Company")}<input value={f.company} onChange={set('company')} /></label>
+            <label>{t("Job title")}<input value={f.title} onChange={set('title')} /></label>
           </div>
-          <b className="small">Email</b>
+          <b className="small">{t("Email")}</b>
           <Rows k="emails" types={['work', 'home', 'other']} placeholder="name@example.com" inputType="email" />
-          <b className="small">Phone</b>
+          <b className="small">{t("Phone")}</b>
           <Rows k="phones" types={['mobile', 'work', 'home', 'other']} placeholder="+1 555 010 2030" inputType="tel" />
-          <details><summary className="small">Address, birthday and notes</summary>
+          <details><summary className="small">{t("Address, birthday and notes")}</summary>
             <div className="form" style={{ marginTop: 8 }}>
-              <input placeholder="Street" value={f.address.street} onChange={(e) => setF({ ...f, address: { ...f.address, street: e.target.value } })} />
+              <input placeholder={t("Street")} value={f.address.street} onChange={(e) => setF({ ...f, address: { ...f.address, street: e.target.value } })} />
               <div className="two-col">
-                <input placeholder="City" value={f.address.city} onChange={(e) => setF({ ...f, address: { ...f.address, city: e.target.value } })} />
-                <input placeholder="State / region" value={f.address.region} onChange={(e) => setF({ ...f, address: { ...f.address, region: e.target.value } })} />
-                <input placeholder="Postal code" value={f.address.postal} onChange={(e) => setF({ ...f, address: { ...f.address, postal: e.target.value } })} />
-                <input placeholder="Country" value={f.address.country} onChange={(e) => setF({ ...f, address: { ...f.address, country: e.target.value } })} />
+                <input placeholder={t("City")} value={f.address.city} onChange={(e) => setF({ ...f, address: { ...f.address, city: e.target.value } })} />
+                <input placeholder={t("State / region")} value={f.address.region} onChange={(e) => setF({ ...f, address: { ...f.address, region: e.target.value } })} />
+                <input placeholder={t("Postal code")} value={f.address.postal} onChange={(e) => setF({ ...f, address: { ...f.address, postal: e.target.value } })} />
+                <input placeholder={t("Country")} value={f.address.country} onChange={(e) => setF({ ...f, address: { ...f.address, country: e.target.value } })} />
               </div>
-              <label>Birthday<input type="date" value={f.birthday} onChange={set('birthday')} /></label>
-              <label>Notes<textarea rows={3} value={f.note} onChange={set('note')} /></label>
+              <label>{t("Birthday")}<input type="date" value={f.birthday} onChange={set('birthday')} /></label>
+              <label>{t("Notes")}<textarea rows={3} value={f.note} onChange={set('note')} /></label>
             </div>
           </details>
         </div>
-        <div className="step-actions"><button type="button" className="btn" onClick={onClose}>Cancel</button><button className="btn primary" disabled={busy}>{busy ? 'Saving…' : 'Save'}</button></div>
+        <div className="step-actions"><button type="button" className="btn" onClick={onClose}>{t("Cancel")}</button><button className="btn primary" disabled={busy}>{busy ? 'Saving…' : 'Save'}</button></div>
       </form>
     </div>
   );

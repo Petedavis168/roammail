@@ -5,6 +5,7 @@ import { Icon } from '../../icons.jsx';
 import RichEditor from '../RichEditor.jsx';
 import { useToast } from '../Toast.jsx';
 import { escapeHtml } from '../../util.js';
+import { t } from '../../i18n.js';
 
 export default function Signatures({ sigData, reloadSigs, prefs, setPrefs }) {
   const toast = useToast();
@@ -27,7 +28,7 @@ export default function Signatures({ sigData, reloadSigs, prefs, setPrefs }) {
     try {
       const saved = await api.put('/api/signature/personal', next);
       setState(saved); reloadSigs();
-      if (!quiet) toast('Signatures saved');
+      if (!quiet) toast(t("Signatures saved"));
     } catch (e) { toast(e.message, { error: true }); }
   }
   if (!state) return <div className="spinner" />;
@@ -44,8 +45,8 @@ export default function Signatures({ sigData, reloadSigs, prefs, setPrefs }) {
   const copyRich = async (html) => {
     try {
       await navigator.clipboard.write([new ClipboardItem({ 'text/html': new Blob([html], { type: 'text/html' }), 'text/plain': new Blob([html.replace(/<[^>]+>/g, '')], { type: 'text/plain' }) })]);
-      toast('Copied. Paste it into Outlook or your phone\'s signature settings.');
-    } catch { toast('Your browser blocked copying. Select the preview and copy it instead.', { error: true }); }
+      toast(t("Copied. Paste it into Outlook or your phone's signature settings."));
+    } catch { toast(t("Your browser blocked copying. Select the preview and copy it instead."), { error: true }); }
   };
 
   return (
@@ -57,17 +58,17 @@ export default function Signatures({ sigData, reloadSigs, prefs, setPrefs }) {
             ? `Your organization adds this to every email you send${org.onReplies ? ', including replies' : ' (not on replies)'}. It updates automatically when your details change.`
             : 'Your organization provides this signature. You can use it, or choose your own below.'}</p>
           <div className="sig-preview" dangerouslySetInnerHTML={{ __html: safeHtml(org.html) }} />
-          <button className="btn sm" onClick={() => copyRich(org.html)}><Icon name="copy" size={14} /> Copy for Outlook / phone</button>
+          <button className="btn sm" onClick={() => copyRich(org.html)}><Icon name="copy" size={14} />{' '}{t("Copy for Outlook / phone")}</button>
         </div>
       )}
       {org?.mode !== 'enforced' && <>
-        <h3>Your signatures</h3>
+        <h3>{t("Your signatures")}</h3>
         {state.signatures.map((s) => (
           editing === s.id ? null : (
             <div key={s.id} className="sig-item">
               <div className="sig-item-head"><b>{s.name}</b><div className="spacer" />
-                <button className="btn sm" onClick={() => copyRich(s.html)} title="Copy for Outlook / phone"><Icon name="copy" size={14} /></button>
-                <button className="btn sm" onClick={() => startEdit(s)}>Edit</button>
+                <button className="btn sm" onClick={() => copyRich(s.html)} title={t("Copy for Outlook / phone")}><Icon name="copy" size={14} /></button>
+                <button className="btn sm" onClick={() => startEdit(s)}>{t("Edit")}</button>
                 <button className="icon-btn" onClick={() => confirm(`Delete "${s.name}"?`) && save({ ...state, signatures: state.signatures.filter((x) => x.id !== s.id),
                   defaultNew: state.defaultNew === s.id ? null : state.defaultNew, defaultReply: state.defaultReply === s.id ? null : state.defaultReply })}><Icon name="trash" size={16} /></button></div>
               <div className="sig-preview" dangerouslySetInnerHTML={{ __html: safeHtml(s.html) }} />
@@ -76,20 +77,18 @@ export default function Signatures({ sigData, reloadSigs, prefs, setPrefs }) {
         ))}
         {editing ? (
           <div className="sig-edit card">
-            <label className="row-field">Name<input value={draft.name} onChange={(e) => setDraft({ ...draft, name: e.target.value })} /></label>
+            <label className="row-field">{t("Name")}<input value={draft.name} onChange={(e) => setDraft({ ...draft, name: e.target.value })} /></label>
             <RichEditor value={draft.html} onChange={(html) => setDraft((d) => ({ ...d, html }))} />
-            <div className="step-actions"><button className="btn" onClick={() => setEditing(null)}>Cancel</button><button className="btn primary" onClick={commit}>Save signature</button></div>
+            <div className="step-actions"><button className="btn" onClick={() => setEditing(null)}>{t("Cancel")}</button><button className="btn primary" onClick={commit}>{t("Save signature")}</button></div>
           </div>
-        ) : <button className="btn" onClick={() => startEdit(null)}><Icon name="plus" size={16} /> New signature</button>}
+        ) : <button className="btn" onClick={() => startEdit(null)}><Icon name="plus" size={16} />{' '}{t("New signature")}</button>}
 
-        <h3>Defaults</h3>
-        <label className="row-field">For new messages
-          <select value={state.defaultNew ?? ''} onChange={(e) => save({ ...state, defaultNew: e.target.value || null })}>
+        <h3>{t("Defaults")}</h3>
+        <label className="row-field">{t("For new messages")}{' '}<select value={state.defaultNew ?? ''} onChange={(e) => save({ ...state, defaultNew: e.target.value || null })}>
             {choices.map(([v, l]) => <option key={String(v)} value={v ?? ''}>{l}</option>)}</select></label>
-        <label className="row-field">For replies &amp; forwards
-          <select value={state.defaultReply ?? ''} onChange={(e) => save({ ...state, defaultReply: e.target.value || null })}>
+        <label className="row-field">{t("For replies & forwards")}{' '}<select value={state.defaultReply ?? ''} onChange={(e) => save({ ...state, defaultReply: e.target.value || null })}>
             {choices.map(([v, l]) => <option key={String(v)} value={v ?? ''}>{l}</option>)}</select></label>
-        <p className="muted small">You can switch signatures while writing with the <Icon name="pen" size={12} /> button.</p>
+        <p className="muted small">{t("You can switch signatures while writing with the")}{' '}<Icon name="pen" size={12} /> button.</p>
       </>}
     </div>
   );

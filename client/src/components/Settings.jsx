@@ -8,15 +8,15 @@ function PushToggle() {
   const [state, setState] = useState('…');
   const [err, setErr] = useState('');
   useEffect(() => { pushState().then(setState); }, []);
-  if (state === 'unsupported') return <p className="muted small">This browser can't show notifications when Roammail is closed. On iPhone, add Roammail to your Home Screen first (Share → Add to Home Screen).</p>;
+  if (state === 'unsupported') return <p className="muted small">{t("This browser can't show notifications when Roammail is closed. On iPhone, add Roammail to your Home Screen first (Share → Add to Home Screen).")}</p>;
   return (
     <div className="small" style={{ margin: '6px 0' }}>
       <label className="check"><input type="checkbox" checked={state === 'on'} disabled={state === 'blocked'} onChange={async (e) => {
         setErr('');
         try { if (e.target.checked) await enablePush(); else await disablePush(); setState(await pushState()); } catch (x) { setErr(x.message); setState(await pushState()); }
-      }} /> Notify me on this device even when Roammail is closed</label>
+      }} />{' '}{t("Notify me on this device even when Roammail is closed")}</label>
       {state === 'on' && <PreviewToggle />}
-      {state === 'blocked' && <div className="muted">Notifications are blocked for this site in your browser settings.</div>}
+      {state === 'blocked' && <div className="muted">{t("Notifications are blocked for this site in your browser settings.")}</div>}
       {err && <div className="bad">{err}</div>}
     </div>
   );
@@ -25,7 +25,7 @@ function PreviewToggle() {
   const [on, setOn] = useState(null);
   useEffect(() => { api.get('/api/push/preview').then((r) => setOn(r.on)).catch(() => {}); }, []);
   if (on === null) return null;
-  return <label className="check" style={{ marginLeft: 22 }}><input type="checkbox" checked={on} onChange={async (e) => { const v = e.target.checked; setOn(v); await api.put('/api/push/preview', { on: v }).catch(() => setOn(!v)); }} /> Show sender and subject (turn off to show only "New mail")</label>;
+  return <label className="check" style={{ marginLeft: 22 }}><input type="checkbox" checked={on} onChange={async (e) => { const v = e.target.checked; setOn(v); await api.put('/api/push/preview', { on: v }).catch(() => setOn(!v)); }} />{' '}{t("Show sender and subject (turn off to show only \"New mail\")")}</label>;
 }
 import { aiStatus, setAiEnabled, aiConsentText } from '../ai.js';
 function AiSetting() {
@@ -34,10 +34,10 @@ function AiSetting() {
   if (!st?.available) return null;
   return (
     <>
-      <h3>AI help</h3>
-      {st.blockedByOrg ? <p className="muted small">Your company has turned off AI help.</p> : (
+      <h3>{t("AI help")}</h3>
+      {st.blockedByOrg ? <p className="muted small">{t("Your company has turned off AI help.")}</p> : (
         <>
-          <label className="check"><input type="checkbox" checked={!!st.enabled} onChange={async (e) => setSt(await setAiEnabled(e.target.checked))} /> Summarise conversations, suggest replies and find mail that needs a reply</label>
+          <label className="check"><input type="checkbox" checked={!!st.enabled} onChange={async (e) => setSt(await setAiEnabled(e.target.checked))} />{' '}{t("Summarise conversations, suggest replies and find mail that needs a reply")}</label>
           <p className="muted small">{aiConsentText}{st.limit != null ? ` Free accounts get ${st.limit} AI requests a month (${Math.max(0, st.limit - st.used)} left this month).` : ''}</p>
         </>
       )}
@@ -52,48 +52,46 @@ import SpamSettings from './settings/Spam.jsx';
 import Privacy from './settings/Privacy.jsx';
 import { api } from '../api.js';
 import { useToast } from './Toast.jsx';
+import { t, lang, setLang, LANGS } from '../i18n.js';
 
 function General({ prefs, setPrefs, me }) {
   const set = (k) => (e) => setPrefs({ [k]: e.target.type === 'checkbox' ? e.target.checked : e.target.value });
   return (
     <div className="settings-section">
-      <h3>Layout</h3>
-      <label className="row-field">Reading pane
-        <select value={prefs.readingPane} onChange={set('readingPane')}>
-          <option value="right">Show on the right</option><option value="bottom">Show on the bottom</option><option value="off">Hidden (open messages full width)</option>
+      <h3>{t("Layout")}</h3>
+      <label className="row-field">{t("Reading pane")}{' '}<select value={prefs.readingPane} onChange={set('readingPane')}>
+          <option value="right">{t("Show on the right")}</option><option value="bottom">{t("Show on the bottom")}</option><option value="off">{t("Hidden (open messages full width)")}</option>
         </select></label>
-      <label className="row-field">Density
-        <select value={prefs.density} onChange={set('density')}><option value="comfortable">Comfortable</option><option value="compact">Compact</option></select></label>
-      <label className="check"><input type="checkbox" checked={prefs.conversation} onChange={set('conversation')} /> Conversation view (group replies together)</label>
-      <h3>Writing</h3>
-      <label className="row-field">Your name (shown to recipients)<input value={prefs.displayName} placeholder={me.name || me.email} onChange={set('displayName')} /></label>
-      <label className="row-field">Undo send
-        <select value={prefs.undoSeconds} onChange={set('undoSeconds')}>
+      <label className="row-field">{t("Language")}{' '}<select value={lang} onChange={(e) => setLang(e.target.value)}>{LANGS.map(([v, n]) => <option key={v} value={v}>{n}</option>)}</select></label>
+      <label className="row-field">{t("Density")}{' '}<select value={prefs.density} onChange={set('density')}><option value="comfortable">{t("Comfortable")}</option><option value="compact">{t("Compact")}</option></select></label>
+      <label className="check"><input type="checkbox" checked={prefs.conversation} onChange={set('conversation')} />{' '}{t("Conversation view (group replies together)")}</label>
+      <h3>{t("Writing")}</h3>
+      <label className="row-field">{t("Your name (shown to recipients)")}<input value={prefs.displayName} placeholder={me.name || me.email} onChange={set('displayName')} /></label>
+      <label className="row-field">{t("Undo send")}{' '}<select value={prefs.undoSeconds} onChange={set('undoSeconds')}>
           {[0, 5, 10, 20, 30].map((s) => <option key={s} value={s}>{s ? `${s} seconds` : 'Off'}</option>)}
         </select></label>
-      <h3>Privacy</h3>
-      <label className="row-field">External images
-        <select value={prefs.showImages} onChange={set('showImages')}><option value="ask">Ask before showing</option><option value="always">Always show</option></select></label>
+      <h3>{t("Privacy")}</h3>
+      <label className="row-field">{t("External images")}{' '}<select value={prefs.showImages} onChange={set('showImages')}><option value="ask">{t("Ask before showing")}</option><option value="always">{t("Always show")}</option></select></label>
       {prefs.trustedSenders.length > 0 && (
         <div className="trusted">
-          <small className="muted">Always show images from:</small>
+          <small className="muted">{t("Always show images from:")}</small>
           {prefs.trustedSenders.map((s) => (
             <span key={s} className="rchip">{s}<button onClick={() => setPrefs((p) => ({ trustedSenders: p.trustedSenders.filter((x) => x !== s) }))}>×</button></span>
           ))}
         </div>
       )}
-      <label className="check"><input type="checkbox" checked={prefs.notifications} onChange={set('notifications')} /> Desktop notifications for new mail</label>
+      <label className="check"><input type="checkbox" checked={prefs.notifications} onChange={set('notifications')} />{' '}{t("Desktop notifications for new mail")}</label>
       <PushToggle />
       <AiSetting />
-      <h3>Categories</h3>
+      <h3>{t("Categories")}</h3>
       {prefs.categories.map((c, i) => (
         <div key={i} className="cat-edit">
           <input type="color" aria-label={`Colour for ${c.name || 'category'}`} value={c.color} onChange={(e) => setPrefs((p) => ({ categories: p.categories.map((x, j) => (j === i ? { ...x, color: e.target.value } : x)) }))} />
-          <input aria-label="Category name" value={c.name} onChange={(e) => setPrefs((p) => ({ categories: p.categories.map((x, j) => (j === i ? { ...x, name: e.target.value } : x)) }))} />
-          <button className="icon-btn" aria-label={`Delete ${c.name || 'category'}`} title="Delete category" onClick={() => setPrefs((p) => ({ categories: p.categories.filter((_, j) => j !== i) }))}><Icon name="trash" size={16} /></button>
+          <input aria-label={t("Category name")} value={c.name} onChange={(e) => setPrefs((p) => ({ categories: p.categories.map((x, j) => (j === i ? { ...x, name: e.target.value } : x)) }))} />
+          <button className="icon-btn" aria-label={`Delete ${c.name || 'category'}`} title={t("Delete category")} onClick={() => setPrefs((p) => ({ categories: p.categories.filter((_, j) => j !== i) }))}><Icon name="trash" size={16} /></button>
         </div>
       ))}
-      <div><button className="btn" onClick={() => setPrefs((p) => ({ categories: [...p.categories, { name: 'New', color: '#038387' }] }))}><Icon name="plus" size={16} /> Add category</button></div>
+      <div><button className="btn" onClick={() => setPrefs((p) => ({ categories: [...p.categories, { name: 'New', color: '#038387' }] }))}><Icon name="plus" size={16} />{' '}{t("Add category")}</button></div>
     </div>
   );
 }
@@ -111,21 +109,21 @@ function PhoneQr({ me }) {
   return (
     <div className="phone-setup card">
       <div className="phone-qr">
-        {link && left > 0 ? <img src={link.qr} alt="Setup QR code" width="200" height="200" /> : (
-          <button className="qr-placeholder" onClick={make}><Icon name="phone" size={32} /><span>Show my setup code</span></button>
+        {link && left > 0 ? <img src={link.qr} alt={t("Setup QR code")} width="200" height="200" /> : (
+          <button className="qr-placeholder" onClick={make}><Icon name="phone" size={32} /><span>{t("Show my setup code")}</span></button>
         )}
       </div>
       <div className="phone-steps">
-        <h3>Set up your phone in seconds</h3>
+        <h3>{t("Set up your phone in seconds")}</h3>
         <ol>
-          <li>Click <b>Show my setup code</b>.</li>
-          <li>Point your phone's camera at the code and tap the link.</li>
-          <li><b>iPhone:</b> tap Install. Mail{' '}(plus calendar &amp; contacts) is set up with nothing to type.<br />
-            <b>Android:</b> follow the one-screen instructions for your app.</li>
+          <li>{t("Click")}{' '}<b>{t("Show my setup code")}</b>.</li>
+          <li>{t("Point your phone's camera at the code and tap the link.")}</li>
+          <li><b>{t("iPhone:")}</b>{' '}{t("tap Install. Mail")}{' '}{t("(plus calendar & contacts) is set up with nothing to type.")}<br />
+            <b>{t("Android:")}</b>{' '}{t("follow the one-screen instructions for your app.")}</li>
         </ol>
-        {link && left > 0 && <p className="muted small">Code works once and expires in {Math.floor(left / 60)}:{String(left % 60).padStart(2, '0')}. It contains a sign-in key, so don't share it.</p>}
-        {link && left <= 0 && <p className="muted small">Code expired. <button className="link" onClick={make}>Make a new one</button></p>}
-        <p className="muted small">Already on your phone? <a href={`/setup?email=${encodeURIComponent(me.email)}`} target="_blank" rel="noreferrer">Open the setup page</a></p>
+        {link && left > 0 && <p className="muted small">{t("Code works once and expires in")}{' '}{Math.floor(left / 60)}:{String(left % 60).padStart(2, '0')}{t(". It contains a sign-in key, so don't share it.")}</p>}
+        {link && left <= 0 && <p className="muted small">{t("Code expired.")}{' '}<button className="link" onClick={make}>{t("Make a new one")}</button></p>}
+        <p className="muted small">{t("Already on your phone?")}{' '}<a href={`/setup?email=${encodeURIComponent(me.email)}`} target="_blank" rel="noreferrer">{t("Open the setup page")}</a></p>
       </div>
     </div>
   );
@@ -139,8 +137,8 @@ function Apps({ me, sigData }) {
   return (
     <div className="settings-section">
       <PhoneQr me={me} />
-      <h3>Server settings</h3>
-      <p className="muted small">Outlook, Apple Mail, Thunderbird and most phone apps only need your email and password. If an app asks for server settings, use these:</p>
+      <h3>{t("Server settings")}</h3>
+      <p className="muted small">{t("Outlook, Apple Mail, Thunderbird and most phone apps only need your email and password. If an app asks for server settings, use these:")}</p>
       <div className="table">
         <Row l="Email / username" v={me.email} />
         <Row l="Incoming (IMAP)" v={`${c.imapHost} · port ${c.imapPort} · SSL/TLS`} />
@@ -148,16 +146,16 @@ function Apps({ me, sigData }) {
         <Row l="Password" v="Your normal password" />
         {me.clientSettings?.davEnabled !== false && <Row l="Calendar & contacts" v={`https://${c.davHost || c.imapHost}/SOGo/dav/`} />}
       </div>
-      <h3>Install this app</h3>
-      <p className="muted small">On your phone: open this site in Safari or Chrome, tap <b>Share</b> → <b>Add to Home Screen</b>. On a computer: click the install icon in the address bar.</p>
+      <h3>{t("Install this app")}</h3>
+      <p className="muted small">{t("On your phone: open this site in Safari or Chrome, tap")}{' '}<b>{t("Share")}</b> → <b>{t("Add to Home Screen")}</b>{t(". On a computer: click the install icon in the address bar.")}</p>
       {sigData?.inOrg && <>
-        <h3>Your contact details</h3>
-        <p className="muted small">Used in your company signature. Your admin manages your name and job title.</p>
+        <h3>{t("Your contact details")}</h3>
+        <p className="muted small">{t("Used in your company signature. Your admin manages your name and job title.")}</p>
         <div className="two-col">
-          <label>Phone<input value={prof.phone} onChange={(e) => setProf({ ...prof, phone: e.target.value })} /></label>
-          <label>Mobile<input value={prof.mobile} onChange={(e) => setProf({ ...prof, mobile: e.target.value })} /></label>
+          <label>{t("Phone")}<input value={prof.phone} onChange={(e) => setProf({ ...prof, phone: e.target.value })} /></label>
+          <label>{t("Mobile")}<input value={prof.mobile} onChange={(e) => setProf({ ...prof, mobile: e.target.value })} /></label>
         </div>
-        <div><button className="btn" onClick={() => api.patch('/api/profile', prof).then(() => toast('Saved')).catch((e) => toast(e.message, { error: true }))}>Save</button></div>
+        <div><button className="btn" onClick={() => api.patch('/api/profile', prof).then(() => toast(t("Saved"))).catch((e) => toast(e.message, { error: true }))}>{t("Save")}</button></div>
       </>}
     </div>
   );
@@ -176,13 +174,13 @@ export default function SettingsPanel({ prefs, setPrefs, me, folders, sigData, r
   const tabs = TABS.filter(([k]) => k !== 'premium' || showPremium);
   return (
     <div className="modal-wrap" onClick={onClose}>
-      <div className="settings-modal" onClick={(e) => e.stopPropagation()} role="dialog" aria-label="Settings">
+      <div className="settings-modal" onClick={(e) => e.stopPropagation()} role="dialog" aria-label={t("Settings")}>
         <nav className="settings-nav">
-          <h2>Settings</h2>
+          <h2>{t("Settings")}</h2>
           {tabs.map(([k, l, i]) => <button key={k} className={tab === k ? 'on' : ''} onClick={() => setTab(k)}><Icon name={i} size={16} /> {l}</button>)}
         </nav>
         <div className="settings-body">
-          <div className="drawer-head"><h2>{TABS.find((t) => t[0] === tab)[1]}</h2><button className="icon-btn" aria-label="Close settings" title="Close" onClick={onClose}><Icon name="close" /></button></div>
+          <div className="drawer-head"><h2>{TABS.find((t) => t[0] === tab)[1]}</h2><button className="icon-btn" aria-label={t("Close settings")} title={t("Close")} onClick={onClose}><Icon name="close" /></button></div>
           <div className="drawer-body">
             {tab === 'general' && <General prefs={prefs} setPrefs={setPrefs} me={me} />}
             {tab === 'signatures' && <Signatures sigData={sigData} reloadSigs={reloadSigs} prefs={prefs} setPrefs={setPrefs} />}

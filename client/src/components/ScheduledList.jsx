@@ -3,6 +3,7 @@ import { api } from '../api.js';
 import { Icon } from '../icons.jsx';
 import { fmtWhen } from '../snooze.js';
 import { useToast } from './Toast.jsx';
+import { t } from '../i18n.js';
 
 export default function ScheduledList() {
   const toast = useToast();
@@ -16,21 +17,21 @@ export default function ScheduledList() {
   };
   return (
     <section className="list wide-list">
-      <div className="list-head"><h2>Scheduled</h2></div>
+      <div className="list-head"><h2>{t("Scheduled")}</h2></div>
       <div className="rows">
         {!jobs && <div className="list-msg"><div className="spinner" /></div>}
-        {jobs?.length === 0 && <div className="empty"><Icon name="clock" size={48} /><p>Nothing scheduled.</p><small>Use the arrow next to <b>Send</b> to send later.</small></div>}
+        {jobs?.length === 0 && <div className="empty"><Icon name="clock" size={48} /><p>{t("Nothing scheduled.")}</p><small>{t("Use the arrow next to")}{' '}<b>{t("Send")}</b>{' '}{t("to send later.")}</small></div>}
         {jobs?.map((j) => (
           <div key={j.id} className="row">
             <div className="row-main">
-              <div className="row-top"><span className="from">To: {j.summary.to}</span>
+              <div className="row-top"><span className="from">{t("To:")}{' '}{j.summary.to}</span>
                 <span className={`date ${j.status === 'failed' ? 'bad' : 'snoozed'}`}><Icon name="clock" size={12} /> {fmtWhen(j.run_at)}</span></div>
               <div className="row-sub"><span className="subject">{j.summary.subject || '(no subject)'}</span></div>
-              {j.status === 'failed' && <div className="snippet bad">Not sent: {j.error}</div>}
+              {j.status === 'failed' && <div className="snippet bad">{t("Not sent:")}{' '}{j.error}</div>}
             </div>
             <div className="sched-actions">
-              <button className="btn sm" onClick={() => cancel(j, true)}>Edit</button>
-              <button className="btn sm" onClick={() => cancel(j, false)}>Cancel</button>
+              <button className="btn sm" onClick={() => cancel(j, true)}>{t("Edit")}</button>
+              <button className="btn sm" onClick={() => cancel(j, false)}>{t("Cancel")}</button>
             </div>
           </div>
         ))}

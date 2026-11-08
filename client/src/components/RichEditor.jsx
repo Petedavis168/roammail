@@ -3,6 +3,7 @@ import { api } from '../api.js';
 import { Icon } from '../icons.jsx';
 import { useToast } from './Toast.jsx';
 import { safeHtml, onSafePaste } from '../safehtml.js';
+import { t } from '../i18n.js';
 
 /** Small WYSIWYG editor used for signatures and templates. Uncontrolled: reads initial `value`, reports changes. */
 export default function RichEditor({ value, onChange, placeholders, minHeight = 120, editorRef }) {
@@ -16,7 +17,7 @@ export default function RichEditor({ value, onChange, placeholders, minHeight = 
   const emit = () => onChange?.(ref.current.innerHTML);
   const onPaste = (e) => onSafePaste(e, emit);
   const exec = (cmd, val) => { ref.current.focus(); document.execCommand(cmd, false, val); emit(); };
-  const link = () => { const u = prompt('Link address (https://…, mailto:…, tel:…)'); if (u) exec('createLink', /^(https?|mailto|tel):/i.test(u) ? u : `https://${u}`); };
+  const link = () => { const u = prompt(t("Link address (https://…, mailto:…, tel:…)")); if (u) exec('createLink', /^(https?|mailto|tel):/i.test(u) ? u : `https://${u}`); };
   const upload = async (f) => {
     if (!f) return;
     const fd = new FormData(); fd.append('image', f);
@@ -33,9 +34,9 @@ export default function RichEditor({ value, onChange, placeholders, minHeight = 
         {btn('Bold', 'bold', () => exec('bold'))}
         {btn('Italic', 'italic', () => exec('italic'))}
         {btn('Underline', 'underline', () => exec('underline'))}
-        <label className="icon-btn color-pick" title="Text color"><span>A</span><input type="color" onChange={(e) => exec('foreColor', e.target.value)} /></label>
-        <select title="Size" onChange={(e) => { exec('fontSize', e.target.value); e.target.value = ''; }} defaultValue="">
-          <option value="" disabled>Size</option><option value="1">Small</option><option value="3">Normal</option><option value="4">Large</option><option value="5">Larger</option>
+        <label className="icon-btn color-pick" title={t("Text color")}><span>A</span><input type="color" onChange={(e) => exec('foreColor', e.target.value)} /></label>
+        <select title={t("Size")} onChange={(e) => { exec('fontSize', e.target.value); e.target.value = ''; }} defaultValue="">
+          <option value="" disabled>{t("Size")}</option><option value="1">{t("Small")}</option><option value="3">{t("Normal")}</option><option value="4">{t("Large")}</option><option value="5">{t("Larger")}</option>
         </select>
         {btn('Link', 'link', link)}
         {btn('Insert image / logo', 'clip', () => file.current.click())}
@@ -44,14 +45,14 @@ export default function RichEditor({ value, onChange, placeholders, minHeight = 
         <input ref={file} type="file" accept="image/png,image/jpeg,image/gif,image/webp" hidden onChange={(e) => { upload(e.target.files[0]); e.target.value = ''; }} />
         {placeholders && (
           <div className="dd">
-            <button type="button" className="btn sm" onMouseDown={(e) => { e.preventDefault(); setShowPh((x) => !x); }}>Insert field <Icon name="down" size={12} /></button>
+            <button type="button" className="btn sm" onMouseDown={(e) => { e.preventDefault(); setShowPh((x) => !x); }}>{t("Insert field")}{' '}<Icon name="down" size={12} /></button>
             {showPh && (
               <div className="menu" onMouseLeave={() => setShowPh(false)}>
                 {placeholders.map(([k, l]) => (
                   <button type="button" key={k} onMouseDown={(e) => { e.preventDefault(); setShowPh(false); exec('insertText', k === 'logo' ? '' : `{{${k}}}`); if (k === 'logo') exec('insertHTML', '{{#logo}}<img src="{{logo}}" alt="" width="140">{{/logo}}'); }}>
                     {l} <small className="muted">{`{{${k}}}`}</small></button>
                 ))}
-                <div className="menu-note">Tip: wrap a line in <code>{'{{#phone}}…{{/phone}}'}</code> to hide it when the person has no phone number.</div>
+                <div className="menu-note">{t("Tip: wrap a line in")}{' '}<code>{'{{#phone}}…{{/phone}}'}</code>{' '}{t("to hide it when the person has no phone number.")}</div>
               </div>
             )}
           </div>

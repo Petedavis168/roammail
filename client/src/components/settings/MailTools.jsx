@@ -3,6 +3,7 @@ import { api } from '../../api.js';
 import { Icon } from '../../icons.jsx';
 import { useToast } from '../Toast.jsx';
 import { folderLabel, fmtDate } from '../../util.js';
+import { t } from '../../i18n.js';
 
 export function AutoReply({ me }) {
   const toast = useToast();
@@ -14,18 +15,18 @@ export function AutoReply({ me }) {
   };
   return (
     <div className="settings-section">
-      <p className="muted small">Let people know you're away. Each sender gets one reply per day. Mailing lists don't get replies.</p>
-      <label className="check big"><input type="checkbox" checked={v.enabled} onChange={(e) => setV({ ...v, enabled: e.target.checked })} /> Send automatic replies</label>
+      <p className="muted small">{t("Let people know you're away. Each sender gets one reply per day. Mailing lists don't get replies.")}</p>
+      <label className="check big"><input type="checkbox" checked={v.enabled} onChange={(e) => setV({ ...v, enabled: e.target.checked })} />{' '}{t("Send automatic replies")}</label>
       <div className={`form ${v.enabled ? '' : 'disabled'}`}>
         <div className="two-col">
-          <label>Start (optional)<input type="date" value={v.start} onChange={(e) => setV({ ...v, start: e.target.value })} /></label>
-          <label>End (optional)<input type="date" value={v.end} onChange={(e) => setV({ ...v, end: e.target.value })} /></label>
+          <label>{t("Start (optional)")}<input type="date" value={v.start} onChange={(e) => setV({ ...v, start: e.target.value })} /></label>
+          <label>{t("End (optional)")}<input type="date" value={v.end} onChange={(e) => setV({ ...v, end: e.target.value })} /></label>
         </div>
-        <label>Subject<input value={v.subject} onChange={(e) => setV({ ...v, subject: e.target.value })} /></label>
-        <label>Message<textarea rows={6} value={v.message} placeholder={'Thanks for your email. I\'m out of the office until Monday with limited access to email.\n\nFor urgent matters please contact ...'} onChange={(e) => setV({ ...v, message: e.target.value })} /></label>
-        {me.orgDomains?.length > 0 && <label className="check"><input type="checkbox" checked={v.onlyOrg} onChange={(e) => setV({ ...v, onlyOrg: e.target.checked })} /> Only reply to people in my organization</label>}
+        <label>{t("Subject")}<input value={v.subject} onChange={(e) => setV({ ...v, subject: e.target.value })} /></label>
+        <label>{t("Message")}<textarea rows={6} value={v.message} placeholder={'Thanks for your email. I\'m out of the office until Monday with limited access to email.\n\nFor urgent matters please contact ...'} onChange={(e) => setV({ ...v, message: e.target.value })} /></label>
+        {me.orgDomains?.length > 0 && <label className="check"><input type="checkbox" checked={v.onlyOrg} onChange={(e) => setV({ ...v, onlyOrg: e.target.checked })} />{' '}{t("Only reply to people in my organization")}</label>}
       </div>
-      <div><button className="btn primary" onClick={() => save(v)}>Save</button></div>
+      <div><button className="btn primary" onClick={() => save(v)}>{t("Save")}</button></div>
     </div>
   );
 }
@@ -39,7 +40,7 @@ export function Rules({ folders, categories, me }) {
   const [edit, setEdit] = useState(null);
   useEffect(() => { api.get('/api/rules').then(setRules); }, []);
   if (!rules) return <div className="spinner" />;
-  const save = async (next) => { try { setRules(await api.put('/api/rules', { rules: next })); toast('Rules saved'); return true; } catch (e) { toast(e.message, { error: true }); } };
+  const save = async (next) => { try { setRules(await api.put('/api/rules', { rules: next })); toast(t("Rules saved")); return true; } catch (e) { toast(e.message, { error: true }); } };
   const selectable = folders.filter((f) => !f.flags.includes('\\Noselect'));
   const describe = (r) => `If ${r.conditions.map((c) => `${FIELDS.find((f) => f[0] === c.field)?.[1].toLowerCase()} "${c.value}"`).join(r.match === 'all' ? ' and ' : ' or ')} → ${r.actions.map((a) => {
     const l = ACTIONS.find((x) => x[0] === a.type)?.[1]; return a.type === 'move' ? `move to ${a.folder}` : a.type === 'forward' ? `forward to ${a.value}` : a.type === 'category' ? `categorize ${a.value}` : l.toLowerCase();
@@ -48,30 +49,30 @@ export function Rules({ folders, categories, me }) {
 
   return (
     <div className="settings-section">
-      <p className="muted small">Rules run on the server as mail arrives, so they work in every app, even when this page is closed.</p>
-      {rules.length === 0 && !edit && <div className="empty-card small">No rules yet.</div>}
+      <p className="muted small">{t("Rules run on the server as mail arrives, so they work in every app, even when this page is closed.")}</p>
+      {rules.length === 0 && !edit && <div className="empty-card small">{t("No rules yet.")}</div>}
       {rules.map((r, i) => edit?.id === r.id ? null : (
         <div key={r.id} className="rule-item">
           <label className="switch"><input type="checkbox" checked={r.enabled} onChange={(e) => save(rules.map((x) => (x.id === r.id ? { ...x, enabled: e.target.checked } : x)))} /></label>
           <div className="rule-text"><b>{r.name || (r.blocked ? `Blocked: ${r.blocked}` : 'Rule')}</b><small className="muted">{describe(r)}</small></div>
-          {!r.blocked && <button className="btn sm" onClick={() => setEdit(JSON.parse(JSON.stringify(r)))}>Edit</button>}
+          {!r.blocked && <button className="btn sm" onClick={() => setEdit(JSON.parse(JSON.stringify(r)))}>{t("Edit")}</button>}
           <button className="icon-btn" onClick={() => save(rules.filter((x) => x.id !== r.id))} title={r.blocked ? 'Unblock' : 'Delete'}><Icon name="trash" size={16} /></button>
         </div>
       ))}
       {edit ? (
         <div className="card rule-edit">
-          <label>Name<input value={edit.name} placeholder="e.g. Newsletters" onChange={(e) => setEdit({ ...edit, name: e.target.value })} /></label>
-          <div className="rule-row"><b>When a message arrives and</b>
-            <select value={edit.match} onChange={(e) => setEdit({ ...edit, match: e.target.value })}><option value="any">any</option><option value="all">all</option></select> of these are true:</div>
+          <label>{t("Name")}<input value={edit.name} placeholder={t("e.g. Newsletters")} onChange={(e) => setEdit({ ...edit, name: e.target.value })} /></label>
+          <div className="rule-row"><b>{t("When a message arrives and")}</b>
+            <select value={edit.match} onChange={(e) => setEdit({ ...edit, match: e.target.value })}><option value="any">any</option><option value="all">all</option></select>{' '}{t("of these are true:")}</div>
           {edit.conditions.map((c, i) => (
             <div className="rule-row" key={i}>
               <select value={c.field} onChange={(e) => { const cs = [...edit.conditions]; cs[i] = { ...c, field: e.target.value }; setEdit({ ...edit, conditions: cs }); }}>{FIELDS.map(([k, l]) => <option key={k} value={k}>{l}</option>)}</select>
-              <input value={c.value} placeholder="text or address" onChange={(e) => { const cs = [...edit.conditions]; cs[i] = { ...c, value: e.target.value }; setEdit({ ...edit, conditions: cs }); }} />
+              <input value={c.value} placeholder={t("text or address")} onChange={(e) => { const cs = [...edit.conditions]; cs[i] = { ...c, value: e.target.value }; setEdit({ ...edit, conditions: cs }); }} />
               {edit.conditions.length > 1 && <button className="icon-btn" onClick={() => setEdit({ ...edit, conditions: edit.conditions.filter((_, j) => j !== i) })}><Icon name="close" size={14} /></button>}
             </div>
           ))}
-          <button className="link" onClick={() => setEdit({ ...edit, conditions: [...edit.conditions, { field: 'subject', value: '' }] })}>+ Add condition</button>
-          <div className="rule-row"><b>Do this:</b></div>
+          <button className="link" onClick={() => setEdit({ ...edit, conditions: [...edit.conditions, { field: 'subject', value: '' }] })}>{t("+ Add condition")}</button>
+          <div className="rule-row"><b>{t("Do this:")}</b></div>
           {edit.actions.map((a, i) => (
             <div className="rule-row" key={i}>
               <select value={a.type} onChange={(e) => { const as = [...edit.actions]; as[i] = { type: e.target.value, folder: a.folder, value: '' }; setEdit({ ...edit, actions: as }); }}>
@@ -80,22 +81,22 @@ export function Rules({ folders, categories, me }) {
                 {selectable.map((f) => <option key={f.path} value={f.path}>{folderLabel(f)}</option>)}</select>}
               {a.type === 'forward' && <input type="email" placeholder="name@example.com" value={a.value} onChange={(e) => { const as = [...edit.actions]; as[i] = { ...a, value: e.target.value }; setEdit({ ...edit, actions: as }); }} />}
               {a.type === 'category' && <select value={a.value} onChange={(e) => { const as = [...edit.actions]; as[i] = { ...a, value: e.target.value }; setEdit({ ...edit, actions: as }); }}>
-                <option value="">Choose…</option>{categories.map((c) => <option key={c.name} value={c.name}>{c.name}</option>)}</select>}
+                <option value="">{t("Choose…")}</option>{categories.map((c) => <option key={c.name} value={c.name}>{c.name}</option>)}</select>}
               {edit.actions.length > 1 && <button className="icon-btn" onClick={() => setEdit({ ...edit, actions: edit.actions.filter((_, j) => j !== i) })}><Icon name="close" size={14} /></button>}
             </div>
           ))}
-          <button className="link" onClick={() => setEdit({ ...edit, actions: [...edit.actions, { type: 'read' }] })}>+ Add action</button>
-          <label className="check"><input type="checkbox" checked={edit.stop} onChange={(e) => setEdit({ ...edit, stop: e.target.checked })} /> Stop processing more rules</label>
+          <button className="link" onClick={() => setEdit({ ...edit, actions: [...edit.actions, { type: 'read' }] })}>{t("+ Add action")}</button>
+          <label className="check"><input type="checkbox" checked={edit.stop} onChange={(e) => setEdit({ ...edit, stop: e.target.checked })} />{' '}{t("Stop processing more rules")}</label>
           <div className="step-actions">
-            <button className="btn" onClick={() => setEdit(null)}>Cancel</button>
+            <button className="btn" onClick={() => setEdit(null)}>{t("Cancel")}</button>
             <button className="btn primary" onClick={async () => {
-              if (!edit.conditions.some((c) => c.value.trim())) return toast('Add at least one condition', { error: true });
+              if (!edit.conditions.some((c) => c.value.trim())) return toast(t("Add at least one condition"), { error: true });
               const exists = rules.some((r) => r.id === edit.id);
               if (await save(exists ? rules.map((r) => (r.id === edit.id ? edit : r)) : [...rules, edit])) setEdit(null);
-            }}>Save rule</button>
+            }}>{t("Save rule")}</button>
           </div>
         </div>
-      ) : <button className="btn" onClick={() => setEdit(blank)}><Icon name="plus" size={16} /> New rule</button>}
+      ) : <button className="btn" onClick={() => setEdit(blank)}><Icon name="plus" size={16} />{' '}{t("New rule")}</button>}
       <ServerFilters />
     </div>
   );
@@ -111,8 +112,8 @@ function ServerFilters() {
   const run = async (fn, msg) => { try { await fn(); toast(msg); load(); return true; } catch (e) { toast(e.message, { error: true }); } };
   return (
     <details className="adv" onToggle={(e) => setOpen(e.currentTarget.open)}>
-      <summary>Advanced: all mailcow server filters (Sieve)</summary>
-      <p className="muted small">Every filter stored for your mailbox on the mail server, including ones made in other tools. Order on the server: mailcow's global filters → <b>pre-filters</b> → <b>post-filters</b> → mailcow moves spam to Junk. Only one filter of each type can be active at a time.</p>
+      <summary>{t("Advanced: all mailcow server filters (Sieve)")}</summary>
+      <p className="muted small">{t("Every filter stored for your mailbox on the mail server, including ones made in other tools. Order on the server: mailcow's global filters →")}{' '}<b>pre-filters</b> → <b>post-filters</b>{' '}{t("→ mailcow moves spam to Junk. Only one filter of each type can be active at a time.")}</p>
       {list?.map((f) => (
         <div key={f.id} className="rule-item col">
           <div className="rule-row">
@@ -123,17 +124,17 @@ function ServerFilters() {
           <pre className="sieve">{f.script}</pre>
         </div>
       ))}
-      {list?.length === 0 && <div className="muted small">No server filters yet.</div>}
+      {list?.length === 0 && <div className="muted small">{t("No server filters yet.")}</div>}
       {add ? (
         <div className="card form">
-          <label>Name<input value={add.desc} onChange={(e) => setAdd({ ...add, desc: e.target.value })} /></label>
-          <label>Type<select value={add.type} onChange={(e) => setAdd({ ...add, type: e.target.value })}><option value="prefilter">Pre-filter</option><option value="postfilter">Post-filter</option></select></label>
-          <label>Sieve script<textarea rows={8} className="mono" value={add.script} onChange={(e) => setAdd({ ...add, script: e.target.value })} /></label>
-          <small className="muted">Saving activates it and turns off any other active {add.type}. The server checks the script and refuses invalid ones.</small>
-          <div className="step-actions"><button className="btn" onClick={() => setAdd(null)}>Cancel</button>
-            <button className="btn primary" onClick={async () => (await run(() => api.post('/api/filters/server', add), 'Filter saved')) && setAdd(null)}>Save filter</button></div>
+          <label>{t("Name")}<input value={add.desc} onChange={(e) => setAdd({ ...add, desc: e.target.value })} /></label>
+          <label>{t("Type")}<select value={add.type} onChange={(e) => setAdd({ ...add, type: e.target.value })}><option value="prefilter">{t("Pre-filter")}</option><option value="postfilter">{t("Post-filter")}</option></select></label>
+          <label>{t("Sieve script")}<textarea rows={8} className="mono" value={add.script} onChange={(e) => setAdd({ ...add, script: e.target.value })} /></label>
+          <small className="muted">{t("Saving activates it and turns off any other active")}{' '}{add.type}{t(". The server checks the script and refuses invalid ones.")}</small>
+          <div className="step-actions"><button className="btn" onClick={() => setAdd(null)}>{t("Cancel")}</button>
+            <button className="btn primary" onClick={async () => (await run(() => api.post('/api/filters/server', add), 'Filter saved')) && setAdd(null)}>{t("Save filter")}</button></div>
         </div>
-      ) : <button className="btn sm" onClick={() => setAdd({ desc: '', type: 'postfilter', script: 'require ["fileinto"];\n\nif header :contains "subject" "[newsletter]" {\n  fileinto "Newsletters";\n}\n' })}><Icon name="plus" size={14} /> Add raw Sieve filter</button>}
+      ) : <button className="btn sm" onClick={() => setAdd({ desc: '', type: 'postfilter', script: 'require ["fileinto"];\n\nif header :contains "subject" "[newsletter]" {\n  fileinto "Newsletters";\n}\n' })}><Icon name="plus" size={14} />{' '}{t("Add raw Sieve filter")}</button>}
     </details>
   );
 }
@@ -156,10 +157,10 @@ function ImportRow({ r, onChange }) {
         <b>{r.user}</b> <span className="muted small">{r.label}</span>
         <small className="muted">{state}</small>
         {pct !== null && r.status === 'active' && r.kind !== 'syncjob' && <div className="meter"><div style={{ width: `${pct}%` }} /></div>}
-        {r.status === 'active' && r.kind !== 'upload' && <small className="muted">Keeps copying new mail until {when(r.stopsAt)}, so nothing is lost while you switch.</small>}
+        {r.status === 'active' && r.kind !== 'upload' && <small className="muted">{t("Keeps copying new mail until")}{' '}{when(r.stopsAt)}{t(", so nothing is lost while you switch.")}</small>}
       </div>
       {r.kind !== 'upload' && ['active', 'paused'].includes(r.status) && <button className="btn sm" onClick={async () => { await api.patch('/api/imports', { recordId: r.id, active: r.status !== 'active' }); onChange(); }}>{r.status === 'active' ? 'Pause' : 'Resume'}</button>}
-      {['active', 'paused'].includes(r.status) && r.kind !== 'upload' && <button className="icon-btn" title="Stop" aria-label="Stop import" onClick={async () => { if (confirm('Stop importing from this account? Mail already copied stays.')) { await api.del('/api/imports', { recordId: r.id }); onChange(); } }}><Icon name="close" size={16} /></button>}
+      {['active', 'paused'].includes(r.status) && r.kind !== 'upload' && <button className="icon-btn" title={t("Stop")} aria-label={t("Stop import")} onClick={async () => { if (confirm(t("Stop importing from this account? Mail already copied stays."))) { await api.del('/api/imports', { recordId: r.id }); onChange(); } }}><Icon name="close" size={16} /></button>}
     </div>
   );
 }
@@ -169,10 +170,10 @@ function ReadyToSwitch({ me }) {
   return (
     <div className="callout ok">
       <Icon name="check" size={16} />
-      <div><b>Ready to switch</b>
+      <div><b>{t("Ready to switch")}</b>
         {business
-          ? <small>Your mail is here. Now point your domain to Roammail: in <b>Admin → Domains</b>, copy the MX record into your DNS and press <b>Check records</b>. New mail arrives here within an hour; the import keeps catching anything sent to the old account meanwhile.</small>
-          : <small>Your mail is here. Tell people your new address, and in your old account turn on forwarding to it. The import keeps catching anything that still arrives there for the next few days.</small>}
+          ? <small>{t("Your mail is here. Now point your domain to Roammail: in")}{' '}<b>{t("Admin → Domains")}</b>{t(", copy the MX record into your DNS and press")}{' '}<b>{t("Check records")}</b>{t(". New mail arrives here within an hour; the import keeps catching anything sent to the old account meanwhile.")}</small>
+          : <small>{t("Your mail is here. Tell people your new address, and in your old account turn on forwarding to it. The import keeps catching anything that still arrives there for the next few days.")}</small>}
       </div>
     </div>
   );
@@ -199,7 +200,7 @@ export function ImportMail({ me, importMsg }) {
   };
   const start = async (e) => {
     e.preventDefault(); setBusy('start');
-    try { await api.post('/api/imports', f); toast('Import started. Mail appears within 20 minutes.'); setF({ ...f, user: '', password: '' }); setFound(null); load(); }
+    try { await api.post('/api/imports', f); toast(t("Import started. Mail appears within 20 minutes.")); setF({ ...f, user: '', password: '' }); setFound(null); load(); }
     catch (err) { toast(err.message, { error: true }); } finally { setBusy(''); }
   };
   const upload = (url, done) => async (e) => {
@@ -212,12 +213,12 @@ export function ImportMail({ me, importMsg }) {
   const ready = d.imports.some((r) => r.readyToSwitch);
   return (
     <div className="settings-section import">
-      <p className="muted small">Bring your mail, folders, contacts and calendar from your old account. Mail keeps syncing for {d.syncDays} days, so you can switch over at your own pace.</p>
+      <p className="muted small">{t("Bring your mail, folders, contacts and calendar from your old account. Mail keeps syncing for")}{' '}{d.syncDays}{' '}{t("days, so you can switch over at your own pace.")}</p>
       {ready && <ReadyToSwitch me={me} />}
       {d.imports.map((r) => <ImportRow key={r.id} r={r} onChange={load} />)}
       {d.jobs.map((j) => <ImportRow key={`j${j.id}`} r={{ id: null, user: j.user, label: j.host, kind: 'syncjob', status: j.active ? 'active' : 'paused', running: j.running, lastRun: j.lastRun, success: j.success }} onChange={load} />)}
 
-      <h3>1. Copy your email</h3>
+      <h3>{t("1. Copy your email")}</h3>
       <div className="provider-pick">
         {Object.entries(d.providers).map(([k, v]) => <button type="button" key={k} className={`chip ${f.provider === k ? 'on' : ''}`} onClick={() => { setFound(null); setF({ ...f, provider: k }); }}>{v.label}</button>)}
       </div>
@@ -225,16 +226,16 @@ export function ImportMail({ me, importMsg }) {
         <div className="card form">
           <div className="callout info"><Icon name="lock" size={16} /><small>{p.help}</small></div>
           {p.oauthReady
-            ? <button className="btn primary" disabled={!!busy} onClick={async () => { setBusy('ms'); try { location.assign((await api.get('/api/imports/outlook/start')).url); } catch (err) { toast(err.message, { error: true }); setBusy(''); } }}>Sign in with Microsoft</button>
-            : <small className="muted">Microsoft sign-in isn't switched on for this server yet. Use the file upload below for now.</small>}
+            ? <button className="btn primary" disabled={!!busy} onClick={async () => { setBusy('ms'); try { location.assign((await api.get('/api/imports/outlook/start')).url); } catch (err) { toast(err.message, { error: true }); setBusy(''); } }}>{t("Sign in with Microsoft")}</button>
+            : <small className="muted">{t("Microsoft sign-in isn't switched on for this server yet. Use the file upload below for now.")}</small>}
         </div>
       ) : (
         <form className="card form" onSubmit={start}>
-          {f.provider === 'other' && <label>IMAP server<input value={f.host} placeholder="imap.example.com" onChange={set('host')} required /></label>}
-          <label>Old email address<input type="email" value={f.user} onChange={set('user')} required autoComplete="off" /></label>
+          {f.provider === 'other' && <label>{t("IMAP server")}<input value={f.host} placeholder="imap.example.com" onChange={set('host')} required /></label>}
+          <label>{t("Old email address")}<input type="email" value={f.user} onChange={set('user')} required autoComplete="off" /></label>
           <label>{f.provider === 'other' ? 'Password' : 'App password'}<input type="password" value={f.password} onChange={set('password')} required autoComplete="new-password" /></label>
-          <div className="callout info"><Icon name="lock" size={16} /><small>{p.help} {p.appPasswordUrl && <a href={p.appPasswordUrl} target="_blank" rel="noreferrer">Open the app password page</a>} An app password only allows mail access and can be revoked any time. We never see or keep your main password.</small></div>
-          {found && <div className="callout ok"><Icon name="check" size={16} /><small>Connected. Found about <b>{found.messages.toLocaleString()}</b> messages in {found.folders} folders.</small></div>}
+          <div className="callout info"><Icon name="lock" size={16} /><small>{p.help} {p.appPasswordUrl && <a href={p.appPasswordUrl} target="_blank" rel="noreferrer">{t("Open the app password page")}</a>}{' '}{t("An app password only allows mail access and can be revoked any time. We never see or keep your main password.")}</small></div>
+          {found && <div className="callout ok"><Icon name="check" size={16} /><small>{t("Connected. Found about")}{' '}<b>{found.messages.toLocaleString()}</b>{' '}{t("messages in")}{' '}{found.folders} folders.</small></div>}
           <div className="row-btns">
             <button type="button" className="btn" disabled={!!busy || !f.user || !f.password} onClick={test}>{busy === 'test' ? 'Checking…' : 'Test connection'}</button>
             <button className="btn primary" disabled={!!busy}>{busy === 'start' ? 'Starting…' : 'Start import'}</button>
@@ -242,17 +243,17 @@ export function ImportMail({ me, importMsg }) {
         </form>
       )}
       <details className="card">
-        <summary><b>Or upload an export file</b> <span className="muted small">(.mbox: Google Takeout, Apple Mail, Thunderbird; Outlook .pst converted to .mbox)</span></summary>
-        <p className="muted small">Messages go into a folder called <b>Imported</b>. Outlook desktop can't save .mbox directly: open the .pst in Thunderbird (free) with the ImportExportTools add-on and export the folders as .mbox.</p>
+        <summary><b>{t("Or upload an export file")}</b> <span className="muted small">{t("(.mbox: Google Takeout, Apple Mail, Thunderbird; Outlook .pst converted to .mbox)")}</span></summary>
+        <p className="muted small">{t("Messages go into a folder called")}{' '}<b>{t("Imported")}</b>{t(". Outlook desktop can't save .mbox directly: open the .pst in Thunderbird (free) with the ImportExportTools add-on and export the folders as .mbox.")}</p>
         <label className="btn">{busy === '/api/imports/upload' ? 'Uploading…' : 'Choose .mbox file'}<input type="file" accept=".mbox,.mbx,application/mbox" hidden onChange={upload('/api/imports/upload', (r) => `Uploaded. Copying into ${r.folder}…`)} /></label>
       </details>
 
-      <h3>2. Contacts and calendar</h3>
+      <h3>{t("2. Contacts and calendar")}</h3>
       <div className="row-btns left">
         <label className="btn">{busy === '/api/address-contacts/import' ? 'Importing…' : 'Import contacts (.vcf)'}<input type="file" accept=".vcf,text/vcard" hidden onChange={upload('/api/address-contacts/import', (r) => `Imported ${r.imported ?? r.count ?? ''} contacts`)} /></label>
         <label className="btn">{busy === '/api/calendar/import' ? 'Importing…' : 'Import calendar (.ics)'}<input type="file" accept=".ics,text/calendar" hidden onChange={upload('/api/calendar/import', (r) => `Imported ${r.imported} events${r.existing ? ` (${r.existing} were already here)` : ''}`)} /></label>
       </div>
-      <p className="muted small">Gmail: contacts.google.com → Export → vCard; calendar.google.com → Settings → Import & export → Export. Outlook: People → Manage → Export contacts; Calendar → Shared calendars → Publish → ICS.</p>
+      <p className="muted small">{t("Gmail: contacts.google.com → Export → vCard; calendar.google.com → Settings → Import & export → Export. Outlook: People → Manage → Export contacts; Calendar → Shared calendars → Publish → ICS.")}</p>
     </div>
   );
 }
