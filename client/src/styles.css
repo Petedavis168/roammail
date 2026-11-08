@@ -1067,3 +1067,17 @@ details.card summary { cursor: pointer; }
 .plain-list { list-style: none; padding: 0; margin: 8px 0; }
 .plain-list li { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; padding: 6px 0; border-bottom: 1px solid var(--border); }
 .plain-list li .link { margin-left: auto; }
+
+/* AI help */
+.ai-panel { margin: 4px 16px 10px; padding: 10px 12px; border: 1px solid var(--border); border-radius: 10px; background: var(--panel-2); }
+.ai-panel.off { padding: 6px 12px; background: none; border-style: dashed; }
+.ai-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.ai-actions .muted { margin-left: auto; }
+.ai-summary { margin-top: 10px; }
+.ai-summary p { margin: 0 0 6px; }
+.ai-summary ul { margin: 0 0 6px; padding-left: 20px; }
+.ai-replies { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin-top: 10px; }
+.needs-reply { padding: 6px 16px 8px; border-bottom: 1px solid var(--border); font-size: 13.5px; }
+.needs-reply .nr-head { display: flex; align-items: center; justify-content: space-between; margin: 2px 0 4px; }
+.needs-reply ul { list-style: none; padding: 0; margin: 0 0 4px; }
+.needs-reply li .link { text-align: left; padding: 3px 0; font-weight: 400; }

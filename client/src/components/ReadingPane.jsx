@@ -3,6 +3,7 @@ import { api, mailUrl } from '../api.js';
 import { Icon } from '../icons.jsx';
 import { fmtDate, fmtSize, personName, avatarColor, initials } from '../util.js';
 import MessageBody from './MessageBody.jsx';
+import AiPanel from './AiPanel.jsx';
 
 function AddrList({ label, list }) {
   if (!list?.length) return null;
@@ -223,6 +224,7 @@ export default function ReadingPane({ folder, msg, me, prefs, setPrefs, conversa
       <div className="thread">
         {error && <div className="form-error">{error}</div>}
         {!thread && !error && <div className="list-msg"><div className="spinner" /></div>}
+        {thread && <AiPanel folder={folder} uid={msg?.uid ?? thread.messages[thread.messages.length - 1].uid} last={thread.messages[thread.messages.length - 1]} onReply={onReply} />}
         {thread?.messages.length > 1 && <div className="muted small thread-count">{thread.messages.length} messages in this conversation</div>}
         {thread?.messages.map((m, i) => {
           const k = `${m.folder}:${m.uid}`;

@@ -96,6 +96,9 @@ jobs:
       - name: Passkey tests (virtual authenticator)
         working-directory: server
         run: npm run test:passkeys
+      - name: AI help tests (stand-in Anthropic API)
+        working-directory: server
+        run: npm run test:ai
 
       - name: Logs on failure
         if: failure()

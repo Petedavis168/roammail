@@ -2,9 +2,10 @@ import { useEffect, useRef } from 'react';
 import { Icon } from '../icons.jsx';
 import { fmtDate, dateGroup, personName, avatarColor, initials } from '../util.js';
 import { fmtWhen } from '../snooze.js';
+import NeedsReply from './NeedsReply.jsx';
 
 export default function MessageList({ list, title, search, onClearSearch, folderUse, filter, setFilter, selected, setSelected,
-  active, onOpen, act, categories, density, onLoadMore, onEmpty, onMarkAllRead, snoozeMap, allInboxes }) {
+  active, onOpen, act, categories, density, onLoadMore, onEmpty, onMarkAllRead, snoozeMap, allInboxes, isInbox }) {
   const ref = useRef();
   const { messages, loading, total } = list;
   const showTo = folderUse === '\\Sent' || folderUse === '\\Drafts';
@@ -70,6 +71,7 @@ export default function MessageList({ list, title, search, onClearSearch, folder
           </div>
         )}
       </div>
+      {isInbox && <NeedsReply messages={messages} onOpen={onOpen} />}
       {selected.size > 0 && !allInboxes && (
         <div className="selbar">
           <b>{selected.size} selected</b>

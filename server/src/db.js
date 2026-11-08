@@ -173,6 +173,7 @@ CREATE TABLE IF NOT EXISTS passkeys (
   name TEXT, creds TEXT NOT NULL, created_at INTEGER NOT NULL, last_used INTEGER
 );
 CREATE INDEX IF NOT EXISTS passkeys_email ON passkeys(email);
+CREATE TABLE IF NOT EXISTS ai_usage (email TEXT NOT NULL, month TEXT NOT NULL, count INTEGER NOT NULL DEFAULT 0, PRIMARY KEY (email, month));
 CREATE TABLE IF NOT EXISTS support_tickets (
   id INTEGER PRIMARY KEY AUTOINCREMENT, email TEXT NOT NULL, account TEXT, topic TEXT, message TEXT, ip TEXT, at INTEGER NOT NULL,
   status TEXT NOT NULL DEFAULT 'open'
@@ -223,7 +224,7 @@ const MIGRATIONS = [['orgs', 'require_2fa', 'INTEGER NOT NULL DEFAULT 0'], ['org
   ['orgs', 'stripe_subscription', 'TEXT'], ['orgs', 'billing_status', "TEXT NOT NULL DEFAULT 'none'"], ['orgs', 'paid_seats', 'INTEGER NOT NULL DEFAULT 0'],
   ['orgs', 'canceled_at', 'TEXT'],
   ['user_security', 'recovery_verified', 'INTEGER NOT NULL DEFAULT 0'], ['user_security', 'recovery_pending', 'TEXT'],
-  ['user_security', 'recovery_code', 'TEXT'], ['user_security', 'recovery_code_exp', 'INTEGER'], ['user_security', 'recovery_code_tries', 'INTEGER NOT NULL DEFAULT 0'], ['jobs', 'claimed_at', 'INTEGER'], ['shared_mailboxes', 'kind', "TEXT NOT NULL DEFAULT 'shared'"], ['orgs', 'account_no', 'TEXT'], ['password_resets', 'kind', "TEXT NOT NULL DEFAULT 'reset'"], ['password_resets', 'invite_to', 'TEXT'], ['sessions', 'user_id', 'TEXT'], ['sessions', 'remember', 'INTEGER NOT NULL DEFAULT 0'], ['signups', 'phone_hash', 'TEXT'], ['orgs', 'comp_until', 'INTEGER'], ['orgs', 'comp_note', 'TEXT'], ['orgs', 'comp_by', 'TEXT'], ['orgs', 'comp_warned', 'INTEGER NOT NULL DEFAULT 0'], ['domains', 'owner_local', 'TEXT'], ['domains', 'owner_mailbox', 'TEXT'], ['user_security', 'birthday', 'TEXT'], ['user_security', 'phone', 'TEXT'], ['user_security', 'push_preview', 'INTEGER NOT NULL DEFAULT 1']];
+  ['user_security', 'recovery_code', 'TEXT'], ['user_security', 'recovery_code_exp', 'INTEGER'], ['user_security', 'recovery_code_tries', 'INTEGER NOT NULL DEFAULT 0'], ['jobs', 'claimed_at', 'INTEGER'], ['shared_mailboxes', 'kind', "TEXT NOT NULL DEFAULT 'shared'"], ['orgs', 'account_no', 'TEXT'], ['password_resets', 'kind', "TEXT NOT NULL DEFAULT 'reset'"], ['password_resets', 'invite_to', 'TEXT'], ['sessions', 'user_id', 'TEXT'], ['sessions', 'remember', 'INTEGER NOT NULL DEFAULT 0'], ['signups', 'phone_hash', 'TEXT'], ['orgs', 'comp_until', 'INTEGER'], ['orgs', 'comp_note', 'TEXT'], ['orgs', 'comp_by', 'TEXT'], ['orgs', 'comp_warned', 'INTEGER NOT NULL DEFAULT 0'], ['domains', 'owner_local', 'TEXT'], ['domains', 'owner_mailbox', 'TEXT'], ['user_security', 'birthday', 'TEXT'], ['user_security', 'phone', 'TEXT'], ['user_security', 'push_preview', 'INTEGER NOT NULL DEFAULT 1'], ['user_security', 'ai_enabled', 'INTEGER NOT NULL DEFAULT 0'], ['user_security', 'premium_until', 'INTEGER'], ['orgs', 'ai_blocked', 'INTEGER NOT NULL DEFAULT 0']];
 
 // Indexes on migrated columns (run after MIGRATIONS)
 const AFTER = ['CREATE UNIQUE INDEX IF NOT EXISTS orgs_account_no ON orgs(account_no)'];

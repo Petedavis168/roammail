@@ -20,12 +20,14 @@
     "test:phone": "node --disable-warning=ExperimentalWarning --test test/phone.test.js",
     "test:mobile": "node --disable-warning=ExperimentalWarning --test test/mobile.test.js",
     "test:passkeys": "node --disable-warning=ExperimentalWarning --test test/passkeys.test.js",
+    "test:ai": "node --disable-warning=ExperimentalWarning --test test/ai.test.js",
     "test:nativepush": "NODE_ENV=test node --disable-warning=ExperimentalWarning --test test/nativepush.test.js"
   },
   "keywords": [],
   "author": "",
   "license": "ISC",
   "dependencies": {
+    "@anthropic-ai/sdk": "^1.6.0",
     "@aws-sdk/client-route-53": "^3.1163.0",
     "@simplewebauthn/server": "^14.1.0",
     "cookie-parser": "^1.4.7",
@@ -43,7 +45,8 @@
     "rate-limit-redis": "^4.3.1",
     "redis": "^5.12.1",
     "sanitize-html": "^2.18.1",
-    "web-push": "^3.6.7"
+    "web-push": "^3.6.7",
+    "zod": "^4.6.7"
   },
   "type": "module"
 }

@@ -322,7 +322,7 @@ export default function Mail({ me, route, refreshMe, theme, setTheme, onLogout }
       toast(`We'll remind you ${days === 1 ? 'tomorrow' : `in ${days} days`} if nobody replies`, { action: 'View', onAction: () => { setPanelTab('followups'); setPanel('followups'); } });
     } catch (e) { toast(e.message, { error: true }); }
   };
-  const reply = (msg, mode) => compose(replyDraft({ folder: listFolder, ...msg }, mode, me.email));
+  const reply = (msg, mode, prefillText) => compose({ ...replyDraft({ folder: listFolder, ...msg }, mode, me.email), ...(prefillText ? { prefillText } : {}) });
 
   const openMessage = (m) => {
     // All inboxes: open the message in its own account
@@ -492,7 +492,7 @@ export default function Mail({ me, route, refreshMe, theme, setTheme, onLogout }
               {folder === '@quarantine' && !search ? <QuarantineList onChanged={setQCount} /> : folder === '@scheduled' && !search ? <ScheduledList onCompose={compose} /> : <MessageList
                 snoozeMap={folder.toLowerCase() === 'snoozed' ? snoozeMap : null}
                 list={list} title={search ? `Results for "${search}"` : folder === '@all' ? 'All inboxes' : folderLabel(currentFolderObj || { name: folder })}
-                search={search} onClearSearch={clearSearch}
+                search={search} onClearSearch={clearSearch} isInbox={folder === 'INBOX' && !search}
                 folderUse={currentFolderObj?.specialUse} filter={filter} setFilter={setFilter}
                 selected={selected} setSelected={setSelected} active={active} onOpen={openMessage}
                 act={act} categories={prefs.categories} density={prefs.density} allInboxes={folder === '@all'}
