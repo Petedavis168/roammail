@@ -19,6 +19,7 @@
     "test:imports": "node --disable-warning=ExperimentalWarning --test test/imports.test.js",
     "test:phone": "node --disable-warning=ExperimentalWarning --test test/phone.test.js",
     "test:mobile": "node --disable-warning=ExperimentalWarning --test test/mobile.test.js",
+    "test:passkeys": "node --disable-warning=ExperimentalWarning --test test/passkeys.test.js",
     "test:nativepush": "NODE_ENV=test node --disable-warning=ExperimentalWarning --test test/nativepush.test.js"
   },
   "keywords": [],
@@ -26,6 +27,7 @@
   "license": "ISC",
   "dependencies": {
     "@aws-sdk/client-route-53": "^3.1163.0",
+    "@simplewebauthn/server": "^14.1.0",
     "cookie-parser": "^1.4.7",
     "express": "^5.3.0",
     "express-rate-limit": "^8.7.3",

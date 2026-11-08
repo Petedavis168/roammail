@@ -112,14 +112,14 @@ appLinks.use('/apple-app-site-association', rateLimit({ windowMs: 60 * 1000, lim
 const APP_ID = () => env.MOBILE_APP_ID || 'net.roammail.app';
 appLinks.get('/.well-known/assetlinks.json', (req, res) => {
   const prints = String(env.ANDROID_CERT_SHA256 || '').split(',').map((x) => x.trim().toUpperCase()).filter((x) => /^([0-9A-F]{2}:){31}[0-9A-F]{2}$/.test(x));
-  res.set('Cache-Control', 'public, max-age=3600').json(prints.length ? [{ relation: ['delegate_permission/common.handle_all_urls'],
+  res.set('Cache-Control', 'public, max-age=3600').json(prints.length ? [{ relation: ['delegate_permission/common.handle_all_urls', 'delegate_permission/common.get_login_creds'],
     target: { namespace: 'android_app', package_name: APP_ID(), sha256_cert_fingerprints: prints } }] : []);
 });
 appLinks.get(['/.well-known/apple-app-site-association', '/apple-app-site-association'], (req, res) => {
   const team = String(env.APPLE_TEAM_ID || env.APNS_TEAM_ID || '').trim();
   res.set('Cache-Control', 'public, max-age=3600').type('application/json').send(JSON.stringify(/^[A-Z0-9]{10}$/.test(team)
-    ? { applinks: { details: [{ appIDs: [`${team}.${APP_ID()}`], components: [{ '/': '/api/*', exclude: true }, { '/': '/*' }] }] } }
-    : { applinks: { details: [] } }));
+    ? { applinks: { details: [{ appIDs: [`${team}.${APP_ID()}`], components: [{ '/': '/api/*', exclude: true }, { '/': '/*' }] }] }, webcredentials: { apps: [`${team}.${APP_ID()}`] } }
+    : { applinks: { details: [] }, webcredentials: { apps: [] } }));
 });
 /** Close the APNs connection (shutdown and tests). */
 export function closeNativePush() { if (apnsSession) { apnsSession.close(); apnsSession = null; } }

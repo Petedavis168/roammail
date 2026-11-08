@@ -91,9 +91,11 @@ test('app-link files for Android and iOS', async () => {
   try {
     const base = `http://127.0.0.1:${srv.address().port}`;
     const a = await (await fetch(`${base}/.well-known/assetlinks.json`)).json();
-    assert.equal(a[0].target.package_name, 'net.roammail.app'); assert.equal(a[0].target.sha256_cert_fingerprints.length, 1);
+    assert.equal(a[0].target.package_name, 'net.roammail.app'); assert.ok(a[0].relation.includes('delegate_permission/common.get_login_creds'), 'passkeys in the Android app'); assert.equal(a[0].target.sha256_cert_fingerprints.length, 1);
     const r = await fetch(`${base}/.well-known/apple-app-site-association`);
     assert.match(r.headers.get('content-type'), /application\/json/);
-    assert.deepEqual((await r.json()).applinks.details[0].appIDs, ['TEAM123456.net.roammail.app']);
+    const aasa = await r.json();
+    assert.deepEqual(aasa.applinks.details[0].appIDs, ['TEAM123456.net.roammail.app']);
+    assert.deepEqual(aasa.webcredentials.apps, ['TEAM123456.net.roammail.app'], 'passkeys in the iPhone app');
   } finally { srv.close(); }
 });

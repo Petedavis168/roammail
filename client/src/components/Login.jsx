@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { isNative } from '../native.js';
+import { passkeysSupported, signInWithPasskey } from '../passkeys.js';
 import { api } from '../api.js';
 import { Icon } from '../icons.jsx';
 
@@ -77,6 +78,11 @@ export default function Login({ onLogin, mode = 'signin' }) {
         footer={<>{cfg.enabled && <button type="button" className="g-link" onClick={() => go('name')}>Create account</button>}<button className="g-btn">Next</button></>}>
         <Field label="Email" type="text" inputMode="email" autoComplete="username" autoFocus value={f.email} onChange={set('email')} error={error} hint={!f.email.includes('@') && f.email ? `Signing in as ${fullEmail}` : ''} />
         <button type="button" className="g-link left" onClick={() => go('forgot-address')}>Forgot email?</button>
+        {passkeysSupported() && (
+          <button type="button" className="g-passkey" disabled={busy} onClick={() => run(async () => { const r = await signInWithPasskey(f.remember); await onLogin(r); })}>
+            <Icon name="lock" size={16} /> Sign in with a passkey
+          </button>
+        )}
         {info && <div className="g-info">{info}</div>}
       </Card>
     </Shell>
