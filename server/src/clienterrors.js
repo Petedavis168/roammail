@@ -20,6 +20,7 @@ clientErrors.post('/client-error', rateLimit({ windowMs: 60 * 1000, limit: 20, s
   if ((seen.get(key) || 0) > now - 60e3) return res.status(204).end();
   seen.set(key, now);
   if (seen.size > 2000) for (const [k, t] of seen) if (t < now - 60e3) seen.delete(k);
-  console.error(`APP_ERROR client ${app} ${message} at ${where} on ${page} v=${clean(b.version, 20)}`);
+  const line = `client ${app} ${message} at ${where} on ${page} v=${clean(b.version, 20)}`.replace(/[\r\n]/g, ' '); // one line per report, whatever was sent
+  console.error('APP_ERROR %s', line);
   res.status(204).end();
 });
