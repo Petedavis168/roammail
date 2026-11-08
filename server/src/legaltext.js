@@ -70,7 +70,7 @@ on the web, by phone or desktop mail apps, or through our APIs. Please read them
 
 <h2>9. Changes to ${app} and these Terms</h2><p>We keep improving ${app} and may add, change or remove features. If a change significantly reduces what a paid plan includes, we'll tell you in advance and you may cancel. If we change these Terms in a way that matters to you, we'll give at least 30 days' notice by email or in the app (sooner only for legal or security reasons). Continuing to use ${app} after the change takes effect means you accept it. If you don't agree, you can stop using ${app} and delete your account.</p>
 
-<h2>10. Third-party services</h2><p>Some features rely on other companies. Payments go through Stripe. Video-meeting links open a meeting service in your browser. Push notifications go through your browser maker's push service. Those services have their own terms. See <a href="/legal/subprocessors">Subprocessors</a>.</p>
+<h2>10. Third-party services</h2><p>Some features rely on other companies. Payments go through Stripe. Video-meeting links open a meeting service in your browser. Push notifications go through your browser maker's push service, or through Google (Android app) and Apple (iPhone app) for the ${app} phone apps. Those services have their own terms. See <a href="/legal/subprocessors">Subprocessors</a>.</p>
 
 <h2>11. Copyright complaints</h2><p>If you believe content sent or stored using ${app} infringes your copyright, send a notice to ${mail(L.dmca || L.contact)}. Include:</p>
 <ul><li>the work you say is infringed</li><li>where the infringing material is</li><li>your contact details</li><li>a statement of good-faith belief</li><li>a statement, under penalty of perjury, that you're authorised to act</li><li>your signature</li></ul>
@@ -114,7 +114,8 @@ Our approach is simple: <b>we run an email service, we don't sell data and we do
 <tr><td>Security and usage records</td><td>Sign-in times, IP addresses, browser/device type, sending counts, admin actions (audit log)</td><td>To protect accounts, prevent abuse and spam, and investigate problems</td></tr>
 <tr><td>Billing (business)</td><td>Business name, billing contact, plan and number of users, Stripe customer and subscription IDs, billing address and tax ID if you give them at checkout</td><td>To charge for paid plans and meet tax obligations. <b>Card details go straight to Stripe. We never see or store them.</b></td></tr>
 <tr><td>Support and reports</td><td>Messages you send to support; abuse reports you make or that are made about an account</td><td>To help you and keep the service safe</td></tr>
-<tr><td>Device notifications</td><td>A push address for each device where you turn on notifications</td><td>To tell you about new mail</td></tr></table>
+<tr><td>Device notifications</td><td>A push address for each browser where you turn on notifications; in the phone apps, the device token Google or Apple gives the app</td><td>To tell you about new mail</td></tr>
+<tr><td>Phone apps</td><td>The ${app} Android and iPhone apps use the same account and data as the website. They add only the notification token above. Files you save or share from the app go where you choose. The apps have no ads or tracking</td><td>To provide the service on your phone</td></tr></table>
 <p>We don't knowingly collect information from children under 16, and we don't ask for sensitive information. Your emails may contain anything you or others choose to write.</p>
 
 <h2>3. How your email is processed</h2><ul>
@@ -234,7 +235,8 @@ Breaking them can lead to paused sending, suspension or closure (see the <a href
 <tr><td>Stripe</td><td>Payments, invoices, tax calculation (business plans)</td><td>Billing contact, business name, billing address, card details (entered directly with Stripe)</td><td>United States</td></tr>
 <tr><td>Have I Been Pwned (Troy Hunt)</td><td>Checks whether a new password appeared in known breaches</td><td>The first 5 characters of a one-way hash of the password. Never the password or your address.</td><td>Global (Cloudflare)</td></tr>
 <tr><td>Cloudflare (Turnstile), if enabled</td><td>Stops bots creating accounts</td><td>Browser signals on the sign-up page</td><td>Global</td></tr>
-<tr><td>Apple, Google, Mozilla, Microsoft push services</td><td>Deliver new-mail notifications to devices where you turned them on</td><td>Sender name and subject, end-to-end encrypted (the push service can't read it)</td><td>Global</td></tr>
+<tr><td>Apple, Google, Mozilla, Microsoft push services</td><td>Deliver new-mail notifications to browsers where you turned them on</td><td>Sender name and subject, end-to-end encrypted (the push service can't read it)</td><td>Global</td></tr>
+<tr><td>Google Firebase Cloud Messaging and Apple Push Notification service</td><td>Deliver new-mail notifications to the ${app} Android and iPhone apps</td><td>Device token, sender name and subject (encrypted in transit, readable by Google or Apple while delivering)</td><td>Global</td></tr>
 ${process.env.FREE_RELAYHOST_ID || process.env.BUSINESS_RELAYHOST_ID ? '<tr><td>Outbound mail relay (e.g. Amazon SES)</td><td>Delivers outgoing mail to recipients</td><td>Outgoing messages</td><td>United States</td></tr>' : ''}
 </table>
 <p>Video-meeting links open ${esc((process.env.MEETING_URL || 'https://meet.jit.si').replace(/^https?:\/\//, ''))} in your browser only when you or a guest click them. No data is sent in advance.</p>

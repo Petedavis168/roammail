@@ -1,0 +1,28 @@
+{
+  "name": "roammail-mobile",
+  "private": true,
+  "version": "1.0.0",
+  "description": "Roammail for Android and iPhone (Capacitor shell around the live web app)",
+  "type": "module",
+  "scripts": {
+    "assets": "node scripts/make-icons.mjs && capacitor-assets generate --android --ios --iconBackgroundColor '#173D56' --iconBackgroundColorDark '#0F1418' --splashBackgroundColor '#173D56' --splashBackgroundColorDark '#0F1418'",
+    "sync": "cap sync",
+    "check": "node scripts/check.mjs"
+  },
+  "dependencies": {
+    "@capacitor/android": "^8.0.0",
+    "@capacitor/app": "^8.0.0",
+    "@capacitor/browser": "^8.0.0",
+    "@capacitor/core": "^8.0.0",
+    "@capacitor/filesystem": "^8.0.0",
+    "@capacitor/ios": "^8.0.0",
+    "@capacitor/push-notifications": "^8.0.0",
+    "@capacitor/share": "^8.0.0",
+    "@capacitor/splash-screen": "^8.0.0",
+    "@capacitor/status-bar": "^8.0.0"
+  },
+  "devDependencies": {
+    "@capacitor/assets": "^3.0.5",
+    "@capacitor/cli": "^8.0.0"
+  }
+}

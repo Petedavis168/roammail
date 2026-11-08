@@ -30,6 +30,7 @@ import { spam } from './spam.js';
 import { startJobs } from './jobs.js';
 import { deviceSetup, deviceSetupApi } from './devicesetup.js';
 import { legalPages, privacy, startRetention } from './privacy.js';
+import { appLinks } from './nativepush.js';
 import { calendar } from './calendar.js';
 import { contacts } from './contacts.js';
 import { groups } from './groups.js';
@@ -74,6 +75,7 @@ app.use('/api', (req, res, next) => {
   next();
 });
 app.get('/healthz', (req, res) => res.json({ ok: true }));
+app.use(appLinks); // before host routing: these must be served on every host, never redirected
 app.use(hosts);
 app.use(ops);
 app.use(abuseDesk);

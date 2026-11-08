@@ -1,3 +1,4 @@
+import { createPortal } from 'react-dom';
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { api, mailUrl } from '../api.js';
 import { messageKey, parseMessageKey, sectionForFolder, folderForSection, loginHref } from '../nav.js';
@@ -410,7 +411,7 @@ export default function Mail({ me, route, refreshMe, theme, setTheme, onLogout }
           </form>
         ) : <div className="spacer" />}
         <div className="topbar-right">
-          {view === 'admin' && <button className="top-btn" onClick={() => setView('mail')}><Icon name="mail" /> <span>Back to mail</span></button>}
+          {view === 'admin' && <button className="top-btn" aria-label="Back to mail" onClick={() => setView('mail')}><Icon name="mail" /> <span>Back to mail</span></button>}
           <button className={`icon-btn on-dark ${panel ? 'pressed' : ''}`} onClick={() => setPanel((p) => (p ? null : panelTab))} title="Tasks, notes and follow-ups (T)" aria-label="Tasks, notes and follow-ups" aria-pressed={!!panel}><Icon name="check" /></button>
           <button className="icon-btn on-dark" onClick={() => setShowSettings(true)} title="Settings" aria-label="Settings"><Icon name="settings" /></button>
           <div className="user-menu-wrap">
@@ -507,6 +508,7 @@ export default function Mail({ me, route, refreshMe, theme, setTheme, onLogout }
                 />
               ) : null}
             </div>
+            {!active && createPortal(<button className="compose-fab" onClick={() => compose()} aria-label="New mail" title="New mail"><Icon name="pen" /></button>, document.body)}
           </main>
           {panel && (
             <TasksPanel tab={panelTab} setTab={(t) => { setPanelTab(t); setPanel(t); }} onClose={() => setPanel(null)}

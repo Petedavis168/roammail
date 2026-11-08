@@ -74,6 +74,8 @@ jobs:
         run: npm run test:tasks --prefix server
       - name: Mail import tests
         run: npm run test:imports --prefix server
+      - name: Phone app push tests (Firebase and Apple fakes)
+        run: npm run test:nativepush --prefix server
       - name: SMS phone verification tests (second instance with the mock SMS service)
         working-directory: server
         run: |
@@ -88,6 +90,9 @@ jobs:
           npm i --no-save playwright@1
           npx playwright install --with-deps chromium
           npm run test:e2e
+      - name: Phone app tests (faked native shell)
+        working-directory: server
+        run: npm run test:mobile
 
       - name: Logs on failure
         if: failure()

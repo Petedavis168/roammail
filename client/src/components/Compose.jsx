@@ -241,12 +241,12 @@ function Composer({ c, me, prefs, sigData, identities, onClose, onSend, focusInd
             )}
           </div>
           <div className="fmt">
+            <button type="button" className="icon-btn" title="Attach files" onClick={() => fileInput.current.click()}><Icon name="clip" size={16} /></button>
             <button type="button" className="icon-btn" title="Bold" onMouseDown={(e) => { e.preventDefault(); exec('bold'); }}><Icon name="bold" size={16} /></button>
             <button type="button" className="icon-btn" title="Italic" onMouseDown={(e) => { e.preventDefault(); exec('italic'); }}><Icon name="italic" size={16} /></button>
             <button type="button" className="icon-btn" title="Underline" onMouseDown={(e) => { e.preventDefault(); exec('underline'); }}><Icon name="underline" size={16} /></button>
             <button type="button" className="icon-btn" title="Bulleted list" onMouseDown={(e) => { e.preventDefault(); exec('insertUnorderedList'); }}><Icon name="list" size={16} /></button>
             <button type="button" className="icon-btn" title="Insert link" onMouseDown={(e) => { e.preventDefault(); addLink(); }}><Icon name="link" size={16} /></button>
-            <button type="button" className="icon-btn" title="Attach files" onClick={() => fileInput.current.click()}><Icon name="clip" size={16} /></button>
             <button type="button" className={`icon-btn ${important ? 'on-red' : ''}`} title="High importance" onClick={() => setImportant((x) => !x)}>!</button>
             <div className="dd">
               <button type="button" className="icon-btn" title="Insert a template" onClick={openTemplates}>📄</button>
