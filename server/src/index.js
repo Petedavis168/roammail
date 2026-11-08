@@ -127,7 +127,7 @@ app.use('/api', outboundAdmin);
 app.use('/api', (req, res) => res.status(404).json({ error: 'Not found' }));
 app.use('/api', (err, req, res, _next) => {
   const status = err.status || (err.code === 'LIMIT_FILE_SIZE' ? 413 : err.authenticationFailed ? 401 : 500);
-  if (status >= 500 && err.expose !== true) console.error(`APP_ERROR [${new Date().toISOString()}] ${req.method} ${req.path}`, err);
+  if (status >= 500 && err.expose !== true) console.error('APP_ERROR [%s] %s %s', new Date().toISOString(), req.method, String(req.path).replace(/[\r\n]/g, ''), err);
   // Never leak internals: only messages we created on purpose (status < 500) or from the mail server are shown
   const safe = status < 500 || err.expose === true || err.responseText || /^mailcow:/.test(err.message || '') || err.code === 'EAUTH';
   const code = (status < 500 || err.expose === true) && /^[a-z][a-z0-9_]*$/.test(String(err.code || '')) ? err.code : undefined; // our own codes only (ai_off, ...)
