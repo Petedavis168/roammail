@@ -16,6 +16,6 @@ if ('serviceWorker' in navigator && (location.protocol === 'https:' || location.
   navigator.serviceWorker.register('/sw.js').catch(() => {});
   // keep this page and its code for offline use (signed-in app pages only)
   if (/^\/\d{8}\//.test(location.pathname) || /^\/\d{6}-\d{3}-[A-Z]{2}\//.test(location.pathname)) {
-    navigator.serviceWorker.ready.then((r) => r.active?.postMessage({ type: 'shell', path: location.pathname })).catch(() => {});
+    navigator.serviceWorker.ready.then((r) => r.active?.postMessage({ type: 'shell' })).catch(() => {});
   }
 }

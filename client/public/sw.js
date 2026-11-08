@@ -58,24 +58,27 @@ self.addEventListener('fetch', (e) => {
   }
 });
 
-// The page asks us to keep the app shell after it loads (its first load happens before we're in control)
-async function keepShell(path) {
-  const url = new URL(path, self.location.origin);
+// Keep the app shell after the page has loaded (its first load happens before we're in control).
+// The page to keep is the one that asked, as the browser reports it (never an address from the message).
+async function keepShell(clientId) {
+  const client = clientId && await self.clients.get(clientId);
+  if (!client) return;
+  const url = new URL(client.url);
   if (url.origin !== self.location.origin || !/^\/(\d{8}|\d{6}-\d{3}-[A-Z]{2})\//.test(url.pathname)) return; // only our own app pages
-  const res = await fetch(url.href, { credentials: 'same-origin' });
+  const res = await fetch(url.origin + url.pathname, { credentials: 'same-origin' });
   if (!res.ok || !(res.headers.get('content-type') || '').includes('text/html')) return;
-  const html = await res.clone().text();
+  const html = await res.text();
   const c = await caches.open(SHELL);
-  await c.put('/__shell', res);
+  await c.put('/__shell', new Response(html, { headers: { 'Content-Type': 'text/html; charset=utf-8' } }));
   const assets = [...html.matchAll(/(?:src|href)="(\/assets\/[^"]+)"/g)].map((m) => m[1]);
   await Promise.all(assets.map(async (a) => { if (!(await c.match(a))) { const r = await fetch(a); if (r.ok) await c.put(a, r); } }));
 }
 self.addEventListener('message', (e) => {
-  // only from Roammail's own pages
+  // only from Roammail's own pages (service workers get an empty e.origin, so check the sending page)
   let from = ''; try { from = new URL(e.source?.url || '').origin; } catch { return; }
   if (from !== self.location.origin) return;
   if (e.data?.type === 'signout') e.waitUntil(Promise.all([caches.delete(DATA), caches.delete(SHELL)]));
-  if (e.data?.type === 'shell' && /^\/[\w/-]*$/.test(e.data.path || '')) e.waitUntil(keepShell(e.data.path).catch(() => {}));
+  if (e.data?.type === 'shell') e.waitUntil(keepShell(e.source?.id).catch(() => {}));
 });
 
 // Push notifications for new mail (sent by the server even when Roammail isn't open)
