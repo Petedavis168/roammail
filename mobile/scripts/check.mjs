@@ -6,7 +6,7 @@ const cfg = JSON.parse(read('capacitor.config.json'));
 const id = cfg.appId;
 ok(/^[a-z]+(\.[a-z0-9]+)+$/.test(id), `appId looks wrong: ${id}`);
 ok(read('android/app/build.gradle').includes(`applicationId "${id}"`), 'Android applicationId differs from capacitor.config.json');
-ok((read('ios/App/App.xcodeproj/project.pbxproj').match(new RegExp(`PRODUCT_BUNDLE_IDENTIFIER = ${id.replace(/\./g, '\\.')};`, 'g')) || []).length === 2, 'iOS bundle id differs from capacitor.config.json');
+ok(read('ios/App/App.xcodeproj/project.pbxproj').split(`PRODUCT_BUNDLE_IDENTIFIER = ${id};`).length - 1 === 2, 'iOS bundle id differs from capacitor.config.json');
 ok(read('ios/App/App.xcodeproj/project.pbxproj').includes('CODE_SIGN_ENTITLEMENTS = App/App.entitlements;'), 'iOS entitlements not wired');
 const ent = read('ios/App/App/App.entitlements');
 ok(ent.includes('aps-environment') && ent.includes('applinks:roammail.net'), 'iOS entitlements missing push or app links');

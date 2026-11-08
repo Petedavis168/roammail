@@ -17,12 +17,12 @@ const verifyJwt = (t, key, alg) => {
 };
 
 // fake Google: token endpoint + FCM send
-const fcmSeen = [];
+const fcmSeen = []; const tokenRequests = [];
 const google = http.createServer((req, res) => {
   let b = ''; req.on('data', (x) => { b += x; }); req.on('end', () => {
     if (req.url === '/token') {
-      const claims = verifyJwt(new URLSearchParams(b).get('assertion'), rsa.publicKey, 'RS256');
-      res.writeHead(claims?.scope?.includes('firebase.messaging') ? 200 : 401, { 'Content-Type': 'application/json' });
+      tokenRequests.push(verifyJwt(new URLSearchParams(b).get('assertion'), rsa.publicKey, 'RS256'));
+      res.writeHead(200, { 'Content-Type': 'application/json' });
       return res.end(JSON.stringify({ access_token: 'goog-token', expires_in: 3600 }));
     }
     const m = JSON.parse(b).message;
@@ -63,6 +63,7 @@ test('Android: signed OAuth, FCM v1 message, dead tokens reported', async () => 
   const s = fcmSeen.at(-1);
   assert.equal(s.url, '/v1/projects/roam-test/messages:send');
   assert.equal(s.auth, 'Bearer goog-token');
+  assert.match(tokenRequests[0]?.scope || '', /firebase\.messaging/, 'OAuth assertion signed with the service-account key');
   assert.equal(s.m.notification.title, 'Ann Lee'); assert.equal(s.m.data.url, '/app'); assert.equal(s.m.android.priority, 'high');
   assert.equal((await sendNative('fcm:gone-token-xxxxxxxxxxxx', payload)).gone, true);
 });
