@@ -18,17 +18,22 @@ const verifyJwt = (t, key, alg) => {
 
 // fake Google: token endpoint + FCM send
 const fcmSeen = []; const tokenRequests = [];
+// fake Google OAuth token endpoint
+const googleAuth = http.createServer((req, res) => {
+  let b = ''; req.on('data', (x) => { b += x; }); req.on('end', () => {
+    tokenRequests.push(verifyJwt(new URLSearchParams(b).get('assertion'), rsa.publicKey, 'RS256'));
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ access_token: 'goog-token', expires_in: 3600 }));
+  });
+});
+// fake FCM send endpoint
 const google = http.createServer((req, res) => {
   let b = ''; req.on('data', (x) => { b += x; }); req.on('end', () => {
-    if (req.url === '/token') {
-      tokenRequests.push(verifyJwt(new URLSearchParams(b).get('assertion'), rsa.publicKey, 'RS256'));
-      res.writeHead(200, { 'Content-Type': 'application/json' });
-      return res.end(JSON.stringify({ access_token: 'goog-token', expires_in: 3600 }));
-    }
     const m = JSON.parse(b).message;
     fcmSeen.push({ url: req.url, auth: req.headers.authorization, m });
-    if (m.token === 'gone-token-xxxxxxxxxxxx') { res.writeHead(404, { 'Content-Type': 'application/json' }); return res.end(JSON.stringify({ error: { status: 'NOT_FOUND', details: [{ errorCode: 'UNREGISTERED' }] } })); }
-    res.writeHead(200, { 'Content-Type': 'application/json' }); res.end('{"name":"x"}');
+    const gone = m.token.startsWith('gone-');
+    res.writeHead(gone ? 404 : 200, { 'Content-Type': 'application/json' });
+    res.end(gone ? JSON.stringify({ error: { status: 'NOT_FOUND', details: [{ errorCode: 'UNREGISTERED' }] } }) : '{"name":"x"}');
   });
 });
 // fake Apple (HTTP/2 cleartext)
@@ -43,12 +48,13 @@ apple.on('stream', (stream, headers) => {
   });
 });
 await new Promise((r) => google.listen(0, '127.0.0.1', r));
+await new Promise((r) => googleAuth.listen(0, '127.0.0.1', r));
 await new Promise((r) => apple.listen(0, '127.0.0.1', r));
-after(async () => { (await import('../src/nativepush.js')).closeNativePush(); google.closeAllConnections(); google.close(); apple.close(); setTimeout(() => process.exit(0), 200).unref(); });
+after(async () => { (await import('../src/nativepush.js')).closeNativePush(); google.closeAllConnections(); google.close(); googleAuth.closeAllConnections(); googleAuth.close(); apple.close(); setTimeout(() => process.exit(0), 200).unref(); });
 
 Object.assign(process.env, {
   FCM_SERVICE_ACCOUNT: Buffer.from(JSON.stringify({ project_id: 'roam-test', client_email: 'push@roam-test.iam.gserviceaccount.com', private_key: rsa.privateKey.export({ type: 'pkcs8', format: 'pem' }) })).toString('base64'),
-  FCM_TOKEN_URL: `http://127.0.0.1:${google.address().port}/token`, FCM_API_BASE: `http://127.0.0.1:${google.address().port}`,
+  FCM_TOKEN_URL: `http://127.0.0.1:${googleAuth.address().port}/token`, FCM_API_BASE: `http://127.0.0.1:${google.address().port}`,
   APNS_KEY: ec.privateKey.export({ type: 'pkcs8', format: 'pem' }), APNS_KEY_ID: 'ABC123DEFG', APNS_TEAM_ID: 'TEAM123456',
   APNS_HOST: `http://127.0.0.1:${apple.address().port}`,
   ANDROID_CERT_SHA256: Array(32).fill('AB').join(':'), APPLE_TEAM_ID: 'TEAM123456',
