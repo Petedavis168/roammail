@@ -152,7 +152,13 @@ config.billing = {
   standardFreeMailboxes: Number(env.STANDARD_FREE_MAILBOXES || 0),
   graceDays: Number(env.BILLING_GRACE_DAYS || 7),
   tax: env.STRIPE_TAX === 'true',                       // Stripe Tax: automatic sales tax / VAT
-  trialDays: Number(env.TRIAL_DAYS || 0),                // free trial for a business's first subscription
+  trialDays: Number(env.TRIAL_DAYS || 0),
+  // Personal Premium ($5/month or $50/year): 100 GB, own domain, unlimited AI help. Hidden until both prices are set.
+  premiumMonthly: env.STRIPE_PRICE_PREMIUM_MONTHLY || '',
+  premiumYearly: env.STRIPE_PRICE_PREMIUM_YEARLY || '',
+  premiumPerMonth: Number(env.PREMIUM_PRICE_MONTHLY || 5),
+  premiumPerYear: Number(env.PREMIUM_PRICE_YEARLY || 50),
+  premiumQuotaMb: Number(env.PREMIUM_QUOTA_MB || 102400),                // free trial for a business's first subscription
   emails: env.BILLING_EMAILS !== 'false',                 // receipts, failed-payment and trial emails to business admins
 };
 config.billing.enabled = (env.BILLING_ENABLED ?? (config.billing.stripeKey ? 'true' : 'false')) === 'true';

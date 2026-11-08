@@ -173,6 +173,7 @@ CREATE TABLE IF NOT EXISTS passkeys (
   name TEXT, creds TEXT NOT NULL, created_at INTEGER NOT NULL, last_used INTEGER
 );
 CREATE INDEX IF NOT EXISTS passkeys_email ON passkeys(email);
+CREATE TABLE IF NOT EXISTS premium (email TEXT PRIMARY KEY, customer TEXT, subscription TEXT, status TEXT NOT NULL DEFAULT 'none', billing_interval TEXT, until INTEGER, domain_org INTEGER, updated_at INTEGER);
 CREATE TABLE IF NOT EXISTS ai_usage (email TEXT NOT NULL, month TEXT NOT NULL, count INTEGER NOT NULL DEFAULT 0, PRIMARY KEY (email, month));
 CREATE TABLE IF NOT EXISTS support_tickets (
   id INTEGER PRIMARY KEY AUTOINCREMENT, email TEXT NOT NULL, account TEXT, topic TEXT, message TEXT, ip TEXT, at INTEGER NOT NULL,

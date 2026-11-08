@@ -1081,3 +1081,9 @@ details.card summary { cursor: pointer; }
 .needs-reply .nr-head { display: flex; align-items: center; justify-content: space-between; margin: 2px 0 4px; }
 .needs-reply ul { list-style: none; padding: 0; margin: 0 0 4px; }
 .needs-reply li .link { text-align: left; padding: 3px 0; font-weight: 400; }
+
+/* Premium */
+.premium-perks { list-style: none; padding: 0; margin: 0 0 14px; }
+.premium-perks li { display: flex; align-items: center; gap: 8px; padding: 5px 0; }
+.premium-buy { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.premium-buy p { flex-basis: 100%; }

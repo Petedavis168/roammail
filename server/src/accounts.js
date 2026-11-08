@@ -282,7 +282,7 @@ accounts.get('/domains', wrap(async (req, res) => {
 
 // Step 1: claim a domain (creates the organization if needed)
 /** Is this a domain a business can bring? Returns the cleaned domain or throws with a plain-English reason. */
-async function checkNewDomain(input) {
+export async function checkNewDomain(input) {
   // plain string cutting (no backtracking regexes) on a length-capped input
   let domain = String(input || '').slice(0, 300).trim().toLowerCase();
   for (const p of ['https://', 'http://']) if (domain.startsWith(p)) domain = domain.slice(p.length);
@@ -297,7 +297,7 @@ async function checkNewDomain(input) {
   return domain;
 }
 /** Create the business and its (pending) domain for an owner. */
-async function createOrgWithDomain(owner, domain, orgName, ownerLocal = null) {
+export async function createOrgWithDomain(owner, domain, orgName, ownerLocal = null) {
   const name = String(orgName || domain).trim().slice(0, 120) || domain;
   const orgId = await q.insert('INSERT INTO orgs(name, owner_email, max_mailboxes) VALUES(?, ?, ?)', name, owner, config.business.maxMailboxes);
   await q.run("INSERT INTO members(email, org_id, role) VALUES(?, ?, 'admin')", owner, orgId);

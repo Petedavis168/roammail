@@ -155,6 +155,11 @@ billingWebhook.post('/api/billing/webhook', express.raw({ type: 'application/jso
   if (!valid) { console.warn('SECURITY_BAD_WEBHOOK signature'); return res.status(400).json({ error: 'bad signature' }); }
   const event = JSON.parse(req.body.toString('utf8'));
   if (await q.get('SELECT 1 FROM billing_events WHERE id = ?', event.id)) return res.json({ received: true, duplicate: true });
+  // Personal Premium subscriptions (premium.js)
+  if (await (await import('./premium.js')).premiumWebhook(event)) {
+    await q.run('INSERT INTO billing_events(id, type, org_id) VALUES(?, ?, ?)', event.id, event.type, null);
+    return res.json({ received: true });
+  }
   const obj = event.data?.object || {};
   const orgId = Number(obj.metadata?.org_id || obj.subscription_details?.metadata?.org_id || 0) || (await q.get('SELECT id FROM orgs WHERE stripe_customer = ?', obj.customer || ''))?.id;
   await q.run('INSERT INTO billing_events(id, type, org_id) VALUES(?, ?, ?)', event.id, event.type, orgId || null);
