@@ -107,6 +107,15 @@ test('sign-up: birthday, recovery email and mobile number are required and store
   assert.ok(email);
 });
 
+test('client error reports: accepted without sign-in, validated, de-duplicated', async () => {
+  const c = new Client();
+  assert.equal((await c.post('/api/client-error', {})).status, 400);
+  const body = { message: `TypeError: x is undefined ${run}`, source: '/assets/index-abc.js:1:200', page: '/12345678/message/abc.12', app: 'android' };
+  assert.equal((await c.post('/api/client-error', body)).status, 204);
+  assert.equal((await c.post('/api/client-error', body)).status, 204, 'repeat is accepted but logged once');
+  assert.equal((await c.req('POST', '/api/client-error', body, { csrf: false })).status, 403, 'still needs the CSRF header');
+});
+
 test('sessions: opaque cookie, logout kills stolen copies, devices can be signed out', async () => {
   const a = new Client(); const email = await signup(a, `s${run}`);
   assert.ok(!decodeURIComponent(a.cookie).includes(PW));
