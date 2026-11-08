@@ -1,3 +1,4 @@
+import { clearOutbox } from './outbox.js';
 import { refreshPush } from './push.js';
 import { useEffect, useState } from 'react';
 import { api, setMailboxId } from './api.js';
@@ -57,7 +58,12 @@ export default function App() {
   // Signed out (or the session ended) while on a mailbox URL: go to the sign-in page
   useEffect(() => { if (route.id && me === null && hostsReady) location.assign(loginHref()); }, [me, hostsReady]);
   const afterAuth = (r) => location.assign(r?.redirect || '/');
-  const signOut = (all) => api.post('/api/logout', all ? { all: true } : {}).finally(() => location.assign(loginHref()));
+  const signOut = async (all) => {
+    // Forget the offline copy of mail and anything waiting in the Outbox on this device
+    navigator.serviceWorker?.controller?.postMessage({ type: 'signout' });
+    await clearOutbox().catch(() => {});
+    api.post('/api/logout', all ? { all: true } : {}).finally(() => location.assign(loginHref()));
+  };
 
   if (me === undefined || !hostsReady || (route.id && !me)) return <div className="splash"><div className="spinner" /></div>;
   return (

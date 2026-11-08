@@ -7,6 +7,8 @@ import { useToast } from './Toast.jsx';
 import { signatureHtml, defaultChoice } from '../signatures.js';
 import { safeHtml, onSafePaste } from '../safehtml.js';
 import { presets, fmtWhen, localInputValue } from '../snooze.js';
+import { queue, flushOutbox, isOffline } from '../outbox.js';
+import { offlineAllowed } from '../api.js';
 
 const sigBlock = (html) => (html ? `<div class="signature" data-sig="1"><br>${safeHtml(html)}</div>` : '');
 
@@ -305,6 +307,16 @@ export default function ComposeManager({ composers, setComposers, me, prefs, sig
   const toast = useToast();
   const [focused, setFocused] = useState(null);
   const remove = (id) => setComposers((cs) => cs.filter((c) => c.id !== id));
+  // Outbox: send what was written while offline as soon as we're back online
+  useEffect(() => {
+    const flush = () => flushOutbox().then((r) => {
+      if (r.sent) { toast(`${r.sent === 1 ? 'Your offline message was' : `${r.sent} offline messages were`} sent`); onSent(); }
+      for (const f of r.failed) toast(`Couldn't send "${f.summary}": ${f.error}`, { error: true, duration: 10000 });
+    });
+    flush();
+    window.addEventListener('online', flush);
+    return () => window.removeEventListener('online', flush);
+  }, []);
 
   const onSend = (c, payload) => {
     remove(c.id);
@@ -313,11 +325,15 @@ export default function ComposeManager({ composers, setComposers, me, prefs, sig
     let undone = false;
     const doSend = async () => {
       if (undone) return;
+      const form = toForm(payload);
       try {
-        await api.form('/api/send', toForm(payload), payload.asMailbox);
+        await api.form('/api/send', form, payload.asMailbox);
         toast('Message sent');
         onSent();
       } catch (e) {
+        if (isOffline(e) && offlineAllowed()) { // no connection: keep it on this device and send it when we're back online
+          try { await queue(form, payload.asMailbox, payload.subject || '(no subject)'); toast('You’re offline. Saved to your Outbox; it will send when you reconnect.'); return; } catch { /* fall through */ }
+        }
         toast(`Couldn't send: ${e.message}`, { error: true, duration: 8000 });
         setComposers((cs) => [...cs, { id: Date.now(), initial: { ...c.initial, ...payload, html: payload.html, draftUid: payload.draftUid } }]);
       }

@@ -102,6 +102,9 @@ jobs:
       - name: Premium tests (Stripe stand-in)
         working-directory: server
         run: npm run test:premium
+      - name: Offline mode tests (service worker, Outbox)
+        working-directory: server
+        run: npm run test:offline
 
       - name: Logs on failure
         if: failure()

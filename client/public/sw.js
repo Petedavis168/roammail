@@ -1,11 +1,76 @@
-// Minimal service worker: makes the app installable and shows a friendly page when offline.
+// Roammail service worker (web and phone apps):
+//  - app shell: the page and its code are kept on the device, so Roammail opens without a connection
+//  - recent mail: folder lists, message lists and messages you opened are kept, so you can read them offline
+//    (only if you ticked "Keep me signed in", always in the phone apps: the app marks those requests X-Offline-Ok)
+//    (always fetched fresh when online; the saved copy is only used when the network fails)
+//  - push notifications for new mail (web; the phone apps use native push)
+// Everything saved is deleted when you sign out ({type: 'signout'} message) or the server says you're signed out.
+const SHELL = 'shell-v2';
+const DATA = 'mail-v2';
+const MAX_DATA = 300; // saved API answers
+const OFFLINE_API = /^\/api\/(me|folders|messages|message|thread|accounts|identities|signup\/config|ai\/status|premium|push\/key)(\/|$|\?)/;
+
 self.addEventListener('install', (e) => self.skipWaiting());
-self.addEventListener('activate', (e) => e.waitUntil(self.clients.claim()));
+self.addEventListener('activate', (e) => e.waitUntil((async () => {
+  for (const k of await caches.keys()) if (![SHELL, DATA].includes(k)) await caches.delete(k);
+  await self.clients.claim();
+})()));
+
+const offlinePage = () => new Response(
+  '<!doctype html><meta name=viewport content="width=device-width"><body style="font-family:sans-serif;text-align:center;padding:20vh 20px;color:#444"><h2>You\'re offline</h2><p>Your mail will be here when you reconnect.</p><button onclick="location.reload()">Try again</button></body>',
+  { headers: { 'Content-Type': 'text/html' } });
+
+async function trim() {
+  const c = await caches.open(DATA);
+  const keys = await c.keys();
+  for (const k of keys.slice(0, Math.max(0, keys.length - MAX_DATA))) await c.delete(k);
+}
+
 self.addEventListener('fetch', (e) => {
-  if (e.request.mode !== 'navigate') return;
-  e.respondWith(fetch(e.request).catch(() => new Response(
-    '<!doctype html><meta name=viewport content="width=device-width"><body style="font-family:sans-serif;text-align:center;padding:20vh 20px;color:#444"><h2>You\'re offline</h2><p>Your mail will be here when you reconnect.</p></body>',
-    { headers: { 'Content-Type': 'text/html' } })));
+  const req = e.request;
+  const url = new URL(req.url);
+  if (req.method !== 'GET' || url.origin !== self.location.origin) return;
+
+  // Pages: network first, then the saved app page (the app shows whatever mail it has saved)
+  if (req.mode === 'navigate') {
+    e.respondWith(fetch(req).then((res) => {
+      if (res.ok && (res.headers.get('content-type') || '').includes('text/html')) caches.open(SHELL).then((c) => c.put('/__shell', res.clone()));
+      return res;
+    }).catch(async () => (await caches.match('/__shell')) || offlinePage()));
+    return;
+  }
+  // Built code and styles have unique names: keep them
+  if (url.pathname.startsWith('/assets/')) {
+    e.respondWith(caches.match(req).then((hit) => hit || fetch(req).then((res) => {
+      if (res.ok) { const copy = res.clone(); caches.open(SHELL).then((c) => c.put(req, copy)); }
+      return res;
+    })));
+    return;
+  }
+  // Mail data: always fresh when online; the saved copy only when the network fails
+  if (OFFLINE_API.test(url.pathname + url.search) && !url.pathname.startsWith('/api/attachment')) {
+    e.respondWith(fetch(req).then((res) => {
+      if (res.status === 401) e.waitUntil(caches.delete(DATA)); // signed out: forget the saved mail
+      // keep a copy only for people who chose to stay signed in
+      else if (res.ok && req.headers.get('x-offline-ok') === '1') { const copy = res.clone(); e.waitUntil(caches.open(DATA).then((c) => c.put(req, copy)).then(trim)); }
+      return res;
+    }).catch(async () => (await caches.match(req)) || new Response(JSON.stringify({ error: 'You’re offline. This hasn’t been saved on this device yet.', offline: true }), { status: 503, headers: { 'Content-Type': 'application/json' } })));
+  }
+});
+
+// The page asks us to keep the app shell after it loads (its first load happens before we're in control)
+async function keepShell(path) {
+  const res = await fetch(path, { credentials: 'same-origin' });
+  if (!res.ok || !(res.headers.get('content-type') || '').includes('text/html')) return;
+  const html = await res.clone().text();
+  const c = await caches.open(SHELL);
+  await c.put('/__shell', res);
+  const assets = [...html.matchAll(/(?:src|href)="(\/assets\/[^"]+)"/g)].map((m) => m[1]);
+  await Promise.all(assets.map(async (a) => { if (!(await c.match(a))) { const r = await fetch(a); if (r.ok) await c.put(a, r); } }));
+}
+self.addEventListener('message', (e) => {
+  if (e.data?.type === 'signout') e.waitUntil(Promise.all([caches.delete(DATA), caches.delete(SHELL)]));
+  if (e.data?.type === 'shell' && /^\/[\w/-]*$/.test(e.data.path || '')) e.waitUntil(keepShell(e.data.path).catch(() => {}));
 });
 
 // Push notifications for new mail (sent by the server even when Roammail isn't open)
