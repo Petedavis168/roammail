@@ -76,5 +76,10 @@
 	<string>Roammail saves attachments to your photos when you ask it to.</string>
 	<key>NSMicrophoneUsageDescription</key>
 	<string>Roammail uses the microphone only when you record a video to attach to an email.</string>
+	<key>WKAppBoundDomains</key>
+	<array>
+		<string>roammail.net</string>
+		<string>login.roammail.net</string>
+	</array>
 </dict>
 </plist>

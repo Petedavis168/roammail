@@ -6,14 +6,42 @@
     "url": "https://roammail.net/app",
     "hostname": "roammail.net",
     "androidScheme": "https",
-    "allowNavigation": ["roammail.net", "login.roammail.net", "app.roammail.net", "www.roammail.net"],
+    "allowNavigation": [
+      "roammail.net",
+      "login.roammail.net",
+      "app.roammail.net",
+      "www.roammail.net"
+    ],
     "errorPath": "offline.html"
   },
-  "android": { "allowMixedContent": false, "captureInput": true, "webContentsDebuggingEnabled": false },
-  "ios": { "contentInset": "never", "limitsNavigationsToAppBoundDomains": false, "scrollEnabled": true },
+  "android": {
+    "allowMixedContent": false,
+    "captureInput": true,
+    "webContentsDebuggingEnabled": false
+  },
+  "ios": {
+    "contentInset": "never",
+    "limitsNavigationsToAppBoundDomains": true,
+    "scrollEnabled": true
+  },
   "plugins": {
-    "SplashScreen": { "launchShowDuration": 800, "launchAutoHide": true, "backgroundColor": "#173D56", "showSpinner": false },
-    "StatusBar": { "overlaysWebView": false, "style": "DARK", "backgroundColor": "#173D56" },
-    "PushNotifications": { "presentationOptions": ["badge", "sound", "alert"] }
+    "SplashScreen": {
+      "launchShowDuration": 800,
+      "launchAutoHide": true,
+      "backgroundColor": "#173D56",
+      "showSpinner": false
+    },
+    "StatusBar": {
+      "overlaysWebView": false,
+      "style": "DARK",
+      "backgroundColor": "#173D56"
+    },
+    "PushNotifications": {
+      "presentationOptions": [
+        "badge",
+        "sound",
+        "alert"
+      ]
+    }
   }
 }

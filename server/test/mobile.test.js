@@ -76,7 +76,6 @@ test('phone app: notifications, links, attachments and notification taps', async
       const calls = () => page.evaluate(() => window.__calls);
       assert.ok((await calls()).some((c) => c[0] === 'permission'));
       if (platform === 'android') assert.ok((await calls()).some((c) => c[0] === 'channel' && c[1] === 'mail'), 'Android notification channel');
-      assert.ok(!(await page.evaluate(() => navigator.serviceWorker?.controller)), 'no web service worker inside the app');
 
       // 2. a link inside the email opens in the in-app browser, the app itself stays put
       await page.click('text=Plans for Elm Street');

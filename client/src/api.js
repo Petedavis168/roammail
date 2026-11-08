@@ -1,3 +1,6 @@
+import { isNative } from './native.js';
+/** Keep mail on this device for offline use only when the person chose to stay signed in (always in the phone apps). */
+export const offlineAllowed = () => isNative() || localStorage.getItem('remember') === '1';
 // Which mailbox this page works on: the public ID from the URL (roammail.net/{id}/...). The server checks it
 // belongs to one of this browser's signed-in mailboxes, or a shared mailbox they may open.
 let mailboxId = '';
@@ -9,6 +12,7 @@ export const mailUrl = (url) => (mailboxId && url.startsWith('/api/') ? `${url}$
 async function request(method, url, body, { form, asMailbox } = {}) {
   const opts = { method, headers: { 'X-Requested-With': 'mailcow-client' }, credentials: 'same-origin' };
   if ((asMailbox || mailboxId) && url.startsWith('/api/')) opts.headers['X-Mailbox-Id'] = asMailbox || mailboxId;
+  if (offlineAllowed()) opts.headers['X-Offline-Ok'] = '1'; // the service worker may keep a copy for offline reading
   if (form) opts.body = form;
   else if (body !== undefined) {
     opts.headers['Content-Type'] = 'application/json';
