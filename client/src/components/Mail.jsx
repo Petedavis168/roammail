@@ -38,7 +38,10 @@ export default function Mail({ me, route, refreshMe, theme, setTheme, onLogout }
   const [sharedBoxes, setSharedBoxes] = useState([]);
   useEffect(() => { api.get('/api/shared-mailboxes').then(setSharedBoxes).catch(() => {}); }, []);
   // Switching mailbox = changing the ID in the path (a full page load, so nothing from the other mailbox lingers)
-  const switchMailbox = (id) => { if (/^(\d{8}|\d{6}-\d{3}-[A-Z]{2})$/.test(String(id)) && id !== route.id) location.assign(`/${id}/inbox`); }; // only real mailbox IDs, never another site
+  const switchMailbox = (id) => {
+    const m = /^(\d{8}|\d{6}-\d{3}-[A-Z]{2})$/.exec(String(id || '')); // only real mailbox IDs, never another site
+    if (m && m[1] !== route.id) location.assign(`/${encodeURIComponent(m[1])}/inbox`);
+  };
   const [filter, setFilter] = useState('');
   const [search, setSearch] = useState(null); // active query string
   const [searchInput, setSearchInput] = useState('');
