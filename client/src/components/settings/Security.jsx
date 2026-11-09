@@ -43,13 +43,44 @@ function Passkeys() {
   );
 }
 
+const SSO_MSG = {
+  linked: 'Linked. You can now sign in with your work account.', 'wrong-company': 'That account isn’t from your company. Sign in with your work account.',
+  cancelled: 'Linking was cancelled.', failed: 'Something went wrong. Please try again.', expired: 'That took too long. Please try again.',
+};
+function WorkSignIn({ ssoMsg }) {
+  const toast = useToast();
+  const [s, setS] = useState(null);
+  const load = () => api.get('/api/sso/me').then(setS).catch(() => setS(null));
+  useEffect(() => { load(); if (ssoMsg && SSO_MSG[ssoMsg]) toast(t(SSO_MSG[ssoMsg]), { error: ssoMsg !== 'linked' }); }, []);
+  if (!s?.provider) return null;
+  const link = async () => {
+    const pw = prompt(t('Enter your Roammail password to link your work account'));
+    if (!pw) return;
+    try { location.href = (await api.post('/api/sso/link', { password: pw })).url; } catch (e) { toast(e.message, { error: true }); }
+  };
+  const unlink = async () => {
+    if (!confirm(t('Stop signing in with your work account? You can link it again later.'))) return;
+    try { await api.del('/api/sso/link'); load(); } catch (e) { toast(e.message, { error: true }); }
+  };
+  return (
+    <>
+      <h3>{t(`Sign in with ${s.providerName}`)}</h3>
+      <p className="muted small">{t(`${s.company || 'Your company'} lets you sign in with your work account. Your company’s own sign-in rules and 2-step verification apply.`)}</p>
+      {s.linked
+        ? <p><Icon name="check" size={14} /> {t('Linked to')} <b>{s.linked.account || s.providerName}</b>{' '}<button className="link" onClick={unlink}>{t('Unlink')}</button></p>
+        : <button className="btn" onClick={link}>{t(`Link my ${s.providerName} account`)}</button>}
+      <p className="muted small">{t('Changing your password or signing out everywhere unlinks it; link it again afterwards.')}</p>
+    </>
+  );
+}
+
 function device(ua = '') {
   const b = /Edg\//.test(ua) ? 'Edge' : /Chrome\//.test(ua) ? 'Chrome' : /Firefox\//.test(ua) ? 'Firefox' : /Safari\//.test(ua) ? 'Safari' : ua.split('/')[0] || 'Unknown';
   const os = /Windows/.test(ua) ? 'Windows' : /iPhone|iPad/.test(ua) ? 'iOS' : /Mac OS/.test(ua) ? 'macOS' : /Android/.test(ua) ? 'Android' : /Linux/.test(ua) ? 'Linux' : '';
   return `${b}${os ? ` on ${os}` : ''}`;
 }
 
-export default function Security({ me }) {
+export default function Security({ me, ssoMsg }) {
   const toast = useToast();
   const [s, setS] = useState(null);
   const [setup, setSetup] = useState(null);
@@ -127,6 +158,7 @@ export default function Security({ me }) {
       </div>
 
       <Passkeys />
+      <WorkSignIn ssoMsg={ssoMsg} />
 
       <h3>{t("Change password")}</h3>
       <form className="form narrow" onSubmit={async (e) => {

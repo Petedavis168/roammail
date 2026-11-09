@@ -102,14 +102,18 @@ publicSecurity.post('/login', loginLimiter, wrap(async (req, res) => {
 }));
 
 /** Last steps of every sign-in (password, 2-step code, passkey): session, alerts, where to go next. */
-export async function finishLogin(req, res, { email, password, remember, how }) {
+/** Start the session after a successful sign-in; returns where to go next. */
+export async function finishLoginSession(req, res, { email, password, remember, how }) {
   await loginSucceeded(email, req.ip);
   await logEvent(req, email, true, how);
   await setSession(res, { email, password, name: '', remember }, req);
   await newDeviceCheck(req, email, password);
   const mailboxId = await ensureMailboxId(email);
   await ensureSetupRow(email);
-  res.json({ email, mailboxId, redirect: inboxUrl(mailboxId), setupRequired: (await setupState(email)).setupRequired });
+  return { email, mailboxId, redirect: inboxUrl(mailboxId), setupRequired: (await setupState(email)).setupRequired };
+}
+export async function finishLogin(req, res, opts) {
+  res.json(await finishLoginSession(req, res, opts));
 }
 
 publicSecurity.post('/login/2fa', loginLimiter, wrap(async (req, res) => {

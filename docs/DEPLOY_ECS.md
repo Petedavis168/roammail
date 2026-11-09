@@ -115,7 +115,8 @@ The allowlist and a reference implementation of the check are in `server/src/pro
 | `FREE_RELAYHOST_ID` / `BUSINESS_RELAYHOST_ID` | mailcow relayhost ids for free vs business domains (separate reputations, 5e) |
 | `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN` (secret), `TWILIO_VERIFY_SID` | Turns on SMS phone verification for free sign-ups (5b). One free account per number. |
 | `FBL_MAILBOX`, `FBL_PASSWORD` (secret) | Mailbox that receives feedback-loop (spam complaint) reports; each complaint pauses the sender (5c) |
-| `MS_CLIENT_ID`, `MS_CLIENT_SECRET` (secret) | Microsoft sign-in for Outlook imports (item 6). Entra app: personal + work accounts, redirect `https://roammail.net/api/imports/outlook/callback`, permissions `IMAP.AccessAsUser.All`, `offline_access` |
+| `MS_CLIENT_ID`, `MS_CLIENT_SECRET` (secret) | Microsoft sign-in for Outlook imports (item 6). Entra app: personal + work accounts, redirect `https://roammail.net/api/imports/outlook/callback`, permissions `IMAP.AccessAsUser.All`, `offline_access` | **Also used for "Sign in with Microsoft" for businesses:** add the redirect `https://roammail.net/api/sso/callback/microsoft` (the `openid email profile` permissions are included by default)
+| `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` (secret) | "Sign in with Google" for businesses on Google Workspace. Google Cloud console → APIs & Services → Credentials → OAuth client ID (Web application), redirect `https://roammail.net/api/sso/callback/google`, scopes `openid email profile`. The button stays hidden while unset |
 | `BUSINESS_SEND_RATE` | Business hourly send limit (default 100) |
 
 **Provisioner allowlist:** the watchdog now also reads `GET get/logs/postfix/N` (bounces and the compromised-account guard).

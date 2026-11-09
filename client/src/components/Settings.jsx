@@ -166,7 +166,7 @@ const TABS = [
   ['autoreply', 'Automatic replies', 'reply'], ['junk', 'Junk & spam', 'junk'], ['rules', 'Rules', 'filter'], ['import', 'Import mail', 'import'], ['apps', 'Phone & apps', 'phone'], ['privacy', 'Privacy', 'shield'], ['premium', 'Premium', 'spark'],
 ];
 
-export default function SettingsPanel({ prefs, setPrefs, me, folders, sigData, reloadSigs, onClose, initialTab = 'general', importMsg, premiumMsg }) {
+export default function SettingsPanel({ prefs, setPrefs, me, folders, sigData, reloadSigs, onClose, initialTab = 'general', importMsg, premiumMsg, ssoMsg }) {
   const [tab, setTab] = useState(initialTab);
   // Premium tab only where it can be bought (personal accounts, Stripe prices set) and never in the iPhone app
   const [showPremium, setShowPremium] = useState(false);
@@ -185,7 +185,7 @@ export default function SettingsPanel({ prefs, setPrefs, me, folders, sigData, r
             {tab === 'general' && <General prefs={prefs} setPrefs={setPrefs} me={me} />}
             {tab === 'signatures' && <Signatures sigData={sigData} reloadSigs={reloadSigs} prefs={prefs} setPrefs={setPrefs} />}
             {tab === 'templates' && <Templates />}
-            {tab === 'security' && <Security me={me} />}
+            {tab === 'security' && <Security me={me} ssoMsg={ssoMsg} />}
             {tab === 'autoreply' && <AutoReply me={me} />}
             {tab === 'junk' && <SpamSettings />}
             {tab === 'rules' && <Rules folders={folders} categories={prefs.categories} me={me} />}

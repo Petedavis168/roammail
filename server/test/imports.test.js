@@ -90,10 +90,10 @@ test('import: bulk CSV only works for mailboxes the admin manages', async () => 
   assert.equal((await me.post('/api/admin/imports/bulk', { csv: 'name,email\na,b' })).status, 400, 'needs the right columns');
 });
 
-test('import: Outlook sign-in is offered only when Microsoft is set up; callback rejects a forged state', async () => {
+test('import: Outlook sign-in goes to Microsoft (set up in the test settings); callback rejects a forged state', async () => {
   const me = await user('impms');
   const s = await me.get('/api/imports/outlook/start');
-  assert.equal(s.status, 400); assert.match(s.data.error, /not set up/);
+  assert.equal(s.status, 200); assert.match(s.data.url, /^https:\/\/login\.microsoftonline\.com\/common\/oauth2\/v2\.0\/authorize\?.*client_id=ms-client/);
   const cb = await fetch(`${BASE}/api/imports/outlook/callback?code=x&state=forged`, { redirect: 'manual' });
   assert.equal(cb.status, 302); assert.match(cb.headers.get('location'), /import=expired/);
 });

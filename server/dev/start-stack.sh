@@ -9,6 +9,7 @@ pkill -f dev/mock-stripe.js || true
 pkill -f dev/mock-provisioner.js || true
 pkill -f dev/mock-sms.js || true
 pkill -f dev/mock-anthropic.js || true
+pkill -f dev/mock-idp.js || true
 pkill -f src/index.js || true
 sleep 0.5
 if [ -n "${1:-}" ] && ! pgrep -f "python3 -m radicale" >/dev/null; then
@@ -26,6 +27,7 @@ node dev/mock-stripe.js > "${TMPDIR:-/tmp}/stripe.log" 2>&1 &
 node dev/mock-provisioner.js > "${TMPDIR:-/tmp}/provisioner.log" 2>&1 &
 node dev/mock-sms.js > "${TMPDIR:-/tmp}/sms.log" 2>&1 &
 node dev/mock-anthropic.js > "${TMPDIR:-/tmp}/anthropic.log" 2>&1 &
+node dev/mock-idp.js > "${TMPDIR:-/tmp}/idp.log" 2>&1 &
 DATA_DIR="$DATA" node --env-file=dev/test.env --disable-warning=ExperimentalWarning src/index.js > "${TMPDIR:-/tmp}/app.log" 2>&1 &
 # system no-reply mailbox (password reset / verification emails)
 curl -sf -X POST -H "Content-Type: application/json" -d '{"email":"no-reply@free.test","login":"no-reply@free.test","password":"NoReply-Test-Pass-2026"}' "${GREENMAIL_API:-http://127.0.0.1:8080}/api/user" >/dev/null || true
