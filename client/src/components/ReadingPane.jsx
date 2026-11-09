@@ -4,6 +4,7 @@ import { Icon } from '../icons.jsx';
 import { fmtDate, fmtSize, personName, avatarColor, initials } from '../util.js';
 import MessageBody from './MessageBody.jsx';
 import AiPanel from './AiPanel.jsx';
+import { t } from '../i18n.js';
 
 function AddrList({ label, list }) {
   if (!list?.length) return null;
@@ -24,8 +25,8 @@ function SecurityBanner({ m, sender, orgDomains }) {
   return (
     <div className="sec-banner">
       <Icon name="alert" size={18} />
-      <div><b>Be careful with this message</b>{issues.map((t, i) => <div key={i}>{t}</div>)}
-        <small>Don't click links, open attachments or reply with personal information unless you're sure it's genuine.</small></div>
+      <div><b>{t("Be careful with this message")}</b>{issues.map((t, i) => <div key={i}>{t}</div>)}
+        <small>{t("Don't click links, open attachments or reply with personal information unless you're sure it's genuine.")}</small></div>
     </div>
   );
 }
@@ -35,8 +36,8 @@ function WhyJunk({ m }) {
   return (
     <div className="why-junk">
       <Icon name="junk" size={16} />
-      <div><b>Why is this in Junk?</b> <span className="muted small">Spam score {m.spam.score.toFixed(1)} (blocked at {m.spam.threshold})</span>
-        {m.spam.reasons.length > 0 ? <ul>{m.spam.reasons.map((r) => <li key={r}>{r}</li>)}</ul> : <div className="small">Several small spam signals added up.</div>}
+      <div><b>{t("Why is this in Junk?")}</b> <span className="muted small">{t("Spam score")}{' '}{m.spam.score.toFixed(1)}{' '}{t("(blocked at")}{' '}{m.spam.threshold})</span>
+        {m.spam.reasons.length > 0 ? <ul>{m.spam.reasons.map((r) => <li key={r}>{r}</li>)}</ul> : <div className="small">{t("Several small spam signals added up.")}</div>}
       </div>
     </div>
   );
@@ -68,16 +69,16 @@ function InviteCard({ m, me }) {
         <b>{inv.method === 'CANCEL' ? 'Canceled: ' : inv.method === 'REPLY' ? 'Reply: ' : ''}{inv.title}</b>
         <div className="small">{when}{inv.repeat && inv.repeat !== 'none' ? ` · repeats ${inv.repeat}` : ''}</div>
         {inv.location && <div className="small muted">{inv.location}</div>}
-        {inv.organizer && inv.method === 'REQUEST' && <div className="small muted">Organizer: {inv.organizer.name || inv.organizer.email}</div>}
+        {inv.organizer && inv.method === 'REQUEST' && <div className="small muted">{t("Organizer:")}{' '}{inv.organizer.name || inv.organizer.email}</div>}
         {inv.method === 'REQUEST' && (
           <div className="inv-actions">
-            {state || mine && mine !== 'NEEDS-ACTION' ? <span className="pill ok">{label[state || mine]}</span> : <span className="small">Going?</span>}
-            <button className="btn sm" disabled={busy} onClick={() => respond('accept')}>Yes</button>
-            <button className="btn sm" disabled={busy} onClick={() => respond('tentative')}>Maybe</button>
-            <button className="btn sm" disabled={busy} onClick={() => respond('decline')}>No</button>
+            {state || mine && mine !== 'NEEDS-ACTION' ? <span className="pill ok">{label[state || mine]}</span> : <span className="small">{t("Going?")}</span>}
+            <button className="btn sm" disabled={busy} onClick={() => respond('accept')}>{t("Yes")}</button>
+            <button className="btn sm" disabled={busy} onClick={() => respond('tentative')}>{t("Maybe")}</button>
+            <button className="btn sm" disabled={busy} onClick={() => respond('decline')}>{t("No")}</button>
           </div>
         )}
-        {inv.method === 'REPLY' && state && <div className="small ok">Your calendar was updated.</div>}
+        {inv.method === 'REPLY' && state && <div className="small ok">{t("Your calendar was updated.")}</div>}
       </div>
     </div>
   );
@@ -111,26 +112,26 @@ function ThreadMessage({ m, expanded, onToggle, onReply, prefs, setPrefs, last, 
         <span className="avatar lg" style={{ background: avatarColor(sender.address) }}>{initials(sender)}</span>
         <div className="who">
           <div><b>{personName(sender)}</b> <span className="muted">&lt;{sender.address}&gt;</span>
-            {external && <span className="ext-tag" title="This message came from outside your organization">External</span>}
-            {m.security?.dkim === 'pass' && m.security?.dmarc === 'pass' && <span className="verified" title="Sender's domain verified (DKIM + DMARC)"><Icon name="lock" size={12} /></span>}
+            {external && <span className="ext-tag" title={t("This message came from outside your organization")}>{t("External")}</span>}
+            {m.security?.dkim === 'pass' && m.security?.dmarc === 'pass' && <span className="verified" title={t("Sender's domain verified (DKIM + DMARC)")}><Icon name="lock" size={12} /></span>}
           </div>
           <div className="muted small" onClick={(e) => { e.stopPropagation(); setDetails((d) => !d); }} style={{ cursor: 'pointer' }}>
             to {[...(m.to || []), ...(m.cc || [])].map((a) => (a.address?.toLowerCase() === me?.email?.toLowerCase() ? 'me' : personName(a))).join(', ') || 'undisclosed recipients'} <Icon name="down" size={12} />
           </div>
           {details && (
             <div className="details">
-              <AddrList label="From:" list={m.from} /><AddrList label="To:" list={m.to} /><AddrList label="Cc:" list={m.cc} />
-              <AddrList label="Reply-To:" list={m.replyTo} /><div className="addr-line"><span>Date:</span> {fmtDate(m.date, true)}</div>
+              <AddrList label={t("From:")} list={m.from} /><AddrList label={t("To:")} list={m.to} /><AddrList label={t("Cc:")} list={m.cc} />
+              <AddrList label={t("Reply-To:")} list={m.replyTo} /><div className="addr-line"><span>{t("Date:")}</span> {fmtDate(m.date, true)}</div>
             </div>
           )}
         </div>
         <div className="tmsg-actions" onClick={(e) => e.stopPropagation()}>
           <span className="date">{fmtDate(m.date, true)}</span>
-          <button className="icon-btn" title="Reply" onClick={() => onReply(m, 'reply')}><Icon name="reply" /></button>
-          <button className="icon-btn" title="Reply all" onClick={() => onReply(m, 'all')}><Icon name="replyAll" /></button>
-          <button className="icon-btn" title="Forward" onClick={() => onReply(m, 'forward')}><Icon name="forward" /></button>
+          <button className="icon-btn" title={t("Reply")} onClick={() => onReply(m, 'reply')}><Icon name="reply" /></button>
+          <button className="icon-btn" title={t("Reply all")} onClick={() => onReply(m, 'all')}><Icon name="replyAll" /></button>
+          <button className="icon-btn" title={t("Forward")} onClick={() => onReply(m, 'forward')}><Icon name="forward" /></button>
           <div className="dd" onMouseLeave={() => setMenu(false)}>
-            <button className="icon-btn" onClick={() => setMenu((x) => !x)} title="More"><Icon name="more" /></button>
+            <button className="icon-btn" onClick={() => setMenu((x) => !x)} title={t("More")}><Icon name="more" /></button>
             {menu && (
               <div className="menu right">
                 {sender.address && <button onClick={async () => {
@@ -138,17 +139,17 @@ function ThreadMessage({ m, expanded, onToggle, onReply, prefs, setPrefs, last, 
                   const parts = (sender.name || '').trim().split(/\s+/);
                   try { await api.post('/api/address-contacts', { first: parts[0] || '', last: parts.slice(1).join(' '), name: sender.name || '', emails: [{ value: sender.address, type: 'work' }] }); alert(`${sender.name || sender.address} was added to your contacts`); }
                   catch (e) { alert(e.message); }
-                }}><Icon name="users" /> Add to contacts</button>}
-                {onAddTask && <button onClick={() => { setMenu(false); onAddTask(m); }}><Icon name="check" /> Add as task <kbd>Shift+T</kbd></button>}
+                }}><Icon name="users" />{' '}{t("Add to contacts")}</button>}
+                {onAddTask && <button onClick={() => { setMenu(false); onAddTask(m); }}><Icon name="check" />{' '}{t("Add as task")}{' '}<kbd>{t("Shift+T")}</kbd></button>}
                 {onFollowUp && m.messageId && <>
-                  <div className="menu-note">Remind me if no reply</div>
+                  <div className="menu-note">{t("Remind me if no reply")}</div>
                   {[['Tomorrow', 1], ['In 3 days', 3], ['In a week', 7]].map(([l, d]) => (
                     <button key={d} onClick={() => { setMenu(false); onFollowUp(m, d); }}><Icon name="clock" /> {l}</button>
                   ))}
                 </>}
-                {sender.address && <button onClick={() => { setMenu(false); onBlock(sender.address); }}><Icon name="block" /> Block {sender.address}</button>}
-                <button onClick={() => window.open(mailUrl(`/api/raw?folder=${encodeURIComponent(m.folder)}&uid=${m.uid}`), '_blank')}><Icon name="external" /> View source</button>
-                <button onClick={() => { const f = document.querySelector(`[data-msg="${m.folder}:${m.uid}"] iframe`); f?.contentWindow?.print(); }}><Icon name="print" /> Print</button>
+                {sender.address && <button onClick={() => { setMenu(false); onBlock(sender.address); }}><Icon name="block" />{' '}{t("Block")}{' '}{sender.address}</button>}
+                <button onClick={() => window.open(mailUrl(`/api/raw?folder=${encodeURIComponent(m.folder)}&uid=${m.uid}`), '_blank')}><Icon name="external" />{' '}{t("View source")}</button>
+                <button onClick={() => { const f = document.querySelector(`[data-msg="${m.folder}:${m.uid}"] iframe`); f?.contentWindow?.print(); }}><Icon name="print" />{' '}{t("Print")}</button>
               </div>
             )}
           </div>
@@ -157,15 +158,14 @@ function ThreadMessage({ m, expanded, onToggle, onReply, prefs, setPrefs, last, 
       {isJunk && <WhyJunk m={m} />}
       {!isJunk && <InviteCard m={m} me={me} />}
       <SecurityBanner m={m} sender={sender} orgDomains={orgDomains} />
-      {isJunk && <div className="img-banner"><Icon name="shield" size={16} /> Links and pictures are turned off in Junk. Mark it as not junk to use them.</div>}
+      {isJunk && <div className="img-banner"><Icon name="shield" size={16} />{' '}{t("Links and pictures are turned off in Junk. Mark it as not junk to use them.")}</div>}
       {blocked > 0 && !allow && !isJunk && (
         <div className="img-banner">
-          <Icon name="shield" size={16} /> Pictures were blocked to protect your privacy.
-          <button className="link" onClick={() => setAllow(true)}>Show pictures</button>
-          <button className="link" onClick={() => { setAllow(true); setPrefs((p) => ({ trustedSenders: [...new Set([...p.trustedSenders, sender.address?.toLowerCase()])] })); }}>Always show from {sender.address}</button>
+          <Icon name="shield" size={16} />{' '}{t("Pictures were blocked to protect your privacy.")}{' '}<button className="link" onClick={() => setAllow(true)}>{t("Show pictures")}</button>
+          <button className="link" onClick={() => { setAllow(true); setPrefs((p) => ({ trustedSenders: [...new Set([...p.trustedSenders, sender.address?.toLowerCase()])] })); }}>{t("Always show from")}{' '}{sender.address}</button>
         </div>
       )}
-      {unsubUrl && <div className="unsub">Mailing list · <a href={unsubUrl} target="_blank" rel="noreferrer">Unsubscribe</a></div>}
+      {unsubUrl && <div className="unsub">{t("Mailing list ·")}{' '}<a href={unsubUrl} target="_blank" rel="noreferrer">{t("Unsubscribe")}</a></div>}
       <div className="tmsg-body" data-msg={`${m.folder}:${m.uid}`}>
         <MessageBody msg={m} allowRemote={allow && !isJunk} onBlocked={setBlocked} disableLinks={isJunk} />
       </div>
@@ -203,9 +203,9 @@ export default function ReadingPane({ folder, msg, me, prefs, setPrefs, conversa
     return (
       <section className="reading empty-pane">
         <Icon name="mail" size={48} />
-        <b>Nothing selected</b>
-        <p className="muted">Pick a message to read it here.</p>
-        <small className="muted">Tip: press <kbd>?</kbd> for keyboard shortcuts</small>
+        <b>{t("Nothing selected")}</b>
+        <p className="muted">{t("Pick a message to read it here.")}</p>
+        <small className="muted">{t("Tip: press")}{' '}<kbd>?</kbd>{' '}{t("for keyboard shortcuts")}</small>
       </section>
     );
   }
@@ -214,18 +214,18 @@ export default function ReadingPane({ folder, msg, me, prefs, setPrefs, conversa
   return (
     <section className="reading">
       <div className="reading-head">
-        <button className="icon-btn back" onClick={onClose} title="Back (u)"><Icon name="back" /></button>
+        <button className="icon-btn back" onClick={onClose} title={t("Back (u)")}><Icon name="back" /></button>
         <h1>{msg.subject}</h1>
         <div className="reading-tools">
           {msg.categories?.map((c) => <span key={c} className="cat" style={{ '--c': catColor(c) }}>{c}</span>)}
         </div>
       </div>
-      {isJunk && <div className="banner warn">This message was identified as junk. Be careful with links and attachments. <button className="link" onClick={() => act.notJunk(msg.uid, msg.from?.[0]?.address)}>It's not junk</button></div>}
+      {isJunk && <div className="banner warn">{t("This message was identified as junk. Be careful with links and attachments.")}{' '}<button className="link" onClick={() => act.notJunk(msg.uid, msg.from?.[0]?.address)}>{t("It's not junk")}</button></div>}
       <div className="thread">
         {error && <div className="form-error">{error}</div>}
         {!thread && !error && <div className="list-msg"><div className="spinner" /></div>}
         {thread && <AiPanel folder={folder} uid={msg?.uid ?? thread.messages[thread.messages.length - 1].uid} last={thread.messages[thread.messages.length - 1]} onReply={onReply} />}
-        {thread?.messages.length > 1 && <div className="muted small thread-count">{thread.messages.length} messages in this conversation</div>}
+        {thread?.messages.length > 1 && <div className="muted small thread-count">{thread.messages.length}{' '}{t("messages in this conversation")}</div>}
         {thread?.messages.map((m, i) => {
           const k = `${m.folder}:${m.uid}`;
           return (
@@ -237,9 +237,9 @@ export default function ReadingPane({ folder, msg, me, prefs, setPrefs, conversa
       </div>
       {thread && (
         <div className="reply-bar">
-          <button className="btn" onClick={() => onReply(thread.messages[thread.messages.length - 1], 'reply')}><Icon name="reply" /> Reply</button>
-          <button className="btn" onClick={() => onReply(thread.messages[thread.messages.length - 1], 'all')}><Icon name="replyAll" /> Reply all</button>
-          <button className="btn" onClick={() => onReply(thread.messages[thread.messages.length - 1], 'forward')}><Icon name="forward" /> Forward</button>
+          <button className="btn" onClick={() => onReply(thread.messages[thread.messages.length - 1], 'reply')}><Icon name="reply" />{' '}{t("Reply")}</button>
+          <button className="btn" onClick={() => onReply(thread.messages[thread.messages.length - 1], 'all')}><Icon name="replyAll" />{' '}{t("Reply all")}</button>
+          <button className="btn" onClick={() => onReply(thread.messages[thread.messages.length - 1], 'forward')}><Icon name="forward" />{' '}{t("Forward")}</button>
         </div>
       )}
     </section>

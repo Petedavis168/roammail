@@ -4,6 +4,7 @@ import { Icon } from '../../icons.jsx';
 import RecipientInput from '../RecipientInput.jsx';
 import { useToast } from '../Toast.jsx';
 import { localInput, evStart, evEnd, addDays } from './dates.js';
+import { t } from '../../i18n.js';
 
 const REPEATS = [['none', 'Does not repeat'], ['daily', 'Every day'], ['weekdays', 'Every weekday (Mon–Fri)'], ['weekly', 'Every week'], ['monthly', 'Every month'], ['yearly', 'Every year']];
 const REMINDERS = [['none', 'No reminder'], [0, 'At start time'], [5, '5 minutes before'], [10, '10 minutes before'], [15, '15 minutes before'], [30, '30 minutes before'], [60, '1 hour before'], [1440, '1 day before']];
@@ -30,11 +31,11 @@ export default function EventEditor({ event, calendars, me, onClose, onSaved }) 
 
   const save = async (e) => {
     e?.preventDefault();
-    if (!f.title.trim()) return toast('Add a title', { error: true });
+    if (!f.title.trim()) return toast(t("Add a title"), { error: true });
     let start; let end;
     if (f.allDay) { start = f.start; end = localInput(addDays(new Date(`${f.end}T00:00:00`), 1), true); }
     else { start = new Date(f.start).toISOString(); end = new Date(f.end).toISOString(); }
-    if (new Date(end) <= new Date(start) && !f.allDay) return toast('The end must be after the start', { error: true });
+    if (new Date(end) <= new Date(start) && !f.allDay) return toast(t("The end must be after the start"), { error: true });
     const body = { ...f, start, end, attendees: f.attendees.map((a) => ({ email: a.address, name: a.name })) };
     setBusy(true);
     try {
@@ -54,9 +55,9 @@ export default function EventEditor({ event, calendars, me, onClose, onSaved }) 
     <div className="modal-wrap" onClick={onClose}>
       <form className="modal event-editor" onClick={(e) => e.stopPropagation()} onSubmit={save}>
         <div className="modal-head"><h2>{readOnly ? 'Event' : isNew ? 'New event' : 'Edit event'}</h2><button type="button" className="icon-btn" onClick={onClose}><Icon name="close" /></button></div>
-        {readOnly && <div className="banner">Organized by {event.organizer.name || event.organizer.email}. Only they can change it.</div>}
+        {readOnly && <div className="banner">{t("Organized by")}{' '}{event.organizer.name || event.organizer.email}{t(". Only they can change it.")}</div>}
         <fieldset disabled={readOnly} className="form">
-          <input className="title-input" placeholder="Add a title" value={f.title} onChange={set('title')} autoFocus />
+          <input className="title-input" placeholder={t("Add a title")} value={f.title} onChange={set('title')} autoFocus />
           <div className="ev-row">
             <Icon name="clock" />
             <input type={f.allDay ? 'date' : 'datetime-local'} value={f.start} onChange={(e) => {
@@ -65,7 +66,7 @@ export default function EventEditor({ event, calendars, me, onClose, onSaved }) 
             }} required />
             <span>to</span>
             <input type={f.allDay ? 'date' : 'datetime-local'} value={f.end} min={f.start} onChange={set('end')} required />
-            <label className="check"><input type="checkbox" checked={f.allDay} onChange={(e) => toggleAllDay(e.target.checked)} /> All day</label>
+            <label className="check"><input type="checkbox" checked={f.allDay} onChange={(e) => toggleAllDay(e.target.checked)} />{' '}{t("All day")}</label>
           </div>
           <div className="ev-row">
             <Icon name="refresh" />
@@ -73,26 +74,26 @@ export default function EventEditor({ event, calendars, me, onClose, onSaved }) 
             <Icon name="alert" />
             <select value={f.reminder} onChange={set('reminder')}>{REMINDERS.map(([v, l]) => <option key={v} value={v}>{l}</option>)}</select>
           </div>
-          <div className="ev-row"><Icon name="globe" /><input placeholder="Add a location" value={f.location} onChange={set('location')} />
-            {!/https?:\/\//.test(f.location) && <button type="button" className="btn sm" title="Add a free video meeting link" onClick={() => {
+          <div className="ev-row"><Icon name="globe" /><input placeholder={t("Add a location")} value={f.location} onChange={set('location')} />
+            {!/https?:\/\//.test(f.location) && <button type="button" className="btn sm" title={t("Add a free video meeting link")} onClick={() => {
               const room = `${(me?.name || 'Roammail').replace(/[^A-Za-z0-9]/g, '').slice(0, 20)}-${crypto.getRandomValues(new Uint32Array(2)).join('').slice(0, 12)}`;
               const link = `${me?.clientSettings?.meetUrl || 'https://meet.jit.si'}/${room}`;
               setF({ ...f, location: link, description: `${f.description ? `${f.description}\n\n` : ''}Join the video meeting: ${link}` });
-            }}>🎥 Add video meeting</button>}
+            }}>{t("🎥 Add video meeting")}</button>}
           </div>
-          <div className="ev-people"><RecipientInput label="Invite" value={f.attendees} onChange={(v) => setF({ ...f, attendees: v })} /></div>
+          <div className="ev-people"><RecipientInput label={t("Invite")} value={f.attendees} onChange={(v) => setF({ ...f, attendees: v })} /></div>
           {!isNew && f.attendees.length > 0 && (
             <div className="rsvp-list">{f.attendees.map((a) => (
               <span key={a.address} className={`rsvp-chip ${String(a.partstat || '').toLowerCase()}`}>{a.name || a.address} · {{ ACCEPTED: 'Yes', DECLINED: 'No', TENTATIVE: 'Maybe' }[a.partstat] || 'Waiting'}</span>
             ))}</div>
           )}
-          <textarea rows={4} placeholder="Add a description" value={f.description} onChange={set('description')} />
+          <textarea rows={4} placeholder={t("Add a description")} value={f.description} onChange={set('description')} />
           {calendars.length > 1 && isNew && (
-            <label className="row-field">Calendar<select value={f.calendar} onChange={set('calendar')}>{calendars.map((c) => <option key={c.href} value={c.href}>{c.name}</option>)}</select></label>
+            <label className="row-field">{t("Calendar")}<select value={f.calendar} onChange={set('calendar')}>{calendars.map((c) => <option key={c.href} value={c.href}>{c.name}</option>)}</select></label>
           )}
         </fieldset>
         <div className="step-actions">
-          {!isNew && !readOnly && <button type="button" className="btn ghost danger-text" onClick={del}><Icon name="trash" size={16} /> Delete</button>}
+          {!isNew && !readOnly && <button type="button" className="btn ghost danger-text" onClick={del}><Icon name="trash" size={16} />{' '}{t("Delete")}</button>}
           <div className="spacer" />
           <button type="button" className="btn" onClick={onClose}>{readOnly ? 'Close' : 'Cancel'}</button>
           {!readOnly && <button className="btn primary" disabled={busy}>{busy ? 'Saving…' : f.attendees.length && isNew ? 'Save & send invites' : 'Save'}</button>}

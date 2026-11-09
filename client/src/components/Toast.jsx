@@ -1,4 +1,5 @@
 import { createContext, useCallback, useContext, useRef, useState } from 'react';
+import { t as tr } from '../i18n.js';
 
 const Ctx = createContext(() => {});
 export const useToast = () => useContext(Ctx);
@@ -23,7 +24,7 @@ export function ToastProvider({ children }) {
           <div key={t.id} className={`toast ${t.error ? 'error' : ''}`}>
             <span>{t.message}</span>
             {t.action && <button onClick={() => { t.onAction?.(); dismiss(t.id); }}>{t.action}</button>}
-            <button className="toast-x" onClick={() => dismiss(t.id)} aria-label="Dismiss">×</button>
+            <button className="toast-x" onClick={() => dismiss(t.id)} aria-label={tr("Dismiss")}>×</button>
           </div>
         ))}
       </div>

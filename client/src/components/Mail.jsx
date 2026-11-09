@@ -20,6 +20,7 @@ import { fmtWhen } from '../snooze.js';
 import ScheduledList from './ScheduledList.jsx';
 import SnoozeMenu from './SnoozeMenu.jsx';
 import QuarantineList from './QuarantineList.jsx';
+import { t } from '../i18n.js';
 const Calendar = lazy(() => import('./calendar/Calendar.jsx'));
 const Contacts = lazy(() => import('./contacts/Contacts.jsx'));
 
@@ -37,7 +38,10 @@ export default function Mail({ me, route, refreshMe, theme, setTheme, onLogout }
   const [sharedBoxes, setSharedBoxes] = useState([]);
   useEffect(() => { api.get('/api/shared-mailboxes').then(setSharedBoxes).catch(() => {}); }, []);
   // Switching mailbox = changing the ID in the path (a full page load, so nothing from the other mailbox lingers)
-  const switchMailbox = (id) => { if (id && id !== route.id) location.assign(`/${id}/inbox`); };
+  const switchMailbox = (id) => {
+    const m = /^(\d{8}|\d{6}-\d{3}-[A-Z]{2})$/.exec(String(id || '')); // only real mailbox IDs, never another site
+    if (m && m[1] !== route.id) location.assign(`/${encodeURIComponent(m[1])}/inbox`);
+  };
   const [filter, setFilter] = useState('');
   const [search, setSearch] = useState(null); // active query string
   const [searchInput, setSearchInput] = useState('');
@@ -286,7 +290,7 @@ export default function Mail({ me, route, refreshMe, theme, setTheme, onLogout }
     async unsnooze(uid) {
       const job = snoozeMap[uid]; if (!job) return;
       await api.post('/api/snoozed/wake', { id: job.id }).catch((e) => toast(e.message, { error: true }));
-      toast('Moved back to your inbox'); load({ quiet: true }); loadFolders();
+      toast(t("Moved back to your inbox")); load({ quiet: true }); loadFolders();
     },
     async block(address) {
       if (!confirm(`Block ${address}? The server will reject their future messages, in every app.`)) return;
@@ -306,7 +310,7 @@ export default function Mail({ me, route, refreshMe, theme, setTheme, onLogout }
 
   // ---------- compose ----------
   const compose = (initial = {}) => setComposers((c) => {
-    if (c.length >= 3) { toast('Close a draft before opening another'); return c; }
+    if (c.length >= 3) { toast(t("Close a draft before opening another")); return c; }
     return [...c, { id: Date.now() + Math.random(), initial }];
   });
   // Home-screen shortcut "New mail" (/app?compose=1)
@@ -391,18 +395,18 @@ export default function Mail({ me, route, refreshMe, theme, setTheme, onLogout }
   return (
     <div className={`app density-${prefs.density}`}>
       <header className="topbar">
-        <button className="icon-btn on-dark" onClick={toggleNav} aria-label="Toggle navigation" title="Collapse or expand navigation ([)" aria-expanded={navMode === 'full' || (navMode === 'drawer' && navPeek)}><Icon name="menu" /></button>
-        <div className="brand" onClick={() => { setView('mail'); setFolder('INBOX'); clearSearch(); }}><img src="/roammail-mark-white.png" alt="" /> <span>Roammail</span></div>
+        <button className="icon-btn on-dark" onClick={toggleNav} aria-label={t("Toggle navigation")} title={t("Collapse or expand navigation ([)")} aria-expanded={navMode === 'full' || (navMode === 'drawer' && navPeek)}><Icon name="menu" /></button>
+        <div className="brand" onClick={() => { setView('mail'); setFolder('INBOX'); clearSearch(); }}><img src="/roammail-mark-white.png" alt="" /> <span>{t("Roammail")}</span></div>
         {view === 'mail' ? (
           <form className="search" onSubmit={(e) => { e.preventDefault(); runSearch(searchInput); }}>
             <Icon name="search" />
-            <input ref={searchRef} value={searchInput} onChange={(e) => setSearchInput(e.target.value)} placeholder="Search mail" aria-label="Search mail" />
-            {search && <button type="button" className="icon-btn" onClick={clearSearch} aria-label="Clear search"><Icon name="close" /></button>}
+            <input ref={searchRef} value={searchInput} onChange={(e) => setSearchInput(e.target.value)} placeholder={t("Search mail")} aria-label={t("Search mail")} />
+            {search && <button type="button" className="icon-btn" onClick={clearSearch} aria-label={t("Clear search")}><Icon name="close" /></button>}
             <div className="dd">
-              <button type="button" className="icon-btn" onClick={() => setOpsHelp((o) => !o)} title="Search tips" aria-label="Search tips"><Icon name="filter" /></button>
+              <button type="button" className="icon-btn" onClick={() => setOpsHelp((o) => !o)} title={t("Search tips")} aria-label={t("Search tips")}><Icon name="filter" /></button>
               {opsHelp && (
                 <div className="menu right search-help" onMouseLeave={() => setOpsHelp(false)}>
-                  <div className="menu-note">Search tips</div>
+                  <div className="menu-note">{t("Search tips")}</div>
                   {[['from:ann', 'From a person'], ['to:bob', 'Sent to'], ['subject:invoice', 'Words in the subject'], ['has:attachment', 'With files'], ['is:unread', 'Unread only'], ['newer_than:7d', 'Last 7 days']].map(([op, l]) => (
                     <button type="button" key={op} onClick={() => { setSearchInput((v) => `${v ? `${v} ` : ''}${op.split(':')[0]}:`); setOpsHelp(false); searchRef.current?.focus(); }}><code>{op}</code><span className="muted">{l}</span></button>
                   ))}
@@ -412,9 +416,9 @@ export default function Mail({ me, route, refreshMe, theme, setTheme, onLogout }
           </form>
         ) : <div className="spacer" />}
         <div className="topbar-right">
-          {view === 'admin' && <button className="top-btn" aria-label="Back to mail" onClick={() => setView('mail')}><Icon name="mail" /> <span>Back to mail</span></button>}
-          <button className={`icon-btn on-dark ${panel ? 'pressed' : ''}`} onClick={() => setPanel((p) => (p ? null : panelTab))} title="Tasks, notes and follow-ups (T)" aria-label="Tasks, notes and follow-ups" aria-pressed={!!panel}><Icon name="check" /></button>
-          <button className="icon-btn on-dark" onClick={() => setShowSettings(true)} title="Settings" aria-label="Settings"><Icon name="settings" /></button>
+          {view === 'admin' && <button className="top-btn" aria-label={t("Back to mail")} onClick={() => setView('mail')}><Icon name="mail" /> <span>{t("Back to mail")}</span></button>}
+          <button className={`icon-btn on-dark ${panel ? 'pressed' : ''}`} onClick={() => setPanel((p) => (p ? null : panelTab))} title={t("Tasks, notes and follow-ups (T)")} aria-label={t("Tasks, notes and follow-ups")} aria-pressed={!!panel}><Icon name="check" /></button>
+          <button className="icon-btn on-dark" onClick={() => setShowSettings(true)} title={t("Settings")} aria-label={t("Settings")}><Icon name="settings" /></button>
           <div className="user-menu-wrap">
             <button className="avatar sm" style={{ background: avatarColor(me.email) }} onClick={() => setUserMenu((u) => !u)} title={me.email}>
               {initials({ name: prefs.displayName || me.name, address: me.email })}
@@ -422,18 +426,18 @@ export default function Mail({ me, route, refreshMe, theme, setTheme, onLogout }
             {userMenu && (
               <div className="menu right" onMouseLeave={() => setUserMenu(false)}>
                 <div className="menu-head"><b>{prefs.displayName || me.name || me.email.split('@')[0]}</b><small>{me.email}</small></div>
-                <button onClick={() => { setShowSettings(true); setUserMenu(false); }}><Icon name="settings" /> Settings</button>
+                <button onClick={() => { setShowSettings(true); setUserMenu(false); }}><Icon name="settings" />{' '}{t("Settings")}</button>
                 <button onClick={() => { setTheme(theme === 'dark' ? 'light' : 'dark'); setUserMenu(false); }}><Icon name={theme === 'dark' ? 'sun' : 'moon'} /> {theme === 'dark' ? 'Light mode' : 'Dark mode'}</button>
-                <button onClick={() => { setShowHelp(true); setUserMenu(false); }}><Icon name="key" /> Keyboard shortcuts</button>
-                <a className="menu-link" href="/help" target="_blank" rel="noreferrer"><Icon name="external" /> Help center</a>
+                <button onClick={() => { setShowHelp(true); setUserMenu(false); }}><Icon name="key" />{' '}{t("Keyboard shortcuts")}</button>
+                <a className="menu-link" href="/help" target="_blank" rel="noreferrer"><Icon name="external" />{' '}{t("Help center")}</a>
                 {(isAdmin || !inOrg) && <button onClick={() => { setView('admin'); setUserMenu(false); }}><Icon name="shield" /> {isAdmin ? 'Admin portal' : 'Set up business email'}</button>}
-                {(me.accounts || []).filter((a) => a.mailboxId !== me.mailboxId).length > 0 && <div className="menu-note">Your other accounts</div>}
+                {(me.accounts || []).filter((a) => a.mailboxId !== me.mailboxId).length > 0 && <div className="menu-note">{t("Your other accounts")}</div>}
                 {(me.accounts || []).filter((a) => a.mailboxId !== me.mailboxId).map((a) => (
                   <button key={a.mailboxId} onClick={() => switchMailbox(a.mailboxId)}><Icon name="mail" /> {a.name || a.email}<small style={{ marginLeft: 6, opacity: 0.7 }}>{a.email}</small></button>
                 ))}
-                <a className="menu-link" href={loginHref('?add=1')}><Icon name="plus" /> Add another account</a>
-                <button onClick={() => onLogout(false)}><Icon name="logout" /> Sign out{(me.accounts || []).length > 1 ? ` of ${me.email}` : ''}</button>
-                {(me.accounts || []).length > 1 && <button onClick={() => onLogout(true)}><Icon name="logout" /> Sign out of all accounts</button>}
+                <a className="menu-link" href={loginHref('?add=1')}><Icon name="plus" />{' '}{t("Add another account")}</a>
+                <button onClick={() => onLogout(false)}><Icon name="logout" />{' '}{t("Sign out")}{(me.accounts || []).length > 1 ? ` of ${me.email}` : ''}</button>
+                {(me.accounts || []).length > 1 && <button onClick={() => onLogout(true)}><Icon name="logout" />{' '}{t("Sign out of all accounts")}</button>}
               </div>
             )}
           </div>
@@ -441,12 +445,12 @@ export default function Mail({ me, route, refreshMe, theme, setTheme, onLogout }
       </header>
 
       <div className="shell">
-      <nav className="app-rail" aria-label="Apps">
+      <nav className="app-rail" aria-label={t("Apps")}>
         {[['mail', 'mail', 'Mail'], ['calendar', 'calendar', 'Calendar'], ['contacts', 'users', 'Contacts']].map(([v, i, l]) => (
           <button key={v} className={view === v ? 'on' : ''} onClick={() => setView(v)} title={l} aria-label={l}><Icon name={i} size={20} /><small>{l}</small></button>
         ))}
         {multi && (
-          <div className="rail-accounts" aria-label="Accounts">
+          <div className="rail-accounts" aria-label={t("Accounts")}>
             {accounts.map((a, i) => (
               <button key={a.mailboxId} className={`rail-acct ${a.mailboxId === route.id ? 'on' : ''}`} onClick={() => switchMailbox(a.mailboxId)}
                 title={`${a.name || a.email}\n${a.email}${i < 9 ? `  (Ctrl/⌘+${i + 1})` : ''}`} aria-label={`Switch to ${a.email}${a.unread ? `, ${a.unread} unread` : ''}`}>
@@ -454,7 +458,7 @@ export default function Mail({ me, route, refreshMe, theme, setTheme, onLogout }
                 {a.unread > 0 && <span className="rail-badge">{a.unread > 99 ? '99+' : a.unread}</span>}
               </button>
             ))}
-            {accounts.length < 10 && <a className="rail-acct add" href={loginHref('?add=1')} title="Add another account" aria-label="Add another account"><Icon name="plus" size={18} /></a>}
+            {accounts.length < 10 && <a className="rail-acct add" href={loginHref('?add=1')} title={t("Add another account")} aria-label={t("Add another account")}><Icon name="plus" size={18} /></a>}
           </div>
         )}
       </nav>
@@ -478,8 +482,8 @@ export default function Mail({ me, route, refreshMe, theme, setTheme, onLogout }
           <main className={`main ${paneClass} ${active ? 'has-active' : ''}`}>
             {(folderUse === '\\Junk' || folder === '@quarantine') && !search && (
               <div className="tabs" role="tablist">
-                <button role="tab" aria-selected={folder !== '@quarantine'} className={folder !== '@quarantine' ? 'on' : ''} onClick={() => special('\\Junk') && setFolder(special('\\Junk'))}>Junk</button>
-                <button role="tab" aria-selected={folder === '@quarantine'} className={folder === '@quarantine' ? 'on' : ''} onClick={() => setFolder('@quarantine')} title="Definite spam held back by the server">Quarantine{qCount > 0 ? ` (${qCount})` : ''}</button>
+                <button role="tab" aria-selected={folder !== '@quarantine'} className={folder !== '@quarantine' ? 'on' : ''} onClick={() => special('\\Junk') && setFolder(special('\\Junk'))}>{t("Junk")}</button>
+                <button role="tab" aria-selected={folder === '@quarantine'} className={folder === '@quarantine' ? 'on' : ''} onClick={() => setFolder('@quarantine')} title={t("Definite spam held back by the server")}>{t("Quarantine")}{qCount > 0 ? ` (${qCount})` : ''}</button>
               </div>
             )}
             {!folder.startsWith('@') && <Ribbon
@@ -509,7 +513,7 @@ export default function Mail({ me, route, refreshMe, theme, setTheme, onLogout }
                 />
               ) : null}
             </div>
-            {!active && createPortal(<button className="compose-fab" onClick={() => compose()} aria-label="New mail" title="New mail"><Icon name="pen" /></button>, document.body)}
+            {!active && createPortal(<button className="compose-fab" onClick={() => compose()} aria-label={t("New mail")} title={t("New mail")}><Icon name="pen" /></button>, document.body)}
           </main>
           {panel && (
             <TasksPanel tab={panelTab} setTab={(t) => { setPanelTab(t); setPanel(t); }} onClose={() => setPanel(null)}

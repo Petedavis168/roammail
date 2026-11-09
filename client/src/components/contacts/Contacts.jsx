@@ -4,6 +4,7 @@ import { Icon } from '../../icons.jsx';
 import { useToast } from '../Toast.jsx';
 import { avatarColor, initials } from '../../util.js';
 import ContactEditor from './ContactEditor.jsx';
+import { t } from '../../i18n.js';
 
 export default function Contacts({ me, onEmail }) {
   const toast = useToast();
@@ -39,33 +40,33 @@ export default function Contacts({ me, onEmail }) {
   };
   const del = async (c) => {
     if (!confirm(`Delete ${c.name}?`)) return;
-    try { await api.del('/api/address-contacts', { href: c.href }); toast('Contact deleted'); setSel(null); load(true); } catch (e) { toast(e.message, { error: true }); }
+    try { await api.del('/api/address-contacts', { href: c.href }); toast(t("Contact deleted")); setSel(null); load(true); } catch (e) { toast(e.message, { error: true }); }
   };
 
   return (
     <div className="contacts">
       <aside className="cal-side">
-        <button className="compose-btn" onClick={() => setEditing({})}><Icon name="plus" /> New contact</button>
+        <button className="compose-btn" onClick={() => setEditing({})}><Icon name="plus" />{' '}{t("New contact")}</button>
         <div className="nav-section">
-          <div className={`folder ${tab === 'mine' ? 'on' : ''}`} onClick={() => { setTab('mine'); setSel(null); }} role="button"><span className="twisty" /><Icon name="users" /><span className="fname">My contacts</span><span className="count muted">{list?.length ?? ''}</span></div>
-          {business && <div className={`folder ${tab === 'dir' ? 'on' : ''}`} onClick={() => { setTab('dir'); setSel(null); }} role="button"><span className="twisty" /><Icon name="globe" /><span className="fname">Company directory</span><span className="count muted">{dir?.length ?? ''}</span></div>}
+          <div className={`folder ${tab === 'mine' ? 'on' : ''}`} onClick={() => { setTab('mine'); setSel(null); }} role="button"><span className="twisty" /><Icon name="users" /><span className="fname">{t("My contacts")}</span><span className="count muted">{list?.length ?? ''}</span></div>
+          {business && <div className={`folder ${tab === 'dir' ? 'on' : ''}`} onClick={() => { setTab('dir'); setSel(null); }} role="button"><span className="twisty" /><Icon name="globe" /><span className="fname">{t("Company directory")}</span><span className="count muted">{dir?.length ?? ''}</span></div>}
         </div>
-        <div className="nav-title">Import &amp; export</div>
+        <div className="nav-title">{t("Import & export")}</div>
         <div className="side-actions">
-          <button className="btn sm" onClick={() => file.current.click()}><Icon name="import" size={14} /> Import .vcf</button>
-          <a className="btn sm" href="/api/address-contacts/export" download><Icon name="external" size={14} /> Export</a>
+          <button className="btn sm" onClick={() => file.current.click()}><Icon name="import" size={14} />{' '}{t("Import .vcf")}</button>
+          <a className="btn sm" href="/api/address-contacts/export" download><Icon name="external" size={14} />{' '}{t("Export")}</a>
           <input ref={file} type="file" accept=".vcf,text/vcard,text/x-vcard" hidden onChange={(e) => { importFile(e.target.files[0]); e.target.value = ''; }} />
         </div>
-        <p className="muted small cal-sync">Export contacts from Gmail (contacts.google.com → Export → vCard) or Outlook and import them here. They sync to your phone too.</p>
+        <p className="muted small cal-sync">{t("Export contacts from Gmail (contacts.google.com → Export → vCard) or Outlook and import them here. They sync to your phone too.")}</p>
       </aside>
       <section className="list contact-list">
         <div className="list-head"><h2>{tab === 'mine' ? 'My contacts' : 'Company directory'}</h2></div>
-        <div className="contact-search"><Icon name="search" size={16} /><input placeholder="Search name, email, company, phone" value={q} onChange={(e) => setQ(e.target.value)} /></div>
+        <div className="contact-search"><Icon name="search" size={16} /><input placeholder={t("Search name, email, company, phone")} value={q} onChange={(e) => setQ(e.target.value)} /></div>
         <div className="rows">
           {(tab === 'mine' ? !list : !dir) && <div className="list-msg"><div className="spinner" /></div>}
           {filtered.length === 0 && (tab === 'mine' ? list : dir) && (
             <div className="empty"><Icon name="users" size={48} /><p>{q ? 'No matches.' : tab === 'mine' ? 'No contacts yet.' : 'No coworkers found.'}</p>
-              {!q && tab === 'mine' && <small>Add one, import a .vcf file, or open any email and choose “Add to contacts”.</small>}</div>
+              {!q && tab === 'mine' && <small>{t("Add one, import a .vcf file, or open any email and choose “Add to contacts”.")}</small>}</div>
           )}
           {groups.map(([letter, cs]) => [
             <div className="group-head" key={`h${letter}`}>{letter}</div>,
@@ -80,7 +81,7 @@ export default function Contacts({ me, onEmail }) {
       </section>
       <section className="reading contact-detail">
         {!current ? (
-          <div className="empty-pane"><Icon name="users" size={64} /><p>Select a contact</p></div>
+          <div className="empty-pane"><Icon name="users" size={64} /><p>{t("Select a contact")}</p></div>
         ) : (
           <div className="thread">
             <div className="contact-card">
@@ -88,9 +89,9 @@ export default function Contacts({ me, onEmail }) {
               <div><h1>{current.name}</h1><div className="muted">{[current.title, current.company].filter(Boolean).join(' · ')}</div></div>
             </div>
             <div className="contact-actions">
-              {current.emails[0] && <button className="btn primary" onClick={() => onEmail({ name: current.name, email: current.emails[0].value })}><Icon name="mail" size={16} /> Email</button>}
-              {current.phones[0] && <a className="btn" href={`tel:${current.phones[0].value.replace(/[^\d+]/g, '')}`}><Icon name="phone" size={16} /> Call</a>}
-              {!current.directory && <button className="btn" onClick={() => setEditing(current)}><Icon name="pen" size={16} /> Edit</button>}
+              {current.emails[0] && <button className="btn primary" onClick={() => onEmail({ name: current.name, email: current.emails[0].value })}><Icon name="mail" size={16} />{' '}{t("Email")}</button>}
+              {current.phones[0] && <a className="btn" href={`tel:${current.phones[0].value.replace(/[^\d+]/g, '')}`}><Icon name="phone" size={16} />{' '}{t("Call")}</a>}
+              {!current.directory && <button className="btn" onClick={() => setEditing(current)}><Icon name="pen" size={16} />{' '}{t("Edit")}</button>}
               {!current.directory && <button className="btn ghost" onClick={() => del(current)}><Icon name="trash" size={16} /></button>}
             </div>
             <div className="table contact-fields">

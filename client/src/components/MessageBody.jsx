@@ -3,6 +3,7 @@ import DOMPurify from 'dompurify';
 import { api } from '../api.js';
 import { escapeHtml } from '../util.js';
 import { nativeFrameLinks } from '../native.js';
+import { t } from '../i18n.js';
 
 // Render an email safely: sanitized HTML in a sandboxed iframe (no scripts),
 // remote images blocked until the user allows them (privacy / tracking pixels).
@@ -110,7 +111,7 @@ export default function MessageBody({ msg, allowRemote, onBlocked, disableLinks 
   }, [srcDoc]);
 
   return (
-    <iframe ref={ref} className="msg-frame" title="Message content" srcDoc={srcDoc} style={{ height }}
+    <iframe ref={ref} className="msg-frame" title={t("Message content")} srcDoc={srcDoc} style={{ height }}
       sandbox="allow-same-origin allow-popups allow-popups-to-escape-sandbox" />
   );
 }
