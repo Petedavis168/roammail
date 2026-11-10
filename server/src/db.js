@@ -191,6 +191,11 @@ CREATE TABLE IF NOT EXISTS bookings (
 );
 CREATE INDEX IF NOT EXISTS bookings_owner ON bookings(owner, start_at);
 CREATE UNIQUE INDEX IF NOT EXISTS bookings_token ON bookings(token_hash);
+CREATE TABLE IF NOT EXISTS subscription_state (email TEXT NOT NULL, sender TEXT NOT NULL, status TEXT NOT NULL, at INTEGER NOT NULL, PRIMARY KEY (email, sender));
+CREATE TABLE IF NOT EXISTS user_aliases (
+  id INTEGER PRIMARY KEY AUTOINCREMENT, email TEXT NOT NULL, address TEXT NOT NULL UNIQUE, mailcow_id TEXT NOT NULL, note TEXT, active INTEGER NOT NULL DEFAULT 1, created_at INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS user_aliases_email ON user_aliases(email);
 CREATE TABLE IF NOT EXISTS sso_links (
   provider TEXT NOT NULL, subject TEXT NOT NULL, email TEXT NOT NULL, tenant TEXT NOT NULL, label TEXT, creds TEXT NOT NULL,
   created_at INTEGER NOT NULL, last_used INTEGER, PRIMARY KEY (provider, subject)

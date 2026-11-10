@@ -20,6 +20,8 @@ import { fmtWhen } from '../snooze.js';
 import ScheduledList from './ScheduledList.jsx';
 import SnoozeMenu from './SnoozeMenu.jsx';
 import QuarantineList from './QuarantineList.jsx';
+import SubscriptionsList from './SubscriptionsList.jsx';
+import AliasesList from './AliasesList.jsx';
 import { t } from '../i18n.js';
 const Calendar = lazy(() => import('./calendar/Calendar.jsx'));
 const Contacts = lazy(() => import('./contacts/Contacts.jsx'));
@@ -200,7 +202,7 @@ export default function Mail({ me, route, refreshMe, theme, setTheme, onLogout }
   // Page title with unread count
   useEffect(() => {
     const inbox = folders.find((f) => f.specialUse === '\\Inbox');
-    document.title = `${inbox?.unread ? `(${inbox.unread}) ` : ''}${view === 'admin' ? 'Admin' : folder === '@scheduled' ? 'Scheduled' : folder === '@quarantine' ? 'Spam quarantine' : folder === '@all' ? 'All inboxes' : folderLabel(currentFolderObj || { name: 'Inbox' })} - ${me.email}`;
+    document.title = `${inbox?.unread ? `(${inbox.unread}) ` : ''}${view === 'admin' ? 'Admin' : folder === '@scheduled' ? 'Scheduled' : folder === '@subscriptions' ? 'Subscriptions' : folder === '@aliases' ? 'Aliases' : folder === '@quarantine' ? 'Spam quarantine' : folder === '@all' ? 'All inboxes' : folderLabel(currentFolderObj || { name: 'Inbox' })} - ${me.email}`;
   }, [folders, currentFolderObj, me.email, view]);
 
   // ---------- helpers ----------
@@ -477,6 +479,8 @@ export default function Mail({ me, route, refreshMe, theme, setTheme, onLogout }
               me={me} mailboxes={sharedBoxes} mailbox={mailbox} onMailbox={switchMailbox}
               onSelect={(p) => { setFolder(p); clearSearch(); setFilter(''); if (vw < 1280) setNavPeek(false); }}
               onDropMessages={(dest, uids) => act.move(dest, uids)} onScheduled={() => { setFolder('@scheduled'); clearSearch(); }} onQuarantine={() => { setFolder('@quarantine'); clearSearch(); }} qCount={qCount}
+              onSubscriptions={mailbox && !me.delegated ? () => { setFolder('@subscriptions'); clearSearch(); setActive(null); if (vw < 1280) setNavPeek(false); } : null}
+              onAliases={!me.delegated ? () => { setFolder('@aliases'); clearSearch(); setActive(null); if (vw < 1280) setNavPeek(false); } : null}
               allInboxes={multi ? accounts.reduce((n, a) => n + (a.unread || 0), 0) : null} onAllInboxes={() => { setFolder('@all'); clearSearch(); }}
               categories={prefs.categories} onCategory={(c) => runSearch(`label:${catKeyword(c.name).slice(4)}`)} />
           )}
@@ -495,7 +499,9 @@ export default function Mail({ me, route, refreshMe, theme, setTheme, onLogout }
               density={prefs.density} setDensity={(v) => setPrefs({ density: v })}
             />}
             <div className="panes">
-              {folder === '@quarantine' && !search ? <QuarantineList onChanged={setQCount} /> : folder === '@scheduled' && !search ? <ScheduledList onCompose={compose} /> : <MessageList
+              {folder === '@subscriptions' && !search ? <SubscriptionsList onShowSender={(a) => { setFolder('INBOX'); runSearch(`from:${a}`); }} onBlock={async (a) => { try { await api.post('/api/block', { address: a }); toast(`Blocked ${a}`); } catch (e) { toast(e.message, { error: true }); } }} />
+                : folder === '@aliases' && !search ? <AliasesList onShowAlias={(a) => { setFolder('INBOX'); runSearch(`to:${a}`); }} />
+                : folder === '@quarantine' && !search ? <QuarantineList onChanged={setQCount} /> : folder === '@scheduled' && !search ? <ScheduledList onCompose={compose} /> : <MessageList
                 snoozeMap={folder.toLowerCase() === 'snoozed' ? snoozeMap : null}
                 list={list} title={search ? `Results for "${search}"` : folder === '@all' ? 'All inboxes' : folderLabel(currentFolderObj || { name: folder })}
                 search={search} onClearSearch={clearSearch} isInbox={folder === 'INBOX' && !search}
