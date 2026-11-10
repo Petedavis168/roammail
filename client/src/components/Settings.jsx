@@ -5,26 +5,40 @@ import Signatures from './settings/Signatures.jsx';
 import Templates from './settings/Templates.jsx';
 import { NudgeSettings } from './Nudges.jsx';
 import { SWIPE_ACTIONS } from '../swipe.js';
-import { sayNewMail, voices, PHRASES } from '../voice.js';
+import { sayNewMail, naturalVoices, isNatural, PHRASES, STYLES } from '../voice.js';
 import { pushState, enablePush, disablePush } from '../push.js';
 
 function VoiceAlert({ prefs, setPrefs }) {
-  const [list, setList] = useState(() => voices());
-  useEffect(() => { if (!window.speechSynthesis) return undefined; const on = () => setList(voices()); speechSynthesis.addEventListener('voiceschanged', on); return () => speechSynthesis.removeEventListener('voiceschanged', on); }, []);
-  if (!window.speechSynthesis) return <p className="muted small">{t("This browser can't speak alerts.")}</p>;
+  const [list, setList] = useState(() => naturalVoices());
+  useEffect(() => { if (!window.speechSynthesis) return undefined; const on = () => setList(naturalVoices()); speechSynthesis.addEventListener('voiceschanged', on); return () => speechSynthesis.removeEventListener('voiceschanged', on); }, []);
   const custom = prefs.voicePhrase && !PHRASES.includes(prefs.voicePhrase);
-  const en = list.filter((v) => /^en/i.test(v.lang));
+  const play = (over = {}) => sayNewMail({ phrase: prefs.voicePhrase, voice: prefs.voiceName, style: prefs.voiceStyle || 'voice', force: true, ...over });
+  const good = list.filter(isNatural);
+  const apple = /Mac|iPhone|iPad/.test(navigator.userAgent);
   return (
     <div className="field-group voice-alert">
-      <label className="check"><input type="checkbox" checked={!!prefs.voiceAlert} onChange={(e) => { setPrefs({ voiceAlert: e.target.checked }); if (e.target.checked) sayNewMail({ phrase: prefs.voicePhrase, voice: prefs.voiceName, force: true }); }} />{' '}{t("Say “You’ve got mail!” out loud when new mail arrives")}</label>
+      <label className="check"><input type="checkbox" checked={!!prefs.voiceAlert} onChange={(e) => { setPrefs({ voiceAlert: e.target.checked }); if (e.target.checked) play(); }} />{' '}{t("Play a sound when new mail arrives (“You’ve got mail!”)")}</label>
       {prefs.voiceAlert && (
         <div className="voice-opts">
-          <label className="row-field">{t("What to say")}{' '}<select value={custom ? '__custom' : (prefs.voicePhrase || PHRASES[0])} onChange={(e) => setPrefs({ voicePhrase: e.target.value === '__custom' ? 'Hey, new email!' : e.target.value })}>
-            {PHRASES.map((p) => <option key={p} value={p}>{p}</option>)}<option value="__custom">{t("Something else…")}</option></select></label>
-          {custom && <input value={prefs.voicePhrase} maxLength={80} onChange={(e) => setPrefs({ voicePhrase: e.target.value })} aria-label={t("Words to say")} />}
-          {en.length > 1 && <label className="row-field">{t("Voice")}{' '}<select value={prefs.voiceName || ''} onChange={(e) => setPrefs({ voiceName: e.target.value })}><option value="">{t("Automatic")}</option>{en.map((v) => <option key={v.name} value={v.name}>{v.name}</option>)}</select></label>}
-          <button className="btn sm" onClick={() => sayNewMail({ phrase: prefs.voicePhrase, voice: prefs.voiceName, force: true })}>🔊 {t("Play it")}</button>
-          <p className="muted small">{t("Plays while Roammail is open. When it’s closed, your phone or computer plays its normal notification sound.")}</p>
+          <label className="row-field">{t("Sound")}{' '}<select value={prefs.voiceStyle || 'voice'} onChange={(e) => { setPrefs({ voiceStyle: e.target.value }); play({ style: e.target.value }); }}>{STYLES.map(([k, l]) => <option key={k} value={k}>{t(l)}</option>)}</select></label>
+          {(prefs.voiceStyle || 'voice') !== 'chime' && <>
+            <label className="row-field">{t("What to say")}{' '}<select value={custom ? '__custom' : (prefs.voicePhrase || PHRASES[0])} onChange={(e) => setPrefs({ voicePhrase: e.target.value === '__custom' ? 'Hey, new email!' : e.target.value })}>
+              {PHRASES.map((p) => <option key={p} value={p}>{p}</option>)}<option value="__custom">{t("Something else…")}</option></select></label>
+            {custom && <input value={prefs.voicePhrase} maxLength={80} onChange={(e) => setPrefs({ voicePhrase: e.target.value })} aria-label={t("Words to say")} />}
+            {list.length > 1 && (
+              <label className="row-field">{t("Voice")}{' '}<select value={prefs.voiceName || ''} onChange={(e) => { setPrefs({ voiceName: e.target.value }); play({ voice: e.target.value }); }}>
+                <option value="">{t("Most natural available")}{good[0] ? ` (${good[0].name.replace(/^Microsoft |\s*\(.*\)$/g, '')})` : ''}</option>
+                {list.map((v) => <option key={v.name} value={v.name}>{isNatural(v) ? '★ ' : ''}{v.name}</option>)}
+              </select></label>
+            )}
+          </>}
+          <button className="btn sm" onClick={() => play()}>🔊 {t("Play it")}</button>
+          {!good.length && (prefs.voiceStyle || 'voice') !== 'chime' && (
+            <p className="muted small">{apple
+              ? t("For a much more natural voice: Settings → Accessibility → Spoken Content (iPhone) or Live Speech / Spoken Content (Mac) → Voices → English → download an “Enhanced” or “Premium” voice. Then pick it here.")
+              : t("For a much more natural voice, open Roammail in Microsoft Edge (it has free “Natural” voices) or Chrome, or choose “Chime only”.")}</p>
+          )}
+          <p className="muted small">{t("★ = natural-sounding voice. Plays while Roammail is open; when it’s closed, your device plays its normal notification sound.")}</p>
         </div>
       )}
     </div>

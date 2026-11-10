@@ -254,7 +254,7 @@ export default function Mail({ me, route, refreshMe, theme, setTheme, themePref 
       es = new EventSource(mailUrl('/api/events'));
       es.addEventListener('new', (e) => {
         const d = JSON.parse(e.data);
-        if (prefsRef.current.voiceAlert && d.messages?.length) sayNewMail({ phrase: prefsRef.current.voicePhrase, voice: prefsRef.current.voiceName });
+        if (prefsRef.current.voiceAlert && d.messages?.length) sayNewMail({ phrase: prefsRef.current.voicePhrase, voice: prefsRef.current.voiceName, style: prefsRef.current.voiceStyle || 'voice' });
         loadFolders();
         if (folderRef.current === 'INBOX') loadRef.current({ quiet: true });
         const m = d.messages?.[0];
