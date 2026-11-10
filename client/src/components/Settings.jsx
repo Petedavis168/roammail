@@ -7,6 +7,12 @@ import { NudgeSettings } from './Nudges.jsx';
 import { SWIPE_ACTIONS } from '../swipe.js';
 import { pushState, enablePush, disablePush } from '../push.js';
 
+function ShareStatus() {
+  const [on, setOn] = useState(null);
+  useEffect(() => { api.get('/api/msg-status/settings').then((r) => setOn(r.share)).catch(() => {}); }, []);
+  if (on === null) return null;
+  return <label className="check"><input type="checkbox" checked={on} onChange={async (e) => { const v = e.target.checked; setOn(v); await api.put('/api/msg-status/settings', { share: v }).catch(() => setOn(!v)); }} />{' '}{t("Let other Roammail users see when I've read their email and when I'm typing a reply (like iMessage)")}</label>;
+}
 function PushToggle() {
   const [state, setState] = useState('…');
   const [err, setErr] = useState('');
@@ -76,6 +82,8 @@ function General({ prefs, setPrefs, me }) {
       <label className="row-field">{t("Undo send")}{' '}<select value={prefs.undoSeconds} onChange={set('undoSeconds')}>
           {[0, 5, 10, 20, 30].map((s) => <option key={s} value={s}>{s ? `${s} seconds` : 'Off'}</option>)}
         </select></label>
+      <h3>{t("Roammail to Roammail")}</h3>
+      <ShareStatus />
       <h3>{t("Follow-ups")}</h3>
       <NudgeSettings />
       <h3>{t("Privacy")}</h3>

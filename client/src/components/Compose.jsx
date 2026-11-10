@@ -196,6 +196,16 @@ function Composer({ c, me, prefs, sigData, identities, onClose, onSend, focusInd
 
   const markDirty = () => { dirty.current = true; };
   useEffect(markDirty, [to, cc, bcc, subject, files]);
+  // "… is typing" for the Roammail people in the conversation you're replying to (every few seconds while typing)
+  const typingRef = useRef({ last: 0, sent: false });
+  const replyRef = init.inReplyTo || null;
+  const rcptList = () => [...to, ...cc].map((r) => r.address).filter(Boolean);
+  const typing = () => {
+    if (!replyRef || Date.now() - typingRef.current.last < 4000) return;
+    typingRef.current = { last: Date.now(), sent: true };
+    api.post('/api/live/typing', { to: rcptList(), ref: replyRef }).catch(() => {});
+  };
+  useEffect(() => () => { if (typingRef.current.sent && replyRef) api.post('/api/live/typing', { to: rcptList(), ref: replyRef, stop: true }).catch(() => {}); }, []);
 
   const close = async () => {
     const hasContent = to.length || subject || (editor.current?.innerText || '').trim().replace(/^--[\s\S]*$/, '').trim();
@@ -281,7 +291,7 @@ function Composer({ c, me, prefs, sigData, identities, onClose, onSend, focusInd
         )}
         <div className="editor-wrap">
           {!ready && <div className="list-msg"><div className="spinner" /></div>}
-          <div ref={editor} className="editor" contentEditable suppressContentEditableWarning onInput={markDirty} aria-label={tr("Message body")} role="textbox" aria-multiline="true"
+          <div ref={editor} className="editor" contentEditable suppressContentEditableWarning onInput={() => { markDirty(); typing(); }} aria-label={tr("Message body")} role="textbox" aria-multiline="true"
             onPaste={(e) => {
               const imgs = [...e.clipboardData.files].filter((f) => f.type.startsWith('image/'));
               if (imgs.length) { e.preventDefault(); addFiles(imgs); return; }

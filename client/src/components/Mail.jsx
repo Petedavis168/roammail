@@ -23,7 +23,8 @@ import QuarantineList from './QuarantineList.jsx';
 import SubscriptionsList from './SubscriptionsList.jsx';
 import ScreenerList from './ScreenerList.jsx';
 import ContactCard from './ContactCard.jsx';
-import { installMode as getInstallMode, onInstallChange, promptInstall } from '../install.js';
+import { installMode as getInstallMode, onInstallChange, promptInstall, isInstalled } from '../install.js';
+import { pushState, enablePush } from '../push.js';
 import AliasesList from './AliasesList.jsx';
 import CommandBar from './CommandBar.jsx';
 import { TABS as SETTINGS_TABS } from './Settings.jsx';
@@ -53,6 +54,18 @@ export default function Mail({ me, route, refreshMe, theme, setTheme, themePref 
   const mailbox = route.id; // the mailbox ID in the URL
   const [sharedBoxes, setSharedBoxes] = useState([]);
   useEffect(() => { api.get('/api/shared-mailboxes').then(setSharedBoxes).catch(() => {}); }, []);
+  // Notifications: in the installed app (and on phones), ask once with a clear button. iPhone only allows this
+  // from a tap inside the Home Screen app, which is why it's a button and not an automatic prompt.
+  const [askPush, setAskPush] = useState(false);
+  useEffect(() => {
+    if (me.delegated || localStorage.getItem('pushAsked') === '1') return;
+    if (!isInstalled() && !matchMedia('(max-width: 899px)').matches) return;
+    pushState().then((st) => setAskPush(st === 'off')).catch(() => {});
+  }, [me.email]);
+  const turnOnPush = async () => {
+    try { await enablePush(); localStorage.setItem('pushAsked', '1'); setAskPush(false); toast(t('Notifications are on. You’ll hear about new mail even when Roammail is closed.')); }
+    catch (e) { toast(e.message, { error: true }); }
+  };
   // Contact cards: click any name in an email
   const [card, setCard] = useState(null);
   useEffect(() => { const on = (e) => setCard(e.detail); window.addEventListener('roammail:card', on); return () => window.removeEventListener('roammail:card', on); }, []);
@@ -234,6 +247,9 @@ export default function Mail({ me, route, refreshMe, theme, setTheme, themePref 
       });
       es.addEventListener('changed', () => { loadFolders(); if (folderRef.current === 'INBOX') loadRef.current({ quiet: true }); });
       es.addEventListener('ready', () => { fails = 0; });
+      // iMessage-style status from other Roammail users
+      es.addEventListener('status', (e) => window.dispatchEvent(new CustomEvent('roammail:status', { detail: JSON.parse(e.data) })));
+      es.addEventListener('typing', (e) => window.dispatchEvent(new CustomEvent('roammail:typing', { detail: JSON.parse(e.data) })));
       // Reconnect quickly (2s, 4s, 8s… up to 30s) so new mail keeps arriving after a network blip
       es.onerror = () => { es.close(); clearTimeout(retry); retry = setTimeout(connect, Math.min(30000, 2000 * 2 ** fails++)); };
     };
@@ -545,6 +561,13 @@ export default function Mail({ me, route, refreshMe, theme, setTheme, themePref 
           onOpenMessage={(m) => location.assign(`/${route.id}/message/${messageKey(m.folder, m.uid)}`)}
           onShowAll={(a) => { setView('mail'); setFolder('INBOX'); runSearch(a); }}
           onBlock={me.delegated ? null : (a) => act.block(a)} />
+      )}
+      {askPush && (
+        <div className="push-ask" role="region" aria-label={t('Notifications')}>
+          <Icon name="bell" size={18} /><span><b>{t('Get notified about new mail')}</b><small>{t('Even when Roammail is closed. You can change this any time in Settings.')}</small></span>
+          <button className="btn sm primary" onClick={turnOnPush}>{t('Turn on')}</button>
+          <button className="btn sm" onClick={() => { localStorage.setItem('pushAsked', '1'); setAskPush(false); }}>{t('Not now')}</button>
+        </div>
       )}
       {iosInstall && (
         <div className="modal-wrap" onClick={(e) => e.target === e.currentTarget && setIosInstall(false)}>

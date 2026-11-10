@@ -105,6 +105,7 @@ privacy.post('/account/delete', wrap(async (req, res) => {
   for (const t of ['user_security', 'user_settings', 'user_signatures', 'profiles', 'jobs', 'password_resets', 'setup_tokens', 'tasks', 'notes', 'followups', 'nudge_dismissed', 'subscription_state', 'screener_list']) await q.run(`DELETE FROM ${t} WHERE email = ?`, e);
   await q.run('DELETE FROM members WHERE email = ?', e);
   await q.run('DELETE FROM voice_notes WHERE owner = ?', e);
+  await q.run('DELETE FROM msg_status WHERE sender = ? OR recipient = ?', e, e);
   await q.run("UPDATE signups SET recovery_email = NULL WHERE email = ?", e); // keep the row for sign-up abuse limits only
   await revokeSessions(e);
   await audit(e, null, 'account.deleted', { ip: req.ip });
@@ -126,6 +127,7 @@ export async function startRetention() {
     await q.run("DELETE FROM abuse_reports WHERE status = 'closed' AND at < ?", twoYears);
     await q.run('DELETE FROM push_subs WHERE created_at < ?', Date.now() - 30 * 864e5);
     await q.run('DELETE FROM voice_notes WHERE expires_at < ?', Date.now());
+    await q.run('DELETE FROM msg_status WHERE delivered_at < ?', Date.now() - 180 * 864e5);
   };
   await run();
   setInterval(() => run().catch((e) => console.error('APP_ERROR retention', e.message)), 6 * 3600e3).unref();

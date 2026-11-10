@@ -16,7 +16,10 @@ import { parseQuery } from './search.js';
 import { lookalike } from './lookalike.js';
 import { requestReceipts, saveTracked, describeReport, collectReceipts } from './receipts.js';
 import { inboxTabs, TABS } from './inboxtabs.js';
+import { attachmentRisk, scanInfo } from './mailsafety.js';
 import { learnRecipients } from './screener.js';
+import { recordDelivered, recordRead } from './status.js';
+import { setLiveSender } from './live.js';
 import { protectEmail, noticeMail, checkSecurePassword } from './secure.js';
 import { rolesFor, q, twoFactorPolicy } from './db.js';
 import { applyEnforcedSignature, htmlToText } from './signatures.js';
@@ -328,7 +331,9 @@ function fullMessage(folder, msg, parsed) {
       size: a.size,
       cid: a.contentId?.replace(/[<>]/g, '') || null,
       inline: a.contentDisposition === 'inline' && !!a.contentId,
+      risk: attachmentRisk(a.filename, a.contentType),
     })),
+    scan: scanInfo(parsed),
   };
 }
 
@@ -336,7 +341,9 @@ api.get('/message', wrap(async (req, res) => {
   const { folder = 'INBOX', uid } = req.query;
   const r = await loadMessage(req.user, folder, uid, { markSeen: req.query.peek !== '1' });
   if (!r) return res.status(404).json({ error: 'Message not found' });
-  res.json(fullMessage(folder, r.msg, r.parsed));
+  const full = fullMessage(folder, r.msg, r.parsed);
+  if (req.query.peek !== '1' && !req.delegatedMailbox) recordRead(req.user.email, full).catch(() => {});
+  res.json(full);
 }));
 
 // Gmail-style conversation: find related messages in this folder + Sent. Also used by AI help (ai.js).
@@ -383,6 +390,7 @@ export async function loadThread(user, folder = 'INBOX', uid, { markSeen = true 
 api.get('/thread', wrap(async (req, res) => {
   const t = await loadThread(req.user, req.query.folder || 'INBOX', req.query.uid);
   if (!t) return res.status(404).json({ error: 'Message not found' });
+  if (!req.delegatedMailbox) for (const m of t.messages || []) recordRead(req.user.email, m).catch(() => {});
   res.json(t);
 }));
 
@@ -391,6 +399,10 @@ api.get('/attachment', wrap(async (req, res) => {
   const r = await loadMessage(req.user, folder, uid, { markSeen: false });
   const att = r?.parsed.attachments?.[Number(index)];
   if (!att) return res.status(404).json({ error: 'Attachment not found' });
+  // Files that can run code on a computer are only handed out after an explicit "I trust this"
+  if (attachmentRisk(att.filename, att.contentType) === 'block' && req.query.confirm !== '1') {
+    return res.status(403).json({ error: 'This file can run programs on your computer, so it was blocked to keep you safe.', code: 'blocked_attachment' });
+  }
   const name = (att.filename || 'attachment').replace(/["\r\n]/g, '');
   res.setHeader('Content-Type', att.contentType || 'application/octet-stream');
   res.setHeader('Content-Disposition', `${req.query.inline === '1' ? 'inline' : 'attachment'}; filename="${encodeURIComponent(name)}"; filename*=UTF-8''${encodeURIComponent(name)}`);
@@ -548,6 +560,7 @@ api.post('/send', upload.array('attachments'), wrap(async (req, res) => {
     return res.json({ ok: true, scheduled: true, id, sendAt, secure: secure && { id: secure.id, url: secure.url } });
   }
   const info = await transport(req.user).sendMail(mail);
+  if (!secure && !req.delegatedMailbox) recordDelivered(req.user.email, info.messageId, rcpts).catch(() => {}); // "Delivered" for Roammail recipients
   count('mail_sent');
   await saveTracked(req.user, mail, rr.track, rcpts).catch((e) => console.warn('receipt tracking failed', e.message));
 
@@ -704,6 +717,7 @@ api.get('/contacts', wrap(async (req, res) => {
 // ---------- live updates (Server-Sent Events + IMAP IDLE) ----------
 // One IDLE connection per person, shared by all their open tabs and devices (was one per tab).
 const hubs = new Map(); // email -> { subs: Set<fn>, client, ready: Promise }
+setLiveSender((email, event, data) => { const h = hubs.get(email); if (h) for (const fn of h.subs) fn(event, data); });
 gauge('live_users', () => hubs.size);
 gauge('preview_cache_entries', () => previewCache.size);
 export const liveStats = () => ({ users: hubs.size, streams: [...hubs.values()].reduce((n, h) => n + h.subs.size, 0) });

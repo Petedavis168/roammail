@@ -1,4 +1,3 @@
-import crypto from 'node:crypto';
 // Per-session IMAP connection pool. Opening TLS + LOGIN on every request is slow,
 // so each signed-in session keeps one connection that is closed after idling.
 import { ImapFlow } from 'imapflow';
@@ -122,26 +121,25 @@ export async function specialFolder(user, use, { create = false } = {}) {
 
 /** SMTP transport with the person's own password; a rejected password is handled like an IMAP one (counted, session ended, never retried). */
 // Sending: one pooled SMTP connection per mailbox, kept open for a couple of minutes, so a send doesn't pay for a
-// new TLS handshake and sign-in every time (the slowest part of sending). Keyed by password too: a changed
-// password gets a fresh connection.
-const smtpPool = new Map(); // email|hash -> { t, timer }
+// new TLS handshake and sign-in every time (the slowest part of sending). If the password has changed, the
+// old connection is closed and a fresh one opened.
+const smtpPool = new Map(); // email -> { t, pass, timer }
 const SMTP_IDLE_MS = 2 * 60e3;
-const poolKey = (user) => `${user.email}|${crypto.createHash('sha256').update(String(user.password)).digest('hex').slice(0, 16)}`;
-function dropTransport(user) { const e = smtpPool.get(poolKey(user)); if (e) { smtpPool.delete(poolKey(user)); clearTimeout(e.timer); e.t.close(); } }
+function dropTransport(user) { const e = smtpPool.get(user.email); if (e) { smtpPool.delete(user.email); clearTimeout(e.timer); e.t.close(); } }
 function pooledTransport(nodemailer, user) {
-  const key = poolKey(user);
-  let e = smtpPool.get(key);
+  let e = smtpPool.get(user.email);
+  if (e && e.pass !== user.password) { dropTransport(user); e = null; } // password changed: a fresh connection
   if (!e) {
     const t = nodemailer.createTransport({
       pool: true, maxConnections: 2, maxMessages: 50, socketTimeout: 60e3,
       host: config.smtp.host, port: config.smtp.port, secure: config.smtp.secure,
       auth: { user: user.email, pass: user.password }, tls: { rejectUnauthorized: config.tlsRejectUnauthorized },
     });
-    e = { t, timer: null };
-    smtpPool.set(key, e);
+    e = { t, pass: user.password, timer: null };
+    smtpPool.set(user.email, e);
   }
   clearTimeout(e.timer);
-  e.timer = setTimeout(() => { smtpPool.delete(key); e.t.close(); }, SMTP_IDLE_MS);
+  e.timer = setTimeout(() => dropTransport(user), SMTP_IDLE_MS);
   e.timer.unref?.();
   return e.t;
 }
