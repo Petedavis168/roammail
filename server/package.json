@@ -25,6 +25,7 @@
     "test:offline": "node --disable-warning=ExperimentalWarning --test test/offline.test.js",
     "test:i18n": "node --disable-warning=ExperimentalWarning --test test/spanish.test.js",
     "test:sso": "node --disable-warning=ExperimentalWarning --test test/sso.test.js",
+    "test:booking": "node --disable-warning=ExperimentalWarning --test test/booking.test.js",
     "test:nativepush": "NODE_ENV=test node --disable-warning=ExperimentalWarning --test test/nativepush.test.js"
   },
   "keywords": [],

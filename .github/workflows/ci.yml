@@ -111,6 +111,9 @@ jobs:
       - name: Microsoft / Google sign-in tests
         working-directory: server
         run: npm run test:sso
+      - name: Booking page tests
+        working-directory: server
+        run: npm run test:booking
 
       - name: Logs on failure
         if: failure()

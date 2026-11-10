@@ -173,6 +173,24 @@ CREATE TABLE IF NOT EXISTS passkeys (
   name TEXT, creds TEXT NOT NULL, created_at INTEGER NOT NULL, last_used INTEGER
 );
 CREATE INDEX IF NOT EXISTS passkeys_email ON passkeys(email);
+CREATE TABLE IF NOT EXISTS booking_pages (
+  email TEXT PRIMARY KEY, slug TEXT NOT NULL UNIQUE, title TEXT, intro TEXT, timezone TEXT NOT NULL, hours TEXT NOT NULL, enabled INTEGER NOT NULL DEFAULT 1,
+  creds TEXT, owner_name TEXT, created_at INTEGER NOT NULL
+);
+CREATE TABLE IF NOT EXISTS booking_types (
+  id INTEGER PRIMARY KEY AUTOINCREMENT, owner TEXT NOT NULL, slug TEXT NOT NULL, name TEXT NOT NULL, description TEXT, duration INTEGER NOT NULL,
+  step_min INTEGER NOT NULL DEFAULT 0, buffer_before INTEGER NOT NULL DEFAULT 0, buffer_after INTEGER NOT NULL DEFAULT 0, min_notice INTEGER NOT NULL DEFAULT 0,
+  max_days INTEGER NOT NULL DEFAULT 60, daily_limit INTEGER NOT NULL DEFAULT 0, location TEXT NOT NULL DEFAULT 'video', location_detail TEXT, color TEXT,
+  active INTEGER NOT NULL DEFAULT 1, sort INTEGER NOT NULL DEFAULT 0
+);
+CREATE UNIQUE INDEX IF NOT EXISTS booking_types_slug ON booking_types(owner, slug);
+CREATE TABLE IF NOT EXISTS bookings (
+  id INTEGER PRIMARY KEY AUTOINCREMENT, owner TEXT NOT NULL, type_id INTEGER, start_at INTEGER NOT NULL, end_at INTEGER NOT NULL,
+  guest_name TEXT NOT NULL, guest_email TEXT NOT NULL, guest_phone TEXT, guest_tz TEXT, notes TEXT, location TEXT, status TEXT NOT NULL DEFAULT 'confirmed',
+  token_hash TEXT NOT NULL, uid TEXT, event_href TEXT, cancelled_by TEXT, cancelled_at INTEGER, created_at INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS bookings_owner ON bookings(owner, start_at);
+CREATE UNIQUE INDEX IF NOT EXISTS bookings_token ON bookings(token_hash);
 CREATE TABLE IF NOT EXISTS sso_links (
   provider TEXT NOT NULL, subject TEXT NOT NULL, email TEXT NOT NULL, tenant TEXT NOT NULL, label TEXT, creds TEXT NOT NULL,
   created_at INTEGER NOT NULL, last_used INTEGER, PRIMARY KEY (provider, subject)
