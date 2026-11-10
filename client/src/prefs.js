@@ -14,6 +14,8 @@ const DEFAULTS = {
     { name: 'Green', color: '#498205' }, { name: 'Blue', color: '#0f6cbd' }, { name: 'Purple', color: '#8764b8' },
   ],
   trustedSenders: [],
+  requestReceipts: 'ask',    // ask (choose per email) | always | never
+  sendReceipts: 'ask',       // when someone asks me: ask | always | never
 };
 
 export function usePrefs(email) {

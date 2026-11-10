@@ -55,6 +55,9 @@ function Composer({ c, me, prefs, sigData, identities, onClose, onSend, focusInd
   const [ready, setReady] = useState(!(init.quote && !init.quote.html && !init.quote.text));
   const [dragging, setDragging] = useState(false);
   const [important, setImportant] = useState(init.priority === 'high');
+  const [readR, setReadR] = useState(prefs.requestReceipts === 'always');
+  const [delivR, setDelivR] = useState(prefs.requestReceipts === 'always');
+  const [rcptMenu, setRcptMenu] = useState(false);
   const editor = useRef();
   const fileInput = useRef();
   const dirty = useRef(false);
@@ -125,7 +128,7 @@ function Composer({ c, me, prefs, sigData, identities, onClose, onSend, focusInd
     to, cc, bcc, subject, files, html: editor.current?.innerHTML || '', text: editor.current?.innerText || '',
     inReplyTo: init.inReplyTo, references: init.references, replyFolder: init.replyFolder, replyUid: init.replyUid,
     forwardFolder: init.forwardFolder, forwardUid: init.forwardUid, draftUid: draft.uid, draftFolder: draft.folder,
-    priority: important ? 'high' : 'normal', fromAddress, asMailbox: fromChoices.find((i) => i.address === fromAddress)?.mailboxId,
+    priority: important ? 'high' : 'normal', readReceipt: readR, deliveryReceipt: delivR, fromAddress, asMailbox: fromChoices.find((i) => i.address === fromAddress)?.mailboxId,
     fromName: fromAddress !== me.email ? ((identities || []).find((i) => i.address === fromAddress)?.name || '') : (prefs.displayName || me.name || ''),
   });
 
@@ -251,6 +254,18 @@ function Composer({ c, me, prefs, sigData, identities, onClose, onSend, focusInd
             <button type="button" className="icon-btn" title={tr("Bulleted list")} onMouseDown={(e) => { e.preventDefault(); exec('insertUnorderedList'); }}><Icon name="list" size={16} /></button>
             <button type="button" className="icon-btn" title={tr("Insert link")} onMouseDown={(e) => { e.preventDefault(); addLink(); }}><Icon name="link" size={16} /></button>
             <button type="button" className={`icon-btn ${important ? 'on-red' : ''}`} title={tr("High importance")} onClick={() => setImportant((x) => !x)}>!</button>
+            {prefs.requestReceipts !== 'never' && (
+              <div className="dd">
+                <button type="button" className={`icon-btn ${readR || delivR ? 'on' : ''}`} title={tr("Receipts")} aria-label={tr("Receipts")} aria-expanded={rcptMenu} onClick={() => setRcptMenu((x) => !x)}><Icon name="check" size={16} />{readR && <Icon name="check" size={16} />}</button>
+                {rcptMenu && (
+                  <div className="menu up rcpt-menu" onMouseLeave={() => setRcptMenu(false)}>
+                    <label className="check"><input type="checkbox" checked={delivR} onChange={(e) => setDelivR(e.target.checked)} /> {tr("Request a delivery receipt")}</label>
+                    <label className="check"><input type="checkbox" checked={readR} onChange={(e) => setReadR(e.target.checked)} /> {tr("Request a read receipt")}</label>
+                    <small className="muted">{tr("The recipient's mail app may ask them first, so a read receipt isn't guaranteed.")}</small>
+                  </div>
+                )}
+              </div>
+            )}
             <div className="dd">
               <button type="button" className="icon-btn" title={tr("Insert a template")} onClick={openTemplates}>📄</button>
               {tplMenu && (

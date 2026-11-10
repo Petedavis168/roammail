@@ -1191,3 +1191,8 @@ a.g-passkey { text-decoration: none; color: inherit; box-sizing: border-box; }
 .alias-note:focus { outline: 1px solid var(--border); background: var(--panel); padding: 2px 6px; }
 .switch { display: inline-flex; gap: 4px; align-items: center; font-size: 13px; }
 @media (max-width: 640px) { .sub-row, .alias-row { flex-wrap: wrap; } .sub-actions { width: 100%; justify-content: flex-start; padding-left: 34px; } }
+.rcpt-menu { padding: 10px 12px; min-width: 260px; display: flex; flex-direction: column; gap: 6px; }
+.rcpt-menu small { font-size: 11px; }
+.rcpt-status { padding: 4px 16px; display: flex; flex-direction: column; gap: 2px; }
+.rcpt-status .ok { color: var(--ok); }
+.rcpt-status .bad { color: var(--danger, #b91c1c); }

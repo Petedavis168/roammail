@@ -72,6 +72,8 @@ function General({ prefs, setPrefs, me }) {
           {[0, 5, 10, 20, 30].map((s) => <option key={s} value={s}>{s ? `${s} seconds` : 'Off'}</option>)}
         </select></label>
       <h3>{t("Privacy")}</h3>
+      <label className="row-field">{t("Ask for receipts on emails I send")}{' '}<select value={prefs.requestReceipts} onChange={set('requestReceipts')}><option value="ask">{t("Choose for each email")}</option><option value="always">{t("Always (delivery and read)")}</option><option value="never">{t("Never")}</option></select></label>
+      <label className="row-field">{t("When someone asks me for a read receipt")}{' '}<select value={prefs.sendReceipts} onChange={set('sendReceipts')}><option value="ask">{t("Ask me")}</option><option value="always">{t("Always send one")}</option><option value="never">{t("Never send one")}</option></select></label>
       <label className="row-field">{t("External images")}{' '}<select value={prefs.showImages} onChange={set('showImages')}><option value="ask">{t("Ask before showing")}</option><option value="always">{t("Always show")}</option></select></label>
       {prefs.trustedSenders.length > 0 && (
         <div className="trusted">
