@@ -25,7 +25,7 @@ function Dropdown({ icon, label, children, right }) {
 /** Message toolbar. Actions only appear once something is selected; Reply/Forward live in the reading pane. */
 export default function Ribbon({ hasSelection, count = 0, folderUse, folders, act, categories, onRefresh, readingPane, setReadingPane, density, setDensity }) {
   return (
-    <div className="toolbar" role="toolbar" aria-label={t("Message actions")}>
+    <div className={`toolbar ${hasSelection ? '' : 'idle'}`} role="toolbar" aria-label={t("Message actions")}>
       {hasSelection ? (
         <>
           {count > 1 && <span className="tb-count">{count} selected</span>}

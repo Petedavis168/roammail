@@ -1478,7 +1478,6 @@ a { color: var(--accent); }
 .ios-install ol { display: grid; gap: 10px; padding-left: 20px; line-height: 1.5; }
 .ios-share { display: inline-grid; place-items: center; width: 24px; height: 24px; border-radius: 6px; background: var(--panel-2); color: var(--accent, #2563eb); font-weight: 700; }
 /* Installed app: respect the notch / home bar */
-@media (display-mode: standalone) { body { padding-top: env(safe-area-inset-top); padding-bottom: env(safe-area-inset-bottom); } }
 
 /* ---------- Contact cards */
 .person-link { border: 0; background: none; padding: 0; font: inherit; color: inherit; cursor: pointer; border-radius: 4px; }
@@ -1586,3 +1585,30 @@ a { color: var(--accent); }
 .ca.reply:hover { border-color: #7c3aed; color: #7c3aed; } .ca.later:hover { border-color: #d97706; color: #d97706; }
 .catchup-done { display: grid; justify-items: center; gap: 8px; padding: 60px 20px; text-align: center; }
 .catchup-party { font-size: 54px; }
+
+/* ---------- Phones: a cleaner, roomier inbox */
+@media (max-width: 899px) {
+  .topbar { height: calc(56px + env(safe-area-inset-top)); padding-left: 6px; padding-right: 10px; gap: 6px; }
+  .topbar .brand { display: none; }
+  .topbar .search { flex: 1; min-width: 0; height: 42px; border-radius: 999px; padding: 0 6px 0 14px; }
+  .topbar .search input { flex: 1; min-width: 0; font-size: 16px; }
+  .topbar .search input::placeholder { color: var(--muted); opacity: 1; }
+  .topbar .search .dd .icon-btn { min-width: 36px; min-height: 36px; }
+  .topbar-right > .icon-btn { display: none; } /* tasks & settings live in the account menu on phones */
+  .topbar-right .avatar.sm { width: 36px; height: 36px; }
+  .toolbar.idle { display: none; } /* "Select a message for actions" adds nothing on a phone; pull down to refresh */
+  .list-head { padding: 10px 12px 6px; gap: 8px; min-height: 0; }
+  .list-head .chk { display: none; }
+  .list-head h2 { font-size: 22px; font-weight: 750; }
+  .list-head .filters { gap: 6px; }
+  .list-head .filters .chip { min-height: 30px; padding: 3px 12px; font-size: 13px; }
+  .inbox-tabs { padding: 0 6px; }
+  .inbox-tabs button { padding: 9px 4px 8px; font-size: 14px; gap: 5px; }
+  .app-rail button small { font-size: 11px; }
+  .app-rail .rail-long { display: none; }
+  .app-rail .rail-short { display: inline !important; }
+  .empty { padding-top: 12vh; }
+}
+.app-rail .rail-short { display: none; }
+.menu .phone-only { display: none; }
+@media (max-width: 899px) { .menu .phone-only { display: flex; } }

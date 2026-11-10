@@ -549,6 +549,7 @@ export default function Mail({ me, route, refreshMe, theme, setTheme, themePref 
               <div className="menu right" onMouseLeave={() => setUserMenu(false)}>
                 <div className="menu-head"><b>{prefs.displayName || me.name || me.email.split('@')[0]}</b><small>{me.email}</small></div>
                 <button onClick={() => { setShowSettings(true); setUserMenu(false); }}><Icon name="settings" />{' '}{t("Settings")}</button>
+                <button className="phone-only" onClick={() => { setPanel(panelTab); setUserMenu(false); }}><Icon name="check" />{' '}{t("Tasks, notes & follow-ups")}</button>
                 {installMode && <button onClick={async () => { setUserMenu(false); if (installMode === 'ios') setIosInstall(true); else await promptInstall(); }}><Icon name="download" /> {t('Install the Roammail app')}</button>}
                 <div className="menu-note">{t('Appearance')}</div>
                 <div className="theme-pick" role="radiogroup" aria-label={t('Appearance')}>
@@ -631,7 +632,7 @@ export default function Mail({ me, route, refreshMe, theme, setTheme, themePref 
           <button key={v} className={view === v && !(v === 'mail' && railFolder) ? 'on' : ''} onClick={() => { setView(v); if (v === 'mail' && railFolder) setFolder('INBOX'); }} title={l} aria-label={l}><Icon name={i} size={20} /><small>{l}</small></button>
         ))}
         {!me.delegated && <button className={view === 'mail' && folder === '@screener' ? 'on' : ''} onClick={() => { setView('mail'); setFolder('@screener'); clearSearch(); setActive(null); }} title={t("Screener")} aria-label={t("Screener")}><Icon name="userCheck" size={20} /><small>{t("Screener")}</small>{screenerCount > 0 && <b className="rail-badge">{screenerCount > 99 ? '99+' : screenerCount}</b>}</button>}
-        <button className={view === 'mail' && folder === '@subscriptions' ? 'on' : ''} onClick={() => { setView('mail'); setFolder('@subscriptions'); clearSearch(); setActive(null); }} title={t("Subscriptions")} aria-label={t("Subscriptions")}><Icon name="list" size={20} /><small className="rail-long">{t("Subscriptions")}</small></button>
+        <button className={view === 'mail' && folder === '@subscriptions' ? 'on' : ''} onClick={() => { setView('mail'); setFolder('@subscriptions'); clearSearch(); setActive(null); }} title={t("Subscriptions")} aria-label={t("Subscriptions")}><Icon name="list" size={20} /><small className="rail-long">{t("Subscriptions")}</small><small className="rail-short">{t("Lists")}</small></button>
         {multi && (
           <div className="rail-accounts" aria-label={t("Accounts")}>
             {accounts.map((a, i) => (
