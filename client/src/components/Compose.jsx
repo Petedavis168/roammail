@@ -10,6 +10,7 @@ import { presets, fmtWhen, localInputValue } from '../snooze.js';
 import { queue, flushOutbox, isOffline } from '../outbox.js';
 import { offlineAllowed } from '../api.js';
 import { t as tr } from '../i18n.js';
+import VoiceRecorder from './VoiceRecorder.jsx';
 import { GALLERY, customFields, builtinValues, fillTemplate, fieldLabel } from '../templategallery.js';
 
 const sigBlock = (html) => (html ? `<div class="signature" data-sig="1"><br>${safeHtml(html)}</div>` : '');
@@ -113,6 +114,16 @@ function Composer({ c, me, prefs, sigData, identities, onClose, onSend, focusInd
     const h = setTimeout(() => api.get(`/api/ooo?emails=${encodeURIComponent(inOrg.join(','))}`).then((r) => setAway(r.away || [])).catch(() => {}), 400);
     return () => clearTimeout(h);
   }, [rcptKey]);
+  const [voice, setVoice] = useState(false);
+  const addVoice = ({ url, durationMs }) => {
+    setVoice(false);
+    const s2 = Math.round((durationMs || 0) / 1000); const len = `${Math.floor(s2 / 60)}:${String(s2 % 60).padStart(2, '0')}`;
+    const html = `<div><table role="presentation" cellpadding="0" cellspacing="0" style="border-collapse:separate;margin:8px 0"><tr><td style="background:#2563eb;border-radius:999px;padding:10px 18px"><a href="${escapeHtml(url)}" style="color:#ffffff;text-decoration:none;font:600 14px Arial,sans-serif">&#9654;&nbsp; ${escapeHtml(tr('Play voice message'))} (${len})</a></td></tr></table></div><div><br></div>`;
+    const ed = editor.current; if (!ed) return;
+    const cur = ed.querySelector('.signature, [data-sig]');
+    if (cur) cur.insertAdjacentHTML('beforebegin', safeHtml(html)); else { ed.focus(); document.execCommand('insertHTML', false, safeHtml(html)); }
+    markDirty();
+  };
   const [sendMenu, setSendMenu] = useState(false);
   const [pickTime, setPickTime] = useState(false);
   const [customTime, setCustomTime] = useState(() => localInputValue(new Date(Date.now() + 3600e3)));
@@ -285,6 +296,7 @@ function Composer({ c, me, prefs, sigData, identities, onClose, onSend, focusInd
           </div>
         )}
         {init.forwardUid && <div className="muted small c-note">{tr("Original attachments will be included.")}</div>}
+        {voice && <VoiceRecorder onAdd={addVoice} onClose={() => setVoice(false)} />}
         {tplFill && (
           <form className="tpl-fill" onSubmit={(e) => { e.preventDefault(); insertTemplate(tplFill.t, tplFill.values); setTplFill(null); }}>
             <b>{tr('Fill in')} “{tplFill.t.name}”</b>
@@ -319,6 +331,7 @@ function Composer({ c, me, prefs, sigData, identities, onClose, onSend, focusInd
             <button type="button" className="icon-btn" title={tr("Bold")} onMouseDown={(e) => { e.preventDefault(); exec('bold'); }}><Icon name="bold" size={16} /></button>
             <button type="button" className="icon-btn" title={tr("Italic")} onMouseDown={(e) => { e.preventDefault(); exec('italic'); }}><Icon name="italic" size={16} /></button>
             <button type="button" className="icon-btn" title={tr("Insert link")} onMouseDown={(e) => { e.preventDefault(); addLink(); }}><Icon name="link" size={16} /></button>
+            <button type="button" className={`icon-btn ${voice ? 'on' : ''}`} title={tr("Voice message")} aria-label={tr("Voice message")} onClick={() => setVoice((x) => !x)}><Icon name="mic" size={16} /></button>
             <button type="button" className={`icon-btn ${protect ? 'on' : ''}`} title={tr("Protect with a password")} aria-label={tr("Protect with a password")} aria-pressed={protect} onClick={() => { setProtect((x) => !x); if (!protect && !sec.password) genPassword(); }}><Icon name="lock" size={16} /></button>
             <div className="dd">
               <button type="button" className={`icon-btn ${important || readR || delivR ? 'on' : ''}`} title={tr("More options")} aria-label={tr("More options")} aria-expanded={moreMenu} onClick={() => setMoreMenu((x) => !x)}><Icon name="more" size={16} /></button>

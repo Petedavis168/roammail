@@ -67,6 +67,7 @@ function General({ prefs, setPrefs, me }) {
       <label className="row-field">{t("Language")}{' '}<select value={lang} onChange={(e) => setLang(e.target.value)}>{LANGS.map(([v, n]) => <option key={v} value={v}>{n}</option>)}</select></label>
       <label className="row-field">{t("Density")}{' '}<select value={prefs.density} onChange={set('density')}><option value="comfortable">{t("Comfortable")}</option><option value="compact">{t("Compact")}</option></select></label>
       <label className="check"><input type="checkbox" checked={prefs.conversation} onChange={set('conversation')} />{' '}{t("Conversation view (group replies together)")}</label>
+      <label className="check"><input type="checkbox" checked={prefs.inboxTabs !== false} onChange={set('inboxTabs')} />{' '}{t("Inbox tabs: Primary, Updates and Newsletters")}</label>
       <h3>{t("Writing")}</h3>
       <label className="row-field">{t("Your name (shown to recipients)")}<input value={prefs.displayName} placeholder={me.name || me.email} onChange={set('displayName')} /></label>
       <label className="row-field">{t("Undo send")}{' '}<select value={prefs.undoSeconds} onChange={set('undoSeconds')}>

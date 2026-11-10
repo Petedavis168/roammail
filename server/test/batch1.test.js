@@ -170,6 +170,7 @@ test('delivery reports: good news is filed away, a bounce is shown in plain word
     const [cn, cv] = me.cookie.split('='); await ctx.addCookies([{ name: cn, value: cv, domain: new URL(BASE).hostname, path: '/' }]);
     const page = await ctx.newPage();
     await page.goto(`${BASE}/app`);
+    await page.click('.inbox-tabs >> text=Updates'); // mail-system messages are in Updates
     await page.click('.row >> text=Undelivered Mail Returned to Sender');
     await page.waitForSelector('.report-line.failed >> text=Not delivered');
     assert.match(await page.locator('.report-card').innerText(), /couldn’t be delivered to typo@example.org\. That email address doesn’t exist/);

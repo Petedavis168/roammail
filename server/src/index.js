@@ -37,6 +37,8 @@ import { ssoApi, ssoPublic } from './sso.js';
 import { bookingApi, bookingPublic, bookingPages } from './booking.js';
 import { subscriptionsApi } from './subscriptions.js';
 import { nudgesApi } from './nudges.js';
+import { screenerApi } from './screener.js';
+import { voiceApi, voicePages } from './voice.js';
 import { aliasesApi } from './aliases.js';
 import { receiptsApi } from './receipts.js';
 import { secureApi, securePublic, securePages } from './secure.js';
@@ -61,6 +63,7 @@ app.use(helmet({
       frameSrc: ["'self'", 'blob:', ...(config.turnstile.siteKey ? ['https://challenges.cloudflare.com'] : [])],
       scriptSrc: ["'self'", ...(config.turnstile.siteKey ? ['https://challenges.cloudflare.com'] : [])],
       connectSrc: ["'self'"],
+      mediaSrc: ["'self'", 'blob:'], // voice notes (recording preview + playback)
     },
   },
   crossOriginEmbedderPolicy: false,
@@ -70,7 +73,7 @@ app.use(billingWebhook); // Stripe → raw body, verified by signature
 app.use(cookieParser());
 app.use(express.json({ limit: '2mb', verify: (req, res, buf) => { req.rawBody = buf; } }));
 app.use((req, res, next) => {
-  res.setHeader('Permissions-Policy', 'camera=(), microphone=(), geolocation=(), payment=(), usb=(), interest-cohort=()');
+  res.setHeader('Permissions-Policy', 'camera=(), microphone=(self), geolocation=(), payment=(), usb=(), interest-cohort=()');
   res.setHeader('Cross-Origin-Opener-Policy', 'same-origin');
   next();
 });
@@ -89,6 +92,7 @@ app.get('/healthz', (req, res) => res.json({ ok: true }));
 app.use(appLinks); // before host routing: these must be served on every host, never redirected
 app.use(bookingPages); // public booking pages, same on every host
 app.use(securePages); // password-protected email page, same on every host
+app.use(voicePages); // voice-note player page, same on every host
 app.use(hosts);
 app.use(ops);
 app.use(abuseDesk);
@@ -124,6 +128,8 @@ app.use('/api', ssoApi);
 app.use('/api', bookingApi);
 app.use('/api', subscriptionsApi);
 app.use('/api', nudgesApi);
+app.use('/api', screenerApi);
+app.use('/api', voiceApi);
 app.use('/api', aliasesApi);
 app.use('/api', receiptsApi);
 app.use('/api', secureApi);

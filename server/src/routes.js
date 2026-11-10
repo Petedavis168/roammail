@@ -15,6 +15,8 @@ import { getClient, closeClient, withMailbox, specialFolder, makeClient, userTra
 import { parseQuery } from './search.js';
 import { lookalike } from './lookalike.js';
 import { requestReceipts, saveTracked, describeReport, collectReceipts } from './receipts.js';
+import { inboxTabs, TABS } from './inboxtabs.js';
+import { learnRecipients } from './screener.js';
 import { protectEmail, noticeMail, checkSecurePassword } from './secure.js';
 import { rolesFor, q, twoFactorPolicy } from './db.js';
 import { applyEnforcedSignature } from './signatures.js';
@@ -172,8 +174,21 @@ api.get('/messages', wrap(async (req, res) => {
   // File delivery reports / read receipts out of the inbox (at most every 30 seconds; never holds up the list)
   if (folder === 'INBOX' && !req.delegatedMailbox) collectReceipts(req.user, { minGap: 30e3 }).catch((e) => console.warn('receipts scan failed', e.message));
 
+  const tab = folder === 'INBOX' && TABS.includes(req.query.tab) ? req.query.tab : null;
   const result = await withMailbox(req.user, folder, async (client) => {
     const total = client.mailbox.exists;
+    if (tab) { // smart inbox tabs: Primary / Updates / Newsletters (optionally also filtered)
+      const t = await inboxTabs(client);
+      let uids = [...t[tab]];
+      if (filter) {
+        const crit = filter === 'unread' ? { seen: false } : filter === 'flagged' ? { flagged: true } : { header: { 'Content-Type': 'multipart/mixed' } };
+        const f = new Set((await client.search(crit, { uid: true })) || []);
+        uids = uids.filter((u) => f.has(u));
+      }
+      uids.sort((a, b) => b - a);
+      const slice = uids.slice(page * pageSize, (page + 1) * pageSize);
+      return { total: uids.length, tab, tabs: t.unread, messages: slice.length ? await fetchSummaries(client, slice.join(','), { uid: true }) : [] };
+    }
     if (filter) {
       const crit = filter === 'unread' ? { seen: false } : filter === 'flagged' ? { flagged: true }
         : { header: { 'Content-Type': 'multipart/mixed' } };
@@ -489,6 +504,7 @@ api.post('/send', upload.array('attachments'), wrap(async (req, res) => {
   const rr = requestReceipts(req.user, mail, { read: req.body.readReceipt === 'true', delivery: req.body.deliveryReceipt === 'true' });
   mail = rr.mail;
   const rcpts = [mail.to, mail.cc, mail.bcc].filter(Boolean).flatMap((v) => addressparser(v)).map((a) => String(a.address || '').toLowerCase()).filter(Boolean);
+  if (!req.delegatedMailbox) learnRecipients(req.user.email, rcpts).catch(() => {}); // the Screener lets people you write to through
   // Password-protected: the recipients get a link; the real email is kept encrypted with the password
   let original = null; let secure = null;
   if (req.body.protect === 'true') {

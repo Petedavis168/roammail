@@ -25,7 +25,7 @@ function cond(c) {
   return null;
 }
 
-export function buildSieve({ vacation, rules }, me, orgDomains) {
+export function buildSieve({ vacation, rules, screener }, me, orgDomains) {
   const req = new Set(['fileinto', 'imap4flags', 'copy']);
   const lines = [];
   if (vacation?.enabled && (vacation.message || vacation.internalMessage)) {
@@ -71,6 +71,18 @@ export function buildSieve({ vacation, rules }, me, orgDomains) {
     if (r.stop !== false) acts.push('stop;');
     lines.push(`# ${String(r.name || 'Rule').replace(/[\r\n]/g, ' ')}\nif ${r.match === 'all' ? 'allof' : 'anyof'}(${tests.join(', ')}) {\n  ${acts.join('\n  ')}\n}`);
   }
+  // Screener: mail from people you've never dealt with waits in "Screener" until you allow them
+  if (screener?.enabled) {
+    req.add('mailbox');
+    if (screener.block?.length) lines.push(`# Screener: blocked senders\nif address :is "from" [${screener.block.map(str).join(', ')}] {\n  fileinto :create "Junk";\n  stop;\n}`);
+    const known = [
+      `address :is "from" [${[me, ...(screener.allow || [])].map(str).join(', ')}]`,
+      'address :localpart :is "from" ["mailer-daemon", "postmaster"]',
+      'header :contains "content-type" "multipart/report"',
+    ];
+    if (orgDomains.length || screener.allowDomains?.length) known.push(`address :domain :is "from" [${[...orgDomains, ...(screener.allowDomains || [])].map(str).join(', ')}]`);
+    lines.push(`# Screener: first-time senders wait until you allow them\nif not anyof(${known.join(', ')}) {\n  fileinto :create "Screener";\n  stop;\n}`);
+  }
   if (!lines.length) return null;
   // mailcow files spam into Junk in global_sieve_after, which runs after this script. File it here first so
   // no rule can pull spam into a normal folder and automatic replies never answer spammers.
@@ -78,8 +90,11 @@ export function buildSieve({ vacation, rules }, me, orgDomains) {
   return `require [${[...req].map(str).join(', ')}];\n\n${[spamFirst, ...lines].join('\n\n')}\n`;
 }
 
+let screenerData = async () => null; // set by screener.js (avoids an import cycle)
+export const setScreenerSource = (fn) => { screenerData = fn; };
+export async function syncSieve(user) { return sync(user); }
 async function sync(user) {
-  const data = { vacation: await userSetting(user.email, 'vacation', null), rules: await userSetting(user.email, 'rules', []) };
+  const data = { vacation: await userSetting(user.email, 'vacation', null), rules: await userSetting(user.email, 'rules', []), screener: await screenerData(user.email) };
   const orgDomains = (await q.all("SELECT domain FROM domains WHERE status = 'active' AND org_id = (SELECT org_id FROM domains WHERE domain = ?)", user.email.split('@')[1])).map((d) => d.domain);
   const script = buildSieve(data, user.email, orgDomains.length ? orgDomains : [user.email.split('@')[1]]);
   const existing = (await mailcow.listFilters(user.email)).find((f) => f.script_desc === SCRIPT_DESC);

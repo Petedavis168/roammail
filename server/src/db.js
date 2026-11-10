@@ -193,6 +193,9 @@ CREATE INDEX IF NOT EXISTS bookings_owner ON bookings(owner, start_at);
 CREATE UNIQUE INDEX IF NOT EXISTS bookings_token ON bookings(token_hash);
 CREATE TABLE IF NOT EXISTS subscription_state (email TEXT NOT NULL, sender TEXT NOT NULL, status TEXT NOT NULL, at INTEGER NOT NULL, PRIMARY KEY (email, sender));
 CREATE TABLE IF NOT EXISTS nudge_dismissed (email TEXT NOT NULL, message_id TEXT NOT NULL, at INTEGER NOT NULL, PRIMARY KEY (email, message_id));
+CREATE TABLE IF NOT EXISTS voice_notes (id TEXT PRIMARY KEY, owner TEXT NOT NULL, mime TEXT NOT NULL, data BLOB NOT NULL, duration_ms INTEGER, plays INTEGER NOT NULL DEFAULT 0, created_at INTEGER NOT NULL, expires_at INTEGER NOT NULL);
+CREATE INDEX IF NOT EXISTS voice_notes_owner ON voice_notes(owner);
+CREATE TABLE IF NOT EXISTS screener_list (email TEXT NOT NULL, address TEXT NOT NULL, decision TEXT NOT NULL, source TEXT, at INTEGER NOT NULL, PRIMARY KEY (email, address));
 CREATE TABLE IF NOT EXISTS user_aliases (
   id INTEGER PRIMARY KEY AUTOINCREMENT, email TEXT NOT NULL, address TEXT NOT NULL UNIQUE, mailcow_id TEXT NOT NULL, note TEXT, active INTEGER NOT NULL DEFAULT 1, created_at INTEGER NOT NULL
 );

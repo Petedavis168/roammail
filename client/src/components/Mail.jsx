@@ -21,6 +21,7 @@ import ScheduledList from './ScheduledList.jsx';
 import SnoozeMenu from './SnoozeMenu.jsx';
 import QuarantineList from './QuarantineList.jsx';
 import SubscriptionsList from './SubscriptionsList.jsx';
+import ScreenerList from './ScreenerList.jsx';
 import AliasesList from './AliasesList.jsx';
 import CommandBar from './CommandBar.jsx';
 import { TABS as SETTINGS_TABS } from './Settings.jsx';
@@ -50,6 +51,9 @@ export default function Mail({ me, route, refreshMe, theme, setTheme, themePref 
   const mailbox = route.id; // the mailbox ID in the URL
   const [sharedBoxes, setSharedBoxes] = useState([]);
   useEffect(() => { api.get('/api/shared-mailboxes').then(setSharedBoxes).catch(() => {}); }, []);
+  // Screener: how many new people are waiting (badge on the rail; refreshed with the mail)
+  const [screenerCount, setScreenerCount] = useState(0);
+  const railFolder = folder === '@subscriptions' || folder === '@screener';
   // Out of office: a bar while it's on, so it's never left on by mistake
   const [ooo, setOoo] = useState(null);
   useEffect(() => {
@@ -64,9 +68,12 @@ export default function Mail({ me, route, refreshMe, theme, setTheme, themePref 
     if (m && m[1] !== route.id) location.assign(`/${encodeURIComponent(m[1])}/inbox`);
   };
   const [filter, setFilter] = useState('');
+  const [inboxTab, setInboxTab] = useState('primary'); // smart inbox tabs
+  const tabsOn = prefs.inboxTabs !== false;
   const [search, setSearch] = useState(null); // active query string
   const [searchInput, setSearchInput] = useState('');
   const [list, setList] = useState({ messages: [], total: 0, page: 0, loading: true, folder: 'INBOX' });
+  useEffect(() => { if (!me.delegated && folder === 'INBOX') api.get('/api/screener').then((d) => setScreenerCount(d.enabled ? d.waiting.length : 0)).catch(() => {}); }, [folder, list.total, me.delegated]);
   const [selected, setSelected] = useState(new Set());
   const [active, setActive] = useState(null); // uid
   const [composers, setComposers] = useState([]);
@@ -143,18 +150,18 @@ export default function Mail({ me, route, refreshMe, theme, setTheme, themePref 
     try {
       const r = folder === '@all' && !search
         ? await api.get('/api/all-inboxes').then((x) => ({ ...x, messages: x.messages.map((m) => ({ ...m, origUid: m.uid, uid: `${m.mailboxId}:${m.uid}` })) }))
-        : await api.messages(folder, page, filter);
+        : await api.messages(folder, page, filter, folder === 'INBOX' && tabsOn ? inboxTab : null);
       if (id !== reqId.current) return;
       setList((l) => ({
         messages: append ? [...l.messages, ...r.messages.filter((m) => !l.messages.some((x) => x.uid === m.uid))] : r.messages,
-        total: r.total, page, loading: false, folder: r.folder || folder,
+        total: r.total, page, loading: false, folder: r.folder || folder, tabs: r.tabs || null,
       }));
     } catch (e) {
       if (id !== reqId.current) return;
       setList((l) => ({ ...l, loading: false }));
       toast(e.message, { error: true });
     }
-  }, [folder, filter, search, toast]);
+  }, [folder, filter, search, toast, inboxTab, tabsOn]);
 
   useEffect(() => { loadFolders(); }, [loadFolders, mailbox]);
 
@@ -227,7 +234,7 @@ export default function Mail({ me, route, refreshMe, theme, setTheme, themePref 
   // Page title with unread count
   useEffect(() => {
     const inbox = folders.find((f) => f.specialUse === '\\Inbox');
-    document.title = `${inbox?.unread ? `(${inbox.unread}) ` : ''}${view === 'admin' ? 'Admin' : folder === '@scheduled' ? 'Scheduled' : folder === '@subscriptions' ? 'Subscriptions' : folder === '@aliases' ? 'Aliases' : folder === '@quarantine' ? 'Spam quarantine' : folder === '@all' ? 'All inboxes' : folderLabel(currentFolderObj || { name: 'Inbox' })} - ${me.email}`;
+    document.title = `${inbox?.unread ? `(${inbox.unread}) ` : ''}${view === 'admin' ? 'Admin' : folder === '@scheduled' ? 'Scheduled' : folder === '@subscriptions' ? 'Subscriptions' : folder === '@screener' ? 'Screener' : folder === '@aliases' ? 'Aliases' : folder === '@quarantine' ? 'Spam quarantine' : folder === '@all' ? 'All inboxes' : folderLabel(currentFolderObj || { name: 'Inbox' })} - ${me.email}`;
   }, [folders, currentFolderObj, me.email, view]);
 
   // ---------- helpers ----------
@@ -501,8 +508,9 @@ export default function Mail({ me, route, refreshMe, theme, setTheme, themePref 
       <div className="shell">
       <nav className="app-rail" aria-label={t("Apps")}>
         {[['mail', 'mail', 'Mail'], ['calendar', 'calendar', 'Calendar'], ['contacts', 'users', 'Contacts']].map(([v, i, l]) => (
-          <button key={v} className={view === v && !(v === 'mail' && folder === '@subscriptions') ? 'on' : ''} onClick={() => { setView(v); if (v === 'mail' && folder === '@subscriptions') setFolder('INBOX'); }} title={l} aria-label={l}><Icon name={i} size={20} /><small>{l}</small></button>
+          <button key={v} className={view === v && !(v === 'mail' && railFolder) ? 'on' : ''} onClick={() => { setView(v); if (v === 'mail' && railFolder) setFolder('INBOX'); }} title={l} aria-label={l}><Icon name={i} size={20} /><small>{l}</small></button>
         ))}
+        {!me.delegated && <button className={view === 'mail' && folder === '@screener' ? 'on' : ''} onClick={() => { setView('mail'); setFolder('@screener'); clearSearch(); setActive(null); }} title={t("Screener")} aria-label={t("Screener")}><Icon name="userCheck" size={20} /><small>{t("Screener")}</small>{screenerCount > 0 && <b className="rail-badge">{screenerCount > 99 ? '99+' : screenerCount}</b>}</button>}
         <button className={view === 'mail' && folder === '@subscriptions' ? 'on' : ''} onClick={() => { setView('mail'); setFolder('@subscriptions'); clearSearch(); setActive(null); }} title={t("Subscriptions")} aria-label={t("Subscriptions")}><Icon name="list" size={20} /><small className="rail-long">{t("Subscriptions")}</small></button>
         {multi && (
           <div className="rail-accounts" aria-label={t("Accounts")}>
@@ -550,12 +558,14 @@ export default function Mail({ me, route, refreshMe, theme, setTheme, themePref 
               density={prefs.density} setDensity={(v) => setPrefs({ density: v })}
             />}
             <div className="panes">
-              {folder === '@subscriptions' && !search ? <SubscriptionsList onShowSender={(a) => { setFolder('INBOX'); runSearch(`from:${a}`); }} onBlock={async (a) => { try { await api.post('/api/block', { address: a }); toast(`Blocked ${a}`); } catch (e) { toast(e.message, { error: true }); } }} />
+              {folder === '@screener' && !search ? <ScreenerList onChanged={setScreenerCount} />
+                : folder === '@subscriptions' && !search ? <SubscriptionsList onShowSender={(a) => { setFolder('INBOX'); runSearch(`from:${a}`); }} onBlock={async (a) => { try { await api.post('/api/block', { address: a }); toast(`Blocked ${a}`); } catch (e) { toast(e.message, { error: true }); } }} />
                 : folder === '@aliases' && !search ? <AliasesList onShowAlias={(a) => { setFolder('INBOX'); runSearch(`to:${a}`); }} />
                 : folder === '@quarantine' && !search ? <QuarantineList onChanged={setQCount} /> : folder === '@scheduled' && !search ? <ScheduledList onCompose={compose} /> : <MessageList
                 snoozeMap={folder.toLowerCase() === 'snoozed' ? snoozeMap : null}
                 list={list} title={search ? `Results for "${search}"` : folder === '@all' ? 'All inboxes' : folderLabel(currentFolderObj || { name: folder })}
                 search={search} onClearSearch={clearSearch} isInbox={folder === 'INBOX' && !search} onBump={me.delegated ? null : bump}
+                inboxTab={folder === 'INBOX' && tabsOn && !search ? inboxTab : null} setInboxTab={(x) => { setInboxTab(x); setActive(null); setSelected(new Set()); }}
                 folderUse={currentFolderObj?.specialUse} filter={filter} setFilter={setFilter}
                 selected={selected} setSelected={setSelected} active={active} onOpen={openMessage}
                 act={act} categories={prefs.categories} density={prefs.density} allInboxes={folder === '@all'}

@@ -50,7 +50,14 @@ function layoutDay(events) {
   return out;
 }
 
-function TimeGrid({ days, events, onSlot, onOpen, now }) {
+/** A task on its due day: tick it off right on the calendar. */
+const TaskChips = ({ tasks, day, onDone }) => (tasks || []).filter((k) => k.dueAt && sameDay(new Date(k.dueAt), day)).map((k) => (
+  <button key={`t${k.id}`} className={`task-chip ${k.done ? 'done' : ''}`} title={k.done ? t('Done') : t('Mark done')} onClick={(x) => { x.stopPropagation(); onDone(k); }}>
+    <Icon name={k.done ? 'check' : 'square'} size={12} /> {k.title}
+  </button>
+));
+
+function TimeGrid({ days, events, onSlot, onOpen, now, tasks, onDone }) {
   const ref = useRef();
   useEffect(() => { if (ref.current) ref.current.scrollTop = HOUR_PX * 7.5; }, [days.length]);
   const allDay = events.filter((e) => e.allDay || evEnd(e) - evStart(e) >= DAY);
@@ -67,6 +74,7 @@ function TimeGrid({ days, events, onSlot, onOpen, now }) {
         <small className="muted">all-day</small>
         {days.map((d) => (
           <div key={d} className="tg-allday-cell">
+            <TaskChips tasks={tasks} day={d} onDone={onDone} />
             {allDay.filter((e) => evStart(e) < addDays(d, 1) && evEnd(e) > d).map((e) => (
               <button key={e.href + e.start} className="ev-chip" style={{ '--c': e.color }} onClick={() => onOpen(e)}>{e.title}</button>
             ))}
@@ -107,7 +115,7 @@ function TimeGrid({ days, events, onSlot, onOpen, now }) {
   );
 }
 
-function MonthGrid({ cursor, events, onSlot, onOpen, now }) {
+function MonthGrid({ cursor, events, onSlot, onOpen, now, tasks, onDone }) {
   const start = startOfWeek(startOfMonth(cursor));
   const days = Array.from({ length: 42 }, (_, i) => addDays(start, i));
   return (
@@ -118,6 +126,7 @@ function MonthGrid({ cursor, events, onSlot, onOpen, now }) {
         return (
           <div key={d} className={`mg-cell ${d.getMonth() !== cursor.getMonth() ? 'other' : ''}`} onClick={() => onSlot(new Date(d.getTime() + 9 * 3600e3))}>
             <span className={`mg-num ${sameDay(d, now) ? 'today' : ''}`}>{d.getDate()}</span>
+            <TaskChips tasks={tasks} day={d} onDone={onDone} />
             {list.slice(0, 3).map((e) => (
               <button key={e.href + e.start} className={`mg-ev ${e.allDay ? 'allday' : ''}`} style={{ '--c': e.color }} onClick={(x) => { x.stopPropagation(); onOpen(e); }}>
                 {!e.allDay && <span className="dot" />}{!e.allDay && <small>{timeLabel(evStart(e))}</small>} {e.title}
@@ -131,6 +140,57 @@ function MonthGrid({ cursor, events, onSlot, onOpen, now }) {
   );
 }
 
+/** The task list beside the calendar: overdue, today, coming up, no date; add one for the day you're looking at. */
+function CalTasks({ tasks, day, now, onDone, onChanged, onPickDay }) {
+  const toast = useToast();
+  const [title, setTitle] = useState('');
+  const [due, setDue] = useState('');
+  useEffect(() => { setDue(`${day.getFullYear()}-${String(day.getMonth() + 1).padStart(2, '0')}-${String(day.getDate()).padStart(2, '0')}`); }, [day.getTime()]);
+  const add = async (e) => {
+    e.preventDefault();
+    if (!title.trim()) return;
+    try { await api.post('/api/tasks', { title: title.trim(), dueAt: due ? new Date(`${due}T17:00:00`).getTime() : null }); setTitle(''); onChanged(); }
+    catch (x) { toast(x.message, { error: true }); }
+  };
+  const open = (tasks || []).filter((k) => !k.done);
+  const today0 = startOfDay(now);
+  const groups = [
+    ['Overdue', open.filter((k) => k.dueAt && k.dueAt < today0.getTime())],
+    ['Today', open.filter((k) => k.dueAt && sameDay(new Date(k.dueAt), now))],
+    ['Coming up', open.filter((k) => k.dueAt && k.dueAt >= addDays(today0, 1).getTime())],
+    ['No date', open.filter((k) => !k.dueAt)],
+  ];
+  return (
+    <aside className="cal-tasks" aria-label={t('Tasks')}>
+      <div className="cal-tasks-head"><b>{t('Tasks')}</b> <span className="muted small">{open.length} {t('to do')}</span></div>
+      <form className="cal-task-add" onSubmit={add}>
+        <input value={title} onChange={(e) => setTitle(e.target.value)} placeholder={t('Add a task…')} aria-label={t('New task')} />
+        <input type="date" value={due} onChange={(e) => setDue(e.target.value)} aria-label={t('Due date')} />
+        <button className="btn sm primary" disabled={!title.trim()}><Icon name="plus" size={14} /></button>
+      </form>
+      {tasks === null && <div className="spinner" />}
+      {tasks && !open.length && <p className="muted small" style={{ padding: '6px 12px' }}>{t('Nothing to do. Turn any email into a task with “Add as task” (Shift+T).')}</p>}
+      {groups.filter(([, l]) => l.length).map(([g, l]) => (
+        <div key={g} className={`cal-task-group ${g === 'Overdue' ? 'overdue' : ''}`}>
+          <div className="nav-title">{t(g)}</div>
+          {l.map((k) => (
+            <div key={k.id} className="cal-task">
+              <button className="task-check" aria-label={t('Mark done')} onClick={() => onDone(k)}><Icon name="square" size={16} /></button>
+              <div className="cal-task-text">
+                <span>{k.title}</span>
+                {(k.dueAt || k.message) && <small className="muted">
+                  {k.dueAt && <button className="link" onClick={() => onPickDay(new Date(k.dueAt))}>{fmt(new Date(k.dueAt), { weekday: 'short', month: 'short', day: 'numeric' })}</button>}
+                  {k.message && <> · <Icon name="mail" size={11} /> {k.message.subject}</>}
+                </small>}
+              </div>
+            </div>
+          ))}
+        </div>
+      ))}
+    </aside>
+  );
+}
+
 export default function Calendar({ me }) {
   const toast = useToast();
   const [view, setView] = useState(() => localStorage.getItem('calView') || (matchMedia('(max-width: 899px)').matches ? 'day' : 'week')); // phones start on Day
@@ -141,6 +201,16 @@ export default function Calendar({ me }) {
   const [editing, setEditing] = useState(null);
   const [now, setNow] = useState(new Date());
   const [error, setError] = useState('');
+  // Tasks beside the calendar (the same tasks as in Mail; "Add as task" on any email)
+  const [tasks, setTasks] = useState(null);
+  const [showTasks, setShowTasks] = useState(() => localStorage.getItem('calTasks') !== '0');
+  const loadTasks = () => api.get('/api/tasks').then((r) => setTasks([...r.open, ...r.done.slice(0, 20)])).catch(() => setTasks([]));
+  useEffect(() => { loadTasks(); }, []);
+  useEffect(() => localStorage.setItem('calTasks', showTasks ? '1' : '0'), [showTasks]);
+  const doneTask = async (k) => {
+    setTasks((l) => l.map((x) => (x.id === k.id ? { ...x, done: !x.done } : x)));
+    try { await api.patch(`/api/tasks/${k.id}`, { done: !k.done }); } catch (e) { toast(e.message, { error: true }); loadTasks(); }
+  };
   useEffect(() => { const t = setInterval(() => setNow(new Date()), 60000); return () => clearInterval(t); }, []);
   useEffect(() => localStorage.setItem('calView', view), [view]);
 
@@ -196,15 +266,17 @@ export default function Calendar({ me }) {
           <button className="icon-btn" onClick={() => step(1)} title={t("Next (j)")}><Icon name="chevron" /></button>
           <h2>{title}</h2>
           <div className="spacer" />
+          <button className={`btn sm ${showTasks ? 'pressed' : ''}`} onClick={() => setShowTasks((x) => !x)} aria-pressed={showTasks}><Icon name="check" size={14} /> {t('Tasks')}</button>
           <div className="seg small-seg">
             {[['day', 'Day'], ['week', 'Week'], ['month', 'Month']].map(([v, l]) => <button key={v} className={view === v ? 'on' : ''} onClick={() => setView(v)}>{l}</button>)}
           </div>
         </div>
         {error && <div className="banner warn">{t("Calendar:")}{' '}{error}</div>}
         {view === 'month'
-          ? <MonthGrid cursor={cursor} events={visible} onSlot={newAt} onOpen={setEditing} now={now} />
-          : <TimeGrid days={view === 'day' ? [cursor] : Array.from({ length: 7 }, (_, i) => addDays(range[0], i))} events={visible} onSlot={newAt} onOpen={setEditing} now={now} />}
+          ? <MonthGrid cursor={cursor} events={visible} onSlot={newAt} onOpen={setEditing} now={now} tasks={tasks} onDone={doneTask} />
+          : <TimeGrid days={view === 'day' ? [cursor] : Array.from({ length: 7 }, (_, i) => addDays(range[0], i))} events={visible} onSlot={newAt} onOpen={setEditing} now={now} tasks={tasks} onDone={doneTask} />}
       </section>
+      {showTasks && <CalTasks tasks={tasks} day={cursor} now={now} onDone={doneTask} onChanged={loadTasks} onPickDay={(d) => setCursor(startOfDay(d))} />}
       {editing && calendars && <EventEditor event={editing} calendars={calendars} me={me} onClose={() => setEditing(null)} onSaved={() => { setEditing(null); load(); }} />}
     </div>
   );

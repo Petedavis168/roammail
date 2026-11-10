@@ -7,7 +7,7 @@ import Nudges from './Nudges.jsx';
 import { t } from '../i18n.js';
 
 export default function MessageList({ list, title, search, onClearSearch, folderUse, filter, setFilter, selected, setSelected,
-  active, onOpen, act, categories, density, onLoadMore, onEmpty, onMarkAllRead, snoozeMap, allInboxes, isInbox, onBump }) {
+  active, onOpen, act, categories, density, onLoadMore, onEmpty, onMarkAllRead, snoozeMap, allInboxes, isInbox, onBump, inboxTab, setInboxTab }) {
   const ref = useRef();
   const { messages, loading, total } = list;
   const showTo = folderUse === '\\Sent' || folderUse === '\\Drafts';
@@ -73,8 +73,17 @@ export default function MessageList({ list, title, search, onClearSearch, folder
           </div>
         )}
       </div>
-      {isInbox && onBump && <Nudges onBump={onBump} />}
-      {isInbox && <NeedsReply messages={messages} onOpen={onOpen} />}
+      {inboxTab && (
+        <div className="inbox-tabs" role="tablist" aria-label={t('Inbox tabs')}>
+          {[['primary', 'inbox', 'Primary'], ['updates', 'bell', 'Updates'], ['newsletters', 'list', 'Newsletters']].map(([k, ic, l]) => (
+            <button key={k} role="tab" aria-selected={inboxTab === k} className={inboxTab === k ? 'on' : ''} onClick={() => setInboxTab(k)}>
+              <Icon name={ic} size={16} /> <span>{t(l)}</span>{list.tabs?.[k] > 0 && <b className="tab-count">{list.tabs[k] > 99 ? '99+' : list.tabs[k]}</b>}
+            </button>
+          ))}
+        </div>
+      )}
+      {isInbox && onBump && (!inboxTab || inboxTab === 'primary') && <Nudges onBump={onBump} />}
+      {isInbox && (!inboxTab || inboxTab === 'primary') && <NeedsReply messages={messages} onOpen={onOpen} />}
       {selected.size > 0 && !allInboxes && (
         <div className="selbar">
           <b>{selected.size} selected</b>
