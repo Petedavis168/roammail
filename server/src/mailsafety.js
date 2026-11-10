@@ -13,7 +13,7 @@ export function attachmentRisk(filename, contentType) {
   const n = String(filename || '').trim().toLowerCase().replace(/[\s.]+$/, '');
   const ct = String(contentType || '').toLowerCase();
   if (BLOCK.test(n) || (DOUBLE.test(n) && BLOCK.test(n)) || /x-msdownload|x-msdos-program|x-sh\b|java-archive|x-ms-installer|vnd\.microsoft\.portable-executable/.test(ct)) return 'block';
-  if (/\.(html?|shtml|xhtml|svg)$/i.test(n) || /^text\/html|image\/svg/.test(ct)) return 'html'; // phishing pages are often sent as attachments
+  if (/\.(html?|shtml|xhtml|svg)$/i.test(n) || /^(?:text\/html|image\/svg)/.test(ct)) return 'html'; // phishing pages are often sent as attachments
   if (MACRO.test(n) || /macroenabled/.test(ct)) return 'macro';
   if (ARCHIVE.test(n) || /zip|x-rar|x-7z/.test(ct)) return 'archive';
   return null;

@@ -20,6 +20,7 @@ import { attachmentRisk, scanInfo } from './mailsafety.js';
 import { learnRecipients } from './screener.js';
 import { recordDelivered, recordRead } from './status.js';
 import { setLiveSender } from './live.js';
+import { groupsFor } from './contactgroups.js';
 import { protectEmail, noticeMail, checkSecurePassword } from './secure.js';
 import { rolesFor, q, twoFactorPolicy } from './db.js';
 import { applyEnforcedSignature, htmlToText } from './signatures.js';
@@ -711,7 +712,10 @@ api.get('/contacts', wrap(async (req, res) => {
   try { for (const c of await allContacts(req.user)) for (const e of c.emails) add(e.value, c.name, 1000); } catch { /* calendar server unavailable */ }
   try { for (const p of await directoryCached(req.user.email)) add(p.email, p.name, 900); } catch { /* not a business */ }
   const match = (p) => !q || p.address.toLowerCase().includes(q) || p.name.toLowerCase().includes(q);
-  res.json([...merged.values()].filter(match).sort((a, b) => b.score - a.score).slice(0, 10));
+  // My contact groups first when the name matches: picking one adds everyone in it
+  const groups = (await groupsFor(req.user.email).catch(() => [])).filter((g) => g.members.length && (!q || g.name.toLowerCase().includes(q)))
+    .slice(0, 3).map((g) => ({ group: true, id: g.id, name: g.name, address: `group:${g.id}`, members: g.members }));
+  res.json([...groups, ...[...merged.values()].filter(match).sort((a, b) => b.score - a.score).slice(0, 10 - groups.length)]);
 }));
 
 // ---------- live updates (Server-Sent Events + IMAP IDLE) ----------

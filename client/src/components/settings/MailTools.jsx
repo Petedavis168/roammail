@@ -101,72 +101,153 @@ export function AutoReply({ me }) {
   );
 }
 
-const FIELDS = [['from', 'From contains'], ['to', 'To / Cc contains'], ['subject', 'Subject contains']];
-const ACTIONS = [['move', 'Move to folder'], ['read', 'Mark as read'], ['flag', 'Flag it'], ['category', 'Categorize'], ['forward', 'Forward to'], ['junk', 'Move to Junk'], ['trash', 'Delete']];
+const FIELDS = [['fromIs', 'Sender is exactly'], ['from', 'Sender contains'], ['domain', 'Sender’s company / domain is'], ['to', 'Sent to (To / Cc) contains'], ['subject', 'Subject contains']];
+const ACTIONS = [['move', 'Move to folder'], ['read', 'Mark as read'], ['flag', 'Flag as important'], ['category', 'Add a color label'], ['reply', 'Send an automatic reply'], ['forward', 'Forward a copy to'], ['junk', 'Send to Junk'], ['trash', 'Delete']];
+
+/** Ready-made rules: pick one, fill in the blanks, save. */
+export const RULE_TEMPLATES = [
+  { id: 'vip', icon: 'flag', title: 'Never miss someone', text: 'Flag every email from one person so it stands out.', rule: { name: 'Important: ', conditions: [{ field: 'fromIs', value: '' }], actions: [{ type: 'flag' }], stop: false } },
+  { id: 'autoreply', icon: 'reply', title: 'Auto-reply to one contact', text: 'When a specific person emails you, they get an automatic answer.', rule: { name: 'Auto-reply to ', conditions: [{ field: 'fromIs', value: '' }], actions: [{ type: 'reply', subject: 'Got your email', value: 'Hi,\n\nThanks for your email — I’ve got it and will get back to you soon.\n\n', days: 1 }], stop: false } },
+  { id: 'company', icon: 'folder', title: 'Everything from a company into a folder', text: 'All email from @theircompany.com goes to its own folder.', rule: { name: 'Company: ', conditions: [{ field: 'domain', value: '' }], actions: [{ type: 'move', folder: '' }] } },
+  { id: 'newsletter', icon: 'list', title: 'Read newsletters later', text: 'Move a newsletter to a folder and mark it read so it doesn’t clutter your inbox.', rule: { name: 'Newsletter: ', conditions: [{ field: 'from', value: '' }], actions: [{ type: 'move', folder: '' }, { type: 'read' }] } },
+  { id: 'receipts', icon: 'tag', title: 'Receipts and orders', text: 'Emails with “receipt”, “order” or “invoice” in the subject go to a folder.', rule: { name: 'Receipts & orders', conditions: [{ field: 'subject', value: 'receipt' }, { field: 'subject', value: 'order' }, { field: 'subject', value: 'invoice' }], actions: [{ type: 'move', folder: '' }] } },
+  { id: 'label', icon: 'tag', title: 'Color-code a client', text: 'Give every email from a client a color label so you spot it instantly.', rule: { name: 'Client: ', conditions: [{ field: 'domain', value: '' }], actions: [{ type: 'category', value: '' }], stop: false } },
+  { id: 'forward', icon: 'forward', title: 'Send invoices to my accountant', text: 'Forward a copy of every invoice automatically (business accounts).', biz: true, rule: { name: 'Invoices to accountant', conditions: [{ field: 'subject', value: 'invoice' }], actions: [{ type: 'forward', value: '' }], stop: false } },
+  { id: 'junk', icon: 'junk', title: 'Send someone straight to Junk', text: 'Their email skips your inbox from now on.', rule: { name: 'Junk: ', conditions: [{ field: 'from', value: '' }], actions: [{ type: 'junk' }] } },
+  { id: 'cleanup', icon: 'trash', title: 'Delete by subject', text: 'Emails with a certain word in the subject are deleted (they go to Trash first).', rule: { name: 'Delete: ', conditions: [{ field: 'subject', value: '' }], actions: [{ type: 'trash' }] } },
+];
 
 export function Rules({ folders, categories, me }) {
   const toast = useToast();
   const [rules, setRules] = useState(null);
   const [edit, setEdit] = useState(null);
-  useEffect(() => { api.get('/api/rules').then(setRules); }, []);
+  const [showHow, setShowHow] = useState(false);
+  const [busy, setBusy] = useState('');
+  const selectable = folders.filter((f) => !f.flags.includes('\\Noselect'));
+  const newId = () => `r${Date.now().toString(36)}`;
+  const blank = () => ({ id: newId(), name: '', enabled: true, match: 'any', stop: true, conditions: [{ field: 'fromIs', value: '' }], actions: [{ type: 'move', folder: selectable[0]?.path || 'INBOX' }] });
+  useEffect(() => {
+    api.get('/api/rules').then((r) => {
+      setRules(r);
+      // "Make a rule" from an email (right-click or ⋯): start from that email's sender / subject
+      const seed = sessionStorage.getItem('ruleSeed');
+      if (seed) {
+        sessionStorage.removeItem('ruleSeed');
+        try { const d = JSON.parse(seed); setEdit({ ...blank(), name: d.name ? `From ${d.name}` : '', conditions: [{ field: 'fromIs', value: d.from || '' }], actions: [{ type: 'move', folder: selectable[0]?.path || 'INBOX' }], seedSubject: d.subject || '' }); } catch { /* ignore */ }
+      }
+      if (!r.length) setShowHow(true);
+    });
+  }, []);
   if (!rules) return <div className="spinner" />;
   const save = async (next) => { try { setRules(await api.put('/api/rules', { rules: next })); toast(t("Rules saved")); return true; } catch (e) { toast(e.message, { error: true }); } };
-  const selectable = folders.filter((f) => !f.flags.includes('\\Noselect'));
-  const describe = (r) => `If ${r.conditions.map((c) => `${FIELDS.find((f) => f[0] === c.field)?.[1].toLowerCase()} "${c.value}"`).join(r.match === 'all' ? ' and ' : ' or ')} → ${r.actions.map((a) => {
-    const l = ACTIONS.find((x) => x[0] === a.type)?.[1]; return a.type === 'move' ? `move to ${a.folder}` : a.type === 'forward' ? `forward to ${a.value}` : a.type === 'category' ? `categorize ${a.value}` : l.toLowerCase();
-  }).join(', ')}`;
-  const blank = { id: `r${Date.now()}`, name: '', enabled: true, match: 'any', stop: true, conditions: [{ field: 'from', value: '' }], actions: [{ type: 'move', folder: selectable[0]?.path || 'INBOX' }] };
+  const label = (k) => FIELDS.find((f) => f[0] === k)?.[1].toLowerCase();
+  const describe = (r) => `${t('When')} ${r.conditions.map((c) => `${label(c.field)} “${c.value}”`).join(r.match === 'all' ? ` ${t('and')} ` : ` ${t('or')} `)} → ${r.actions.map((a) => (
+    a.type === 'move' ? `${t('move to')} ${a.folder}` : a.type === 'forward' ? `${t('forward to')} ${a.value}` : a.type === 'category' ? `${t('label')} ${a.value}` : a.type === 'reply' ? t('auto-reply') : ACTIONS.find((x) => x[0] === a.type)?.[1].toLowerCase()
+  )).join(', ')}`;
+  const useTemplate = (tpl) => {
+    const r = JSON.parse(JSON.stringify(tpl.rule));
+    for (const a of r.actions) if (a.type === 'move' && !a.folder) a.folder = selectable.find((f) => !f.specialUse && f.path !== 'INBOX')?.path || selectable[0]?.path || 'INBOX';
+    for (const a of r.actions) if (a.type === 'category' && !a.value) a.value = categories[0]?.name || '';
+    setEdit({ ...blank(), ...r, id: newId(), template: tpl.id, enabled: true, match: 'any', stop: r.stop !== false });
+  };
+  const runNow = async (r) => {
+    setBusy(r.id);
+    try { const x = await api.post('/api/rules/run', { id: r.id }); toast(x.matched ? `${t('Done:')} ${x.matched} ${t('emails in your inbox matched this rule')}` : t('No emails in your inbox match this rule')); }
+    catch (e) { toast(e.message, { error: true }); }
+    setBusy('');
+  };
+  const setCond = (i, k, v) => setEdit((e) => { const cs = [...e.conditions]; cs[i] = { ...cs[i], [k]: v }; return { ...e, conditions: cs }; });
+  const setAct = (i, patch) => setEdit((e) => { const as = [...e.actions]; as[i] = { ...as[i], ...patch }; return { ...e, actions: as }; });
 
   return (
-    <div className="settings-section">
-      <p className="muted small">{t("Rules run on the server as mail arrives, so they work in every app, even when this page is closed.")}</p>
-      {rules.length === 0 && !edit && <div className="empty-card small">{t("No rules yet.")}</div>}
-      {rules.map((r, i) => edit?.id === r.id ? null : (
-        <div key={r.id} className="rule-item">
-          <label className="switch"><input type="checkbox" checked={r.enabled} onChange={(e) => save(rules.map((x) => (x.id === r.id ? { ...x, enabled: e.target.checked } : x)))} /></label>
-          <div className="rule-text"><b>{r.name || (r.blocked ? `Blocked: ${r.blocked}` : 'Rule')}</b><small className="muted">{describe(r)}</small></div>
-          {!r.blocked && <button className="btn sm" onClick={() => setEdit(JSON.parse(JSON.stringify(r)))}>{t("Edit")}</button>}
-          <button className="icon-btn" onClick={() => save(rules.filter((x) => x.id !== r.id))} title={r.blocked ? 'Unblock' : 'Delete'}><Icon name="trash" size={16} /></button>
+    <div className="settings-section rules">
+      <div className="rules-how">
+        <button className="link" onClick={() => setShowHow((x) => !x)}><Icon name="spark" size={14} /> {t('How rules work')}</button>
+        {showHow && (
+          <div className="how-card">
+            <p><b>{t('Rules sort your email for you, automatically.')}</b> {t('Each rule has two parts: a “When” (who it’s from, what the subject says…) and a “Do” (move it, flag it, reply…).')}</p>
+            <ol>
+              <li>{t('When an email arrives, the mail server checks your rules from top to bottom.')}</li>
+              <li>{t('If the email matches a rule’s “When”, its “Do” happens straight away — even when Roammail is closed, and in your phone’s mail app too.')}</li>
+              <li>{t('“Stop here” means later rules are skipped for that email. Untick it to let several rules act on the same email.')}</li>
+              <li>{t('Rules work on new email. To tidy what’s already in your inbox, use “Run on my inbox now”.')}</li>
+            </ol>
+            <p className="muted small">{t('Tip: right-click any email (or use its ⋯ menu) and choose “Make a rule” to start from that sender.')}</p>
+          </div>
+        )}
+      </div>
+
+      {!edit && <>
+        <h4>{t('Start from a template')}</h4>
+        <div className="rule-tpls">
+          {RULE_TEMPLATES.filter((x) => !x.biz || me.orgDomains?.length).map((x) => (
+            <button key={x.id} className="rule-tpl" onClick={() => useTemplate(x)}>
+              <Icon name={x.icon} size={18} /><span><b>{t(x.title)}</b><small>{t(x.text)}</small></span>
+            </button>
+          ))}
+          <button className="rule-tpl blank" onClick={() => setEdit(blank())}><Icon name="plus" size={18} /><span><b>{t('Blank rule')}</b><small>{t('Build your own from scratch.')}</small></span></button>
         </div>
-      ))}
-      {edit ? (
+        <h4>{t('My rules')} {rules.length > 0 && <span className="muted small">({rules.length})</span>}</h4>
+        {rules.length === 0 && <div className="empty-card small">{t('No rules yet. Pick a template above to make your first one.')}</div>}
+        {rules.map((r, i) => (
+          <div key={r.id} className="rule-item">
+            <label className="switch"><input type="checkbox" checked={r.enabled} onChange={(e) => save(rules.map((x) => (x.id === r.id ? { ...x, enabled: e.target.checked } : x)))} aria-label={t('Rule on')} /></label>
+            <div className="rule-text"><b>{r.name || (r.blocked ? `Blocked: ${r.blocked}` : t('Rule'))}</b><small className="muted">{describe(r)}</small></div>
+            {i > 0 && <button className="icon-btn" title={t('Move up')} onClick={() => { const n = [...rules]; [n[i - 1], n[i]] = [n[i], n[i - 1]]; save(n); }}>↑</button>}
+            {!r.actions.every((a) => ['reply', 'forward'].includes(a.type)) && <button className="btn sm" disabled={busy === r.id} onClick={() => runNow(r)}>{busy === r.id ? t('Running…') : t('Run on my inbox now')}</button>}
+            {!r.blocked && <button className="btn sm" onClick={() => setEdit(JSON.parse(JSON.stringify(r)))}>{t('Edit')}</button>}
+            <button className="icon-btn" onClick={() => confirm(`${t('Delete the rule')} “${r.name || t('Rule')}”?`) && save(rules.filter((x) => x.id !== r.id))} title={r.blocked ? 'Unblock' : t('Delete')}><Icon name="trash" size={16} /></button>
+          </div>
+        ))}
+      </>}
+
+      {edit && (
         <div className="card rule-edit">
-          <label>{t("Name")}<input value={edit.name} placeholder={t("e.g. Newsletters")} onChange={(e) => setEdit({ ...edit, name: e.target.value })} /></label>
-          <div className="rule-row"><b>{t("When a message arrives and")}</b>
-            <select value={edit.match} onChange={(e) => setEdit({ ...edit, match: e.target.value })}><option value="any">any</option><option value="all">all</option></select>{' '}{t("of these are true:")}</div>
+          <label>{t('Rule name')}<input value={edit.name} placeholder={t('e.g. Newsletters')} onChange={(e) => setEdit({ ...edit, name: e.target.value })} /></label>
+          <div className="rule-block"><b className="rule-step">{t('When an email arrives and')}</b>
+            <select value={edit.match} onChange={(e) => setEdit({ ...edit, match: e.target.value })}><option value="any">{t('any')}</option><option value="all">{t('all')}</option></select> {t('of these are true:')}</div>
           {edit.conditions.map((c, i) => (
             <div className="rule-row" key={i}>
-              <select value={c.field} onChange={(e) => { const cs = [...edit.conditions]; cs[i] = { ...c, field: e.target.value }; setEdit({ ...edit, conditions: cs }); }}>{FIELDS.map(([k, l]) => <option key={k} value={k}>{l}</option>)}</select>
-              <input value={c.value} placeholder={t("text or address")} onChange={(e) => { const cs = [...edit.conditions]; cs[i] = { ...c, value: e.target.value }; setEdit({ ...edit, conditions: cs }); }} />
+              <select value={c.field} onChange={(e) => setCond(i, 'field', e.target.value)}>{FIELDS.map(([k, l]) => <option key={k} value={k}>{t(l)}</option>)}</select>
+              <input value={c.value} placeholder={c.field === 'domain' ? 'theircompany.com' : c.field === 'fromIs' ? 'name@example.com' : t('text')} onChange={(e) => setCond(i, 'value', e.target.value)} />
               {edit.conditions.length > 1 && <button className="icon-btn" onClick={() => setEdit({ ...edit, conditions: edit.conditions.filter((_, j) => j !== i) })}><Icon name="close" size={14} /></button>}
             </div>
           ))}
-          <button className="link" onClick={() => setEdit({ ...edit, conditions: [...edit.conditions, { field: 'subject', value: '' }] })}>{t("+ Add condition")}</button>
-          <div className="rule-row"><b>{t("Do this:")}</b></div>
+          <button className="link" onClick={() => setEdit({ ...edit, conditions: [...edit.conditions, { field: 'subject', value: edit.seedSubject || '' }] })}>{t("+ Add condition")}</button>
+          <div className="rule-block"><b className="rule-step">{t("Do this:")}</b></div>
           {edit.actions.map((a, i) => (
-            <div className="rule-row" key={i}>
-              <select value={a.type} onChange={(e) => { const as = [...edit.actions]; as[i] = { type: e.target.value, folder: a.folder, value: '' }; setEdit({ ...edit, actions: as }); }}>
-                {ACTIONS.filter(([k]) => k !== 'forward' || me.orgDomains?.length).map(([k, l]) => <option key={k} value={k}>{l}</option>)}</select>
-              {a.type === 'move' && <select value={a.folder} onChange={(e) => { const as = [...edit.actions]; as[i] = { ...a, folder: e.target.value }; setEdit({ ...edit, actions: as }); }}>
-                {selectable.map((f) => <option key={f.path} value={f.path}>{folderLabel(f)}</option>)}</select>}
-              {a.type === 'forward' && <input type="email" placeholder="name@example.com" value={a.value} onChange={(e) => { const as = [...edit.actions]; as[i] = { ...a, value: e.target.value }; setEdit({ ...edit, actions: as }); }} />}
-              {a.type === 'category' && <select value={a.value} onChange={(e) => { const as = [...edit.actions]; as[i] = { ...a, value: e.target.value }; setEdit({ ...edit, actions: as }); }}>
-                <option value="">{t("Choose…")}</option>{categories.map((c) => <option key={c.name} value={c.name}>{c.name}</option>)}</select>}
+            <div className="rule-row action" key={i}>
+              <select value={a.type} onChange={(e) => setAct(i, { type: e.target.value, value: '', ...(e.target.value === 'reply' ? { subject: 'Got your email', days: 1 } : {}) })}>
+                {ACTIONS.filter(([k]) => k !== 'forward' || me.orgDomains?.length).map(([k, l]) => <option key={k} value={k}>{t(l)}</option>)}</select>
+              {a.type === 'move' && <select value={a.folder} onChange={(e) => setAct(i, { folder: e.target.value })}>{selectable.map((f) => <option key={f.path} value={f.path}>{folderLabel(f)}</option>)}</select>}
+              {a.type === 'forward' && <input type="email" placeholder="name@example.com" value={a.value} onChange={(e) => setAct(i, { value: e.target.value })} />}
+              {a.type === 'category' && <select value={a.value} onChange={(e) => setAct(i, { value: e.target.value })}><option value="">{t("Choose…")}</option>{categories.map((c) => <option key={c.name} value={c.name}>{c.name}</option>)}</select>}
               {edit.actions.length > 1 && <button className="icon-btn" onClick={() => setEdit({ ...edit, actions: edit.actions.filter((_, j) => j !== i) })}><Icon name="close" size={14} /></button>}
+              {a.type === 'reply' && (
+                <div className="rule-reply">
+                  <input value={a.subject || ''} placeholder={t('Subject')} onChange={(e) => setAct(i, { subject: e.target.value })} aria-label={t('Subject')} />
+                  <textarea rows={4} value={a.value} placeholder={t('Your automatic reply…')} onChange={(e) => setAct(i, { value: e.target.value })} aria-label={t('Reply message')} />
+                  <label className="small">{t('Reply to the same person at most')} <select value={a.days || 1} onChange={(e) => setAct(i, { days: Number(e.target.value) })}><option value={1}>{t('once a day')}</option><option value={3}>{t('once every 3 days')}</option><option value={7}>{t('once a week')}</option></select></label>
+                </div>
+              )}
             </div>
           ))}
-          <button className="link" onClick={() => setEdit({ ...edit, actions: [...edit.actions, { type: 'read' }] })}>{t("+ Add action")}</button>
-          <label className="check"><input type="checkbox" checked={edit.stop} onChange={(e) => setEdit({ ...edit, stop: e.target.checked })} />{' '}{t("Stop processing more rules")}</label>
+          {edit.actions.length < 5 && <button className="link" onClick={() => setEdit({ ...edit, actions: [...edit.actions, { type: 'read' }] })}>{t("+ Add action")}</button>}
+          <label className="check"><input type="checkbox" checked={edit.stop} onChange={(e) => setEdit({ ...edit, stop: e.target.checked })} />{' '}{t("Stop here (don’t run my other rules on these emails)")}</label>
+          <div className="rule-preview muted small">{describe({ ...edit, conditions: edit.conditions.filter((c) => c.value.trim()) })}</div>
           <div className="step-actions">
             <button className="btn" onClick={() => setEdit(null)}>{t("Cancel")}</button>
             <button className="btn primary" onClick={async () => {
-              if (!edit.conditions.some((c) => c.value.trim())) return toast(t("Add at least one condition"), { error: true });
+              if (!edit.conditions.some((c) => c.value.trim())) return toast(t("Fill in at least one “When”"), { error: true });
+              if (edit.actions.some((a) => a.type === 'reply' && !String(a.value).trim())) return toast(t('Write the automatic reply'), { error: true });
+              const { seedSubject, ...clean } = edit; void seedSubject;
+              const cleaned = { ...clean, name: clean.name.trim() || describe(clean).slice(0, 60), conditions: clean.conditions.filter((c) => c.value.trim()) };
               const exists = rules.some((r) => r.id === edit.id);
-              if (await save(exists ? rules.map((r) => (r.id === edit.id ? edit : r)) : [...rules, edit])) setEdit(null);
+              if (await save(exists ? rules.map((r) => (r.id === edit.id ? cleaned : r)) : [...rules, cleaned])) setEdit(null);
             }}>{t("Save rule")}</button>
           </div>
         </div>
-      ) : <button className="btn" onClick={() => setEdit(blank)}><Icon name="plus" size={16} />{' '}{t("New rule")}</button>}
+      )}
       <ServerFilters />
     </div>
   );

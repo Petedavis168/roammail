@@ -197,6 +197,8 @@ CREATE TABLE IF NOT EXISTS voice_notes (id TEXT PRIMARY KEY, owner TEXT NOT NULL
 CREATE INDEX IF NOT EXISTS voice_notes_owner ON voice_notes(owner);
 CREATE TABLE IF NOT EXISTS msg_status (message_id TEXT NOT NULL, sender TEXT NOT NULL, recipient TEXT NOT NULL, delivered_at INTEGER, read_at INTEGER, PRIMARY KEY (message_id, recipient));
 CREATE INDEX IF NOT EXISTS msg_status_sender ON msg_status(sender, message_id);
+CREATE TABLE IF NOT EXISTS contact_groups (id INTEGER PRIMARY KEY AUTOINCREMENT, email TEXT NOT NULL, name TEXT NOT NULL, members TEXT NOT NULL, updated_at INTEGER NOT NULL);
+CREATE INDEX IF NOT EXISTS contact_groups_email ON contact_groups(email);
 CREATE TABLE IF NOT EXISTS screener_list (email TEXT NOT NULL, address TEXT NOT NULL, decision TEXT NOT NULL, source TEXT, at INTEGER NOT NULL, PRIMARY KEY (email, address));
 CREATE TABLE IF NOT EXISTS user_aliases (
   id INTEGER PRIMARY KEY AUTOINCREMENT, email TEXT NOT NULL, address TEXT NOT NULL UNIQUE, mailcow_id TEXT NOT NULL, note TEXT, active INTEGER NOT NULL DEFAULT 1, created_at INTEGER NOT NULL

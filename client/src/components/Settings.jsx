@@ -5,8 +5,31 @@ import Signatures from './settings/Signatures.jsx';
 import Templates from './settings/Templates.jsx';
 import { NudgeSettings } from './Nudges.jsx';
 import { SWIPE_ACTIONS } from '../swipe.js';
+import { sayNewMail, voices, PHRASES } from '../voice.js';
 import { pushState, enablePush, disablePush } from '../push.js';
 
+function VoiceAlert({ prefs, setPrefs }) {
+  const [list, setList] = useState(() => voices());
+  useEffect(() => { if (!window.speechSynthesis) return undefined; const on = () => setList(voices()); speechSynthesis.addEventListener('voiceschanged', on); return () => speechSynthesis.removeEventListener('voiceschanged', on); }, []);
+  if (!window.speechSynthesis) return <p className="muted small">{t("This browser can't speak alerts.")}</p>;
+  const custom = prefs.voicePhrase && !PHRASES.includes(prefs.voicePhrase);
+  const en = list.filter((v) => /^en/i.test(v.lang));
+  return (
+    <div className="field-group voice-alert">
+      <label className="check"><input type="checkbox" checked={!!prefs.voiceAlert} onChange={(e) => { setPrefs({ voiceAlert: e.target.checked }); if (e.target.checked) sayNewMail({ phrase: prefs.voicePhrase, voice: prefs.voiceName, force: true }); }} />{' '}{t("Say “You’ve got mail!” out loud when new mail arrives")}</label>
+      {prefs.voiceAlert && (
+        <div className="voice-opts">
+          <label className="row-field">{t("What to say")}{' '}<select value={custom ? '__custom' : (prefs.voicePhrase || PHRASES[0])} onChange={(e) => setPrefs({ voicePhrase: e.target.value === '__custom' ? 'Hey, new email!' : e.target.value })}>
+            {PHRASES.map((p) => <option key={p} value={p}>{p}</option>)}<option value="__custom">{t("Something else…")}</option></select></label>
+          {custom && <input value={prefs.voicePhrase} maxLength={80} onChange={(e) => setPrefs({ voicePhrase: e.target.value })} aria-label={t("Words to say")} />}
+          {en.length > 1 && <label className="row-field">{t("Voice")}{' '}<select value={prefs.voiceName || ''} onChange={(e) => setPrefs({ voiceName: e.target.value })}><option value="">{t("Automatic")}</option>{en.map((v) => <option key={v.name} value={v.name}>{v.name}</option>)}</select></label>}
+          <button className="btn sm" onClick={() => sayNewMail({ phrase: prefs.voicePhrase, voice: prefs.voiceName, force: true })}>🔊 {t("Play it")}</button>
+          <p className="muted small">{t("Plays while Roammail is open. When it’s closed, your phone or computer plays its normal notification sound.")}</p>
+        </div>
+      )}
+    </div>
+  );
+}
 function ShareStatus() {
   const [on, setOn] = useState(null);
   useEffect(() => { api.get('/api/msg-status/settings').then((r) => setOn(r.share)).catch(() => {}); }, []);
@@ -82,6 +105,8 @@ function General({ prefs, setPrefs, me }) {
       <label className="row-field">{t("Undo send")}{' '}<select value={prefs.undoSeconds} onChange={set('undoSeconds')}>
           {[0, 5, 10, 20, 30].map((s) => <option key={s} value={s}>{s ? `${s} seconds` : 'Off'}</option>)}
         </select></label>
+      <h3>{t("Sounds")}</h3>
+      <VoiceAlert prefs={prefs} setPrefs={setPrefs} />
       <h3>{t("Roammail to Roammail")}</h3>
       <ShareStatus />
       <h3>{t("Follow-ups")}</h3>

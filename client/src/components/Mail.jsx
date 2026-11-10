@@ -23,6 +23,8 @@ import QuarantineList from './QuarantineList.jsx';
 import SubscriptionsList from './SubscriptionsList.jsx';
 import ScreenerList from './ScreenerList.jsx';
 import ContactCard from './ContactCard.jsx';
+import CatchUp from './CatchUp.jsx';
+import { sayNewMail } from '../voice.js';
 import { installMode as getInstallMode, onInstallChange, promptInstall, isInstalled } from '../install.js';
 import { pushState, enablePush } from '../push.js';
 import AliasesList from './AliasesList.jsx';
@@ -66,6 +68,16 @@ export default function Mail({ me, route, refreshMe, theme, setTheme, themePref 
     try { await enablePush(); localStorage.setItem('pushAsked', '1'); setAskPush(false); toast(t('Notifications are on. You’ll hear about new mail even when Roammail is closed.')); }
     catch (e) { toast(e.message, { error: true }); }
   };
+  // Right-click on an email: the common actions, plus "Make a rule"
+  const [rowMenu, setRowMenu] = useState(null);
+  useEffect(() => { const on = (e) => setRowMenu(e.detail); window.addEventListener('roammail:rowmenu', on); return () => window.removeEventListener('roammail:rowmenu', on); }, []);
+  useEffect(() => { if (!rowMenu) return undefined; const close = () => setRowMenu(null); window.addEventListener('click', close); window.addEventListener('scroll', close, true); window.addEventListener('keydown', close); return () => { window.removeEventListener('click', close); window.removeEventListener('scroll', close, true); window.removeEventListener('keydown', close); }; }, [rowMenu]);
+  const makeRule = (m) => {
+    const f = m?.from?.[0] || {};
+    sessionStorage.setItem('ruleSeed', JSON.stringify({ from: f.address || '', name: f.name || f.address || '', subject: m?.subject || '' }));
+    setShowSettings('rules');
+  };
+  useEffect(() => { const on = (e) => makeRule(e.detail); window.addEventListener('roammail:makerule', on); return () => window.removeEventListener('roammail:makerule', on); }, []);
   // Contact cards: click any name in an email
   const [card, setCard] = useState(null);
   useEffect(() => { const on = (e) => setCard(e.detail); window.addEventListener('roammail:card', on); return () => window.removeEventListener('roammail:card', on); }, []);
@@ -76,6 +88,8 @@ export default function Mail({ me, route, refreshMe, theme, setTheme, themePref 
   // Screener: how many new people are waiting (badge on the rail; refreshed with the mail)
   const [screenerCount, setScreenerCount] = useState(0);
   const railFolder = folder === '@subscriptions' || folder === '@screener';
+  // Auto-tidy (if turned on): runs on the server when the inbox opens, at most every few hours
+  useEffect(() => { if (!me.delegated) api.post('/api/catchup/autotidy', {}).then((r) => { if (r.done && (r.done.newsletters || r.done.updates || r.done.old)) loadFolders(); }).catch(() => {}); }, [me.email]);
   // Out of office: a bar while it's on, so it's never left on by mistake
   const [ooo, setOoo] = useState(null);
   useEffect(() => {
@@ -230,6 +244,8 @@ export default function Mail({ me, route, refreshMe, theme, setTheme, themePref 
   // ---------- live updates ----------
   const loadRef = useRef(load);
   loadRef.current = load;
+  const prefsRef = useRef(prefs);
+  prefsRef.current = prefs;
   const folderRef = useRef(folder);
   folderRef.current = folder;
   useEffect(() => {
@@ -238,6 +254,7 @@ export default function Mail({ me, route, refreshMe, theme, setTheme, themePref 
       es = new EventSource(mailUrl('/api/events'));
       es.addEventListener('new', (e) => {
         const d = JSON.parse(e.data);
+        if (prefsRef.current.voiceAlert && d.messages?.length) sayNewMail({ phrase: prefsRef.current.voicePhrase, voice: prefsRef.current.voiceName });
         loadFolders();
         if (folderRef.current === 'INBOX') loadRef.current({ quiet: true });
         const m = d.messages?.[0];
@@ -271,7 +288,7 @@ export default function Mail({ me, route, refreshMe, theme, setTheme, themePref 
   // Page title with unread count
   useEffect(() => {
     const inbox = folders.find((f) => f.specialUse === '\\Inbox');
-    document.title = `${inbox?.unread ? `(${inbox.unread}) ` : ''}${view === 'admin' ? 'Admin' : folder === '@scheduled' ? 'Scheduled' : folder === '@subscriptions' ? 'Subscriptions' : folder === '@screener' ? 'Screener' : folder === '@aliases' ? 'Aliases' : folder === '@quarantine' ? 'Spam quarantine' : folder === '@all' ? 'All inboxes' : folderLabel(currentFolderObj || { name: 'Inbox' })} - ${me.email}`;
+    document.title = `${inbox?.unread ? `(${inbox.unread}) ` : ''}${view === 'admin' ? 'Admin' : folder === '@scheduled' ? 'Scheduled' : folder === '@subscriptions' ? 'Subscriptions' : folder === '@screener' ? 'Screener' : folder === '@catchup' ? 'Catch up' : folder === '@aliases' ? 'Aliases' : folder === '@quarantine' ? 'Spam quarantine' : folder === '@all' ? 'All inboxes' : folderLabel(currentFolderObj || { name: 'Inbox' })} - ${me.email}`;
     // Unread count on the app icon (installed app on Windows, Mac, Android, iPhone)
     if ('setAppBadge' in navigator) (inbox?.unread ? navigator.setAppBadge(inbox.unread) : navigator.clearAppBadge()).catch(() => {});
   }, [folders, currentFolderObj, me.email, view]);
@@ -554,6 +571,24 @@ export default function Mail({ me, route, refreshMe, theme, setTheme, themePref 
           </div>
         </div>
       </header>
+      {rowMenu && (
+        <div className="menu ctx-menu" style={{ left: Math.min(rowMenu.x, innerWidth - 230), top: Math.min(rowMenu.y, innerHeight - 380) }} onClick={(e) => e.stopPropagation()} role="menu">
+          {[
+            ['reply', 'Reply', () => api.get('/api/message', { folder: listFolder, uid: rowMenu.m.uid, peek: 1 }).then((full) => reply({ ...full, folder: listFolder, uid: rowMenu.m.uid }, 'reply'))],
+            ['forward', 'Forward', () => api.get('/api/message', { folder: listFolder, uid: rowMenu.m.uid, peek: 1 }).then((full) => reply({ ...full, folder: listFolder, uid: rowMenu.m.uid }, 'forward'))],
+            null,
+            ['archive', 'Archive', () => act.archive(rowMenu.m.uid)],
+            ['trash', 'Delete', () => act.del(rowMenu.m.uid)],
+            ['mail', rowMenu.m.seen ? 'Mark as unread' : 'Mark as read', () => act.read(!rowMenu.m.seen, rowMenu.m.uid)],
+            ['flag', rowMenu.m.flagged ? 'Remove flag' : 'Flag', () => act.flag(rowMenu.m.uid)],
+            ['clock', 'Snooze…', () => act.snooze(rowMenu.m.uid)],
+            null,
+            ['filter', 'Make a rule…', () => makeRule(rowMenu.m)],
+            ['users', 'Contact card', () => window.dispatchEvent(new CustomEvent('roammail:card', { detail: { person: rowMenu.m.from?.[0] || {}, anchor: null } }))],
+            ...(me.delegated ? [] : [['block', `Block ${rowMenu.m.from?.[0]?.address || 'sender'}`, () => act.block(rowMenu.m.from?.[0]?.address)]]),
+          ].map((x, i) => (x ? <button key={x[1]} role="menuitem" onClick={() => { setRowMenu(null); Promise.resolve(x[2]()).catch((e) => toast(e.message, { error: true })); }}><Icon name={x[0]} size={15} /> {t(x[1])}</button> : <div key={`s${i}`} className="menu-sep" />))}
+        </div>
+      )}
       {card && (
         <ContactCard person={card.person} anchor={card.anchor} me={me} onClose={() => setCard(null)}
           onEmail={(p) => compose({ to: [p] })}
@@ -615,7 +650,7 @@ export default function Mail({ me, route, refreshMe, theme, setTheme, themePref 
       ) : view === 'calendar' ? (
         <Suspense fallback={<div className="spinner" />}><Calendar me={me} /></Suspense>
       ) : view === 'contacts' ? (
-        <Suspense fallback={<div className="spinner" />}><Contacts me={me} onEmail={(c) => { compose({ to: [{ name: c.name, address: c.email }] }); setView('mail'); }} /></Suspense>
+        <Suspense fallback={<div className="spinner" />}><Contacts me={me} onEmail={(c) => { compose({ to: [{ name: c.name, address: c.email }] }); setView('mail'); }} onEmailMany={(list) => { compose({ to: list }); setView('mail'); }} /></Suspense>
       ) : (
         <div className="body">
           {navPeek && vw < 1280 && <div className={`nav-backdrop ${navMode === 'drawer' ? '' : 'clear'}`} onClick={() => setNavPeek(false)} />}
@@ -643,7 +678,8 @@ export default function Mail({ me, route, refreshMe, theme, setTheme, themePref 
               density={prefs.density} setDensity={(v) => setPrefs({ density: v })}
             />}
             <div className="panes">
-              {folder === '@screener' && !search ? <ScreenerList onChanged={setScreenerCount} />
+              {folder === '@catchup' && !search ? <CatchUp onClose={() => setFolder('INBOX')} onReply={(m) => reply(m, 'reply')} onChanged={() => { loadFolders(); }} onRule={makeRule} />
+                : folder === '@screener' && !search ? <ScreenerList onChanged={setScreenerCount} />
                 : folder === '@subscriptions' && !search ? <SubscriptionsList onShowSender={(a) => { setFolder('INBOX'); runSearch(`from:${a}`); }} onBlock={async (a) => { try { await api.post('/api/block', { address: a }); toast(`Blocked ${a}`); } catch (e) { toast(e.message, { error: true }); } }} />
                 : folder === '@aliases' && !search ? <AliasesList onShowAlias={(a) => { setFolder('INBOX'); runSearch(`to:${a}`); }} />
                 : folder === '@quarantine' && !search ? <QuarantineList onChanged={setQCount} /> : folder === '@scheduled' && !search ? <ScheduledList onCompose={compose} /> : <MessageList
@@ -655,6 +691,7 @@ export default function Mail({ me, route, refreshMe, theme, setTheme, themePref 
                   const what = (side === 'left' ? prefs.swipeLeft : prefs.swipeRight) || (side === 'left' ? 'archive' : 'read');
                   if (what === 'read') act.read(!m.seen, m.uid); else if (what === 'flag') act.flag(m.uid); else if (act[what]) act[what](m.uid);
                 }}
+                unreadInbox={folders.find((f) => f.specialUse === '\\Inbox')?.unread || 0} onCatchUp={() => { setFolder('@catchup'); setActive(null); }}
                 swipe={{ left: prefs.swipeLeft, right: prefs.swipeRight }} onRefresh={() => { loadFolders(); load({ quiet: true }); }}
                 folderUse={currentFolderObj?.specialUse} filter={filter} setFilter={setFilter}
                 selected={selected} setSelected={setSelected} active={active} onOpen={openMessage}

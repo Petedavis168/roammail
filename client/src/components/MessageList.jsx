@@ -8,7 +8,7 @@ import { attachGestures, SWIPE_ACTIONS } from '../swipe.js';
 import { t } from '../i18n.js';
 
 export default function MessageList({ list, title, search, onClearSearch, folderUse, filter, setFilter, selected, setSelected,
-  active, onOpen, act, categories, density, onLoadMore, onEmpty, onMarkAllRead, snoozeMap, allInboxes, isInbox, onBump, inboxTab, setInboxTab, onSwipe, swipe = {}, onRefresh }) {
+  active, onOpen, act, categories, density, onLoadMore, onEmpty, onMarkAllRead, snoozeMap, allInboxes, isInbox, onBump, inboxTab, setInboxTab, onSwipe, swipe = {}, onRefresh, unreadInbox = 0, onCatchUp }) {
   const ref = useRef();
   const { messages, loading, total } = list;
   const showTo = folderUse === '\\Sent' || folderUse === '\\Drafts';
@@ -97,6 +97,9 @@ export default function MessageList({ list, title, search, onClearSearch, folder
           ))}
         </div>
       )}
+      {isInbox && onCatchUp && unreadInbox >= 15 && (
+        <button className="catchup-banner" onClick={onCatchUp}><Icon name="spark" size={16} /><span><b>{unreadInbox} {t('unread')}</b> · {t('Catch up in a couple of minutes')}</span><Icon name="chevron" size={16} /></button>
+      )}
       {isInbox && onBump && (!inboxTab || inboxTab === 'primary') && <Nudges onBump={onBump} />}
       {isInbox && (!inboxTab || inboxTab === 'primary') && <NeedsReply messages={messages} onOpen={onOpen} />}
       {selected.size > 0 && !allInboxes && (
@@ -124,7 +127,8 @@ export default function MessageList({ list, title, search, onClearSearch, folder
             header,
             <div key={m.uid} data-uid={m.uid} role="listitem" aria-current={active === m.uid ? 'true' : undefined}
               className={`row ${m.seen ? '' : 'unread'} ${active === m.uid ? 'active' : ''} ${selected.has(m.uid) ? 'selected' : ''}`}
-              onClick={(e) => onRowClick(m, e)} draggable={!allInboxes} onDragStart={(e) => onDragStart(m, e)}>
+              onClick={(e) => onRowClick(m, e)} draggable={!allInboxes} onDragStart={(e) => onDragStart(m, e)}
+              onContextMenu={allInboxes ? undefined : (e) => { e.preventDefault(); window.dispatchEvent(new CustomEvent('roammail:rowmenu', { detail: { m, x: e.clientX, y: e.clientY } })); }}>
               <div className="row-left" onClick={(e) => toggle(m.uid, e)}>
                 {density === 'compact' ? null : (
                   <span className="avatar" style={{ background: avatarColor(person.address) }}>{initials(person)}</span>

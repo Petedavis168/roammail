@@ -281,6 +281,7 @@ function ThreadMessage({ m, expanded, onToggle, onReply, prefs, setPrefs, last, 
                     <button key={d} onClick={() => { setMenu(false); onFollowUp(m, d); }}><Icon name="clock" /> {l}</button>
                   ))}
                 </>}
+                <button onClick={() => { setMenu(false); window.dispatchEvent(new CustomEvent('roammail:makerule', { detail: m })); }}><Icon name="filter" />{' '}{t("Make a rule…")}</button>
                 {sender.address && <button onClick={() => { setMenu(false); onBlock(sender.address); }}><Icon name="block" />{' '}{t("Block")}{' '}{sender.address}</button>}
                 <button onClick={() => window.open(mailUrl(`/api/raw?folder=${encodeURIComponent(m.folder)}&uid=${m.uid}`), '_blank')}><Icon name="external" />{' '}{t("View source")}</button>
                 <button onClick={() => { const f = document.querySelector(`[data-msg="${m.folder}:${m.uid}"] iframe`); f?.contentWindow?.print(); }}><Icon name="print" />{' '}{t("Print")}</button>

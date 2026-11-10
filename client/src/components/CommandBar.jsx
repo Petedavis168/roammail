@@ -31,6 +31,7 @@ export default function CommandBar({ onClose, folders, actions, settingsTabs }) 
       ...folders.filter((f) => f.path !== 'INBOX').map((f) => ({ group: 'Go to', label: f.label || f.name || f.path, icon: 'folder', keywords: `folder ${f.specialUse || ''}`, run: () => actions.folder(f.path) })),
       { group: 'Go to', label: t('Scheduled'), icon: 'clock', keywords: 'send later', run: () => actions.folder('@scheduled') },
       { group: 'Go to', label: t('Subscriptions'), icon: 'list', keywords: 'newsletters unsubscribe mailing lists', run: () => actions.folder('@subscriptions') },
+      { group: 'Go to', label: t('Catch up on unread'), icon: 'spark', keywords: 'unread clean up inbox zero tidy', run: () => actions.folder('@catchup') },
       { group: 'Go to', label: t('Screener'), icon: 'userCheck', keywords: 'new senders first time allow block', run: () => actions.folder('@screener') },
       { group: 'Go to', label: t('Aliases'), icon: 'shield', keywords: 'hide my email alias', run: () => actions.folder('@aliases') },
       { group: 'Go to', label: t('Calendar'), icon: 'calendar', keywords: 'events meetings', run: () => actions.view('calendar') },

@@ -5,6 +5,7 @@ import { q, userSetting, setUserSetting, audit } from './db.js';
 import { requireAuth } from './session.js';
 import { mailcow } from './mailcow.js';
 import { assertPublicHost, accountKind } from './abuse.js';
+import { withMailbox, specialFolder } from './imap.js';
 
 const wrap = (fn) => (req, res, next) => Promise.resolve(fn(req, res, next)).catch(next);
 const fail = (status, message) => Object.assign(new Error(message), { status });
@@ -21,6 +22,8 @@ function cond(c) {
   if (c.field === 'from') return `address :contains "from" ${str(v)}`;
   if (c.field === 'to') return `address :contains ["to", "cc"] ${str(v)}`;
   if (c.field === 'subject') return `header :contains "subject" ${str(v)}`;
+  if (c.field === 'domain') return `address :domain :is "from" ${str(v.replace(/^@/, '').toLowerCase())}`;
+  if (c.field === 'fromIs') return `address :is "from" ${str(v.toLowerCase())}`;
   if (c.field === 'body') return null; // body extension isn't guaranteed; skipped
   return null;
 }
@@ -64,6 +67,11 @@ export function buildSieve({ vacation, rules, screener }, me, orgDomains) {
       if (a.type === 'forward' && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(a.value || '')) acts.push(`redirect :copy ${str(a.value)};`);
       if (a.type === 'junk') acts.push('fileinto "Junk";');
       if (a.type === 'trash') acts.push('fileinto "Trash";');
+      // Automatic reply just for the people this rule matches (never to mailing lists or other robots; once a day each)
+      if (a.type === 'reply' && String(a.value || '').trim()) {
+        req.add('vacation');
+        acts.push(`if not anyof(exists "list-id", exists "auto-submitted", header :contains "precedence" ["bulk", "list", "junk"]) {\n    vacation :days ${[1, 3, 7].includes(Number(a.days)) ? Number(a.days) : 1} :handle ${str(`rule-${r.id}`)} :subject ${str(a.subject || 'Re: your email')} :addresses [${str(me)}] ${multiline(a.value)};\n  }`);
+      }
     }
     if (!acts.length) continue;
     // flags must be set before fileinto to land on the filed copy
@@ -179,8 +187,12 @@ async function assertSafeSieve(email, script) {
 const cleanRule = (r, i) => ({
   id: String(r.id || `r${Date.now()}${i}`).slice(0, 40), name: String(r.name || 'Rule').slice(0, 80), enabled: r.enabled !== false,
   match: r.match === 'all' ? 'all' : 'any', stop: r.stop !== false,
-  conditions: (r.conditions || []).slice(0, 10).map((c) => ({ field: ['from', 'to', 'subject'].includes(c.field) ? c.field : 'from', value: String(c.value || '').slice(0, 200) })),
-  actions: (r.actions || []).slice(0, 5).map((a) => ({ type: ['move', 'read', 'flag', 'category', 'forward', 'junk', 'trash'].includes(a.type) ? a.type : 'move', folder: String(a.folder || '').slice(0, 200), value: String(a.value || '').slice(0, 200) })),
+  conditions: (r.conditions || []).slice(0, 10).map((c) => ({ field: ['from', 'fromIs', 'domain', 'to', 'subject'].includes(c.field) ? c.field : 'from', value: String(c.value || '').slice(0, 200) })),
+  actions: (r.actions || []).slice(0, 5).map((a) => ({
+    type: ['move', 'read', 'flag', 'category', 'forward', 'junk', 'trash', 'reply'].includes(a.type) ? a.type : 'move', folder: String(a.folder || '').slice(0, 200),
+    value: String(a.value || '').slice(0, a.type === 'reply' ? 3000 : 200), ...(a.type === 'reply' ? { subject: String(a.subject || '').slice(0, 200), days: [1, 3, 7].includes(Number(a.days)) ? Number(a.days) : 1 } : {}),
+  })),
+  ...(r.template ? { template: String(r.template).slice(0, 40) } : {}),
 });
 
 mailtools.get('/rules', async (req, res) => res.json(await userSetting(req.user.email, 'rules', [])));
@@ -192,6 +204,51 @@ mailtools.put('/rules', wrap(async (req, res) => {
   await sync(req.user);
   await audit(req.user.email, null, 'rules.update', { count: rules.length, forwards: rules.filter((r) => r.actions.some((a) => a.type === 'forward')).length });
   res.json(rules);
+}));
+
+// Run a rule on what's already in the inbox (rules on the server only see new mail)
+const searchFor = (c) => {
+  const v = String(c.value || '').trim();
+  if (!v) return null;
+  if (c.field === 'from' || c.field === 'fromIs') return { header: { from: v } };
+  if (c.field === 'domain') return { header: { from: `@${v.replace(/^@/, '')}` } };
+  if (c.field === 'to') return { or: [{ to: v }, { cc: v }] };
+  if (c.field === 'subject') return { subject: v };
+  return null;
+};
+mailtools.post('/rules/run', wrap(async (req, res) => {
+  const rule = (await userSetting(req.user.email, 'rules', [])).find((r) => r.id === req.body.id);
+  if (!rule) throw fail(404, 'Rule not found');
+  const crits = rule.conditions.map((c) => ({ c, crit: searchFor(c) })).filter((x) => x.crit);
+  if (!crits.length) throw fail(400, 'This rule has nothing to match');
+  const matched = await withMailbox(req.user, 'INBOX', async (c) => {
+    let set = null;
+    for (const { c: cond, crit } of crits) {
+      let uids = new Set((await c.search(crit, { uid: true })) || []);
+      if (cond.field === 'fromIs') { // exact sender
+        const exact = new Set();
+        if (uids.size) for await (const m of c.fetch([...uids].join(','), { uid: true, envelope: true }, { uid: true })) if (String(m.envelope?.from?.[0]?.address || '').toLowerCase() === String(cond.value).trim().toLowerCase()) exact.add(m.uid);
+        uids = exact;
+      }
+      set = set === null ? uids : rule.match === 'all' ? new Set([...set].filter((u) => uids.has(u))) : new Set([...set, ...uids]);
+    }
+    const list = [...(set || [])].slice(0, 5000);
+    if (!list.length) return 0;
+    const range = list.join(',');
+    let moveTo = null;
+    for (const a of rule.actions) {
+      if (a.type === 'read') await c.messageFlagsAdd(range, ['\\Seen'], { uid: true });
+      if (a.type === 'flag') await c.messageFlagsAdd(range, ['\\Flagged'], { uid: true });
+      if (a.type === 'category' && a.value) await c.messageFlagsAdd(range, [`cat_${a.value.replace(/[^A-Za-z0-9_-]/g, '')}`], { uid: true });
+      if (a.type === 'move' && a.folder && a.folder !== 'INBOX') moveTo = a.folder;
+      if (a.type === 'junk') moveTo = await specialFolder(req.user, '\\Junk', { create: true });
+      if (a.type === 'trash') moveTo = await specialFolder(req.user, '\\Trash', { create: true });
+    }
+    if (moveTo) { await c.mailboxCreate(moveTo).catch(() => {}); if (!(await c.messageMove(range, moveTo, { uid: true }))) throw fail(400, `Couldn't move to ${moveTo}`); }
+    return list.length;
+  });
+  await audit(req.user.email, null, 'rules.run', { rule: rule.id, matched });
+  res.json({ ok: true, matched });
 }));
 
 // ---------------------------------------------------------------- advanced: all of the user's mailcow Sieve filters
