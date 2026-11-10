@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Icon } from '../icons.jsx';
+import Booking from './settings/Booking.jsx';
 import Signatures from './settings/Signatures.jsx';
 import Templates from './settings/Templates.jsx';
 import { pushState, enablePush, disablePush } from '../push.js';
@@ -162,7 +163,7 @@ function Apps({ me, sigData }) {
 }
 
 const TABS = [
-  ['general', 'General', 'settings'], ['signatures', 'Signatures', 'pen'], ['templates', 'Templates', 'mail'], ['security', 'Security', 'lock'],
+  ['general', 'General', 'settings'], ['signatures', 'Signatures', 'pen'], ['booking', 'Booking page', 'calendar'], ['templates', 'Templates', 'mail'], ['security', 'Security', 'lock'],
   ['autoreply', 'Automatic replies', 'reply'], ['junk', 'Junk & spam', 'junk'], ['rules', 'Rules', 'filter'], ['import', 'Import mail', 'import'], ['apps', 'Phone & apps', 'phone'], ['privacy', 'Privacy', 'shield'], ['premium', 'Premium', 'spark'],
 ];
 
@@ -183,7 +184,8 @@ export default function SettingsPanel({ prefs, setPrefs, me, folders, sigData, r
           <div className="drawer-head"><h2>{TABS.find((t) => t[0] === tab)[1]}</h2><button className="icon-btn" aria-label={t("Close settings")} title={t("Close")} onClick={onClose}><Icon name="close" /></button></div>
           <div className="drawer-body">
             {tab === 'general' && <General prefs={prefs} setPrefs={setPrefs} me={me} />}
-            {tab === 'signatures' && <Signatures sigData={sigData} reloadSigs={reloadSigs} prefs={prefs} setPrefs={setPrefs} />}
+            {tab === 'booking' && <Booking />}
+            {tab === 'signatures' && <Signatures sigData={sigData} reloadSigs={reloadSigs} prefs={prefs} setPrefs={setPrefs} me={me} />}
             {tab === 'templates' && <Templates />}
             {tab === 'security' && <Security me={me} ssoMsg={ssoMsg} />}
             {tab === 'autoreply' && <AutoReply me={me} />}

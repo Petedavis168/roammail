@@ -1089,3 +1089,73 @@ details.card summary { cursor: pointer; }
 .premium-buy p { flex-basis: 100%; }
 
 a.g-passkey { text-decoration: none; color: inherit; box-sizing: border-box; }
+
+/* ---- signature builder ---- */
+.sb { padding: 0; overflow: hidden; }
+.sb-head { display: flex; align-items: center; gap: 8px; padding: 12px 14px; border-bottom: 1px solid var(--border); flex-wrap: wrap; }
+.sb-head .row-field { margin: 0; }
+.sb-body { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.1fr); min-height: 420px; }
+.sb-form { border-right: 1px solid var(--border); min-width: 0; }
+.sb-tabs { display: flex; flex-wrap: wrap; gap: 2px; padding: 8px 8px 0; border-bottom: 1px solid var(--border); }
+.sb-tabs button { border: 0; background: none; padding: 8px 10px; border-radius: 6px 6px 0 0; color: var(--muted); font: inherit; font-size: 13px; cursor: pointer; border-bottom: 2px solid transparent; }
+.sb-tabs button.on { color: var(--text); border-bottom-color: var(--brand); font-weight: 600; }
+.sb-fields { display: flex; flex-direction: column; gap: 10px; padding: 14px; }
+.sb-fields label { display: flex; flex-direction: column; gap: 4px; font-size: 13px; color: var(--muted); }
+.sb-fields input:not([type=range]):not([type=color]), .sb-fields select, .sb-fields textarea { padding: 7px 9px; border: 1px solid var(--border); border-radius: 6px; font: inherit; color: var(--text); background: var(--bg); }
+.sb-fields h4 { margin: 6px 0 0; font-size: 13px; }
+.sb-rep { display: flex; flex-direction: column; gap: 6px; align-items: flex-start; }
+.sb-rep-row { display: flex; gap: 6px; width: 100%; }
+.sb-rep-row select { flex: 0 0 110px; padding: 7px; border: 1px solid var(--border); border-radius: 6px; background: var(--bg); color: var(--text); }
+.sb-rep-row input { flex: 1; min-width: 0; padding: 7px 9px; border: 1px solid var(--border); border-radius: 6px; background: var(--bg); color: var(--text); }
+.sb-gallery { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 10px; padding: 12px; max-height: 560px; overflow: auto; }
+.sb-thumb { display: flex; flex-direction: column; gap: 6px; padding: 6px; border: 2px solid var(--border); border-radius: 8px; background: #fff; cursor: pointer; font: inherit; font-size: 12px; color: #374151; text-align: center; }
+.sb-thumb.on { border-color: var(--brand); box-shadow: 0 0 0 3px var(--brand-soft); }
+.sb-thumb-view { height: 96px; overflow: hidden; position: relative; pointer-events: none; text-align: left; }
+.sb-thumb-inner { transform: scale(0.45); transform-origin: top left; width: 222%; }
+.sb-color { display: flex; align-items: center; gap: 10px; font-size: 13px; color: var(--muted); flex-wrap: wrap; }
+.sb-color > span { min-width: 110px; }
+.sb-swatches { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
+.sb-swatches button { width: 22px; height: 22px; border-radius: 50%; border: 2px solid #fff; box-shadow: 0 0 0 1px var(--border); cursor: pointer; padding: 0; }
+.sb-swatches button.on { box-shadow: 0 0 0 2px var(--text); }
+.sb-color input[type=color] { width: 34px; height: 26px; border: 1px solid var(--border); border-radius: 6px; padding: 1px; background: #fff; }
+.sb-preview { padding: 14px; background: var(--panel-2); min-width: 0; }
+.sb-preview-label { font-size: 12px; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); margin-bottom: 8px; }
+.sb-mail { background: #fff; color: #111827; border: 1px solid var(--border); border-radius: 8px; padding: 18px; overflow-x: auto; position: sticky; top: 0; }
+.sb-mail-text { font-family: Arial, sans-serif; font-size: 14px; margin-bottom: 14px; color: #374151; }
+@media (max-width: 820px) {
+  .sb-body { grid-template-columns: 1fr; }
+  .sb-form { border-right: 0; border-bottom: 1px solid var(--border); }
+  .sb-preview { order: -1; }
+  .sb-mail { position: static; }
+}
+.btn-row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin-top: 8px; }
+/* ---- booking settings ---- */
+.bk-link { display: flex; flex-direction: column; gap: 4px; padding: 12px 14px; }
+.bk-link > a { font-weight: 600; word-break: break-all; }
+.bk-fields { display: grid; grid-template-columns: 1fr 1fr; gap: 10px 14px; margin: 12px 0; }
+.bk-fields label, .bkt-grid label { display: flex; flex-direction: column; gap: 4px; font-size: 13px; color: var(--muted); }
+.bk-fields label:nth-child(3) { grid-column: 1 / -1; }
+.bk-slug { display: flex; align-items: center; gap: 2px; min-width: 0; }
+.bk-slug span { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 55%; font-size: 12px; }
+.bk-slug input { flex: 1; min-width: 80px; }
+.bkh { border: 1px solid var(--border); border-radius: 8px; }
+.bkh-row { display: flex; gap: 12px; padding: 8px 12px; border-bottom: 1px solid var(--border); align-items: flex-start; flex-wrap: wrap; }
+.bkh-row:last-child { border-bottom: 0; }
+.bkh-day { width: 120px; display: flex; gap: 6px; align-items: center; padding-top: 5px; font-weight: 600; font-size: 14px; }
+.bkh-ranges { display: flex; flex-direction: column; gap: 6px; align-items: flex-start; flex: 1; min-width: 200px; }
+.bkh-range { display: flex; align-items: center; gap: 6px; }
+.bkh-range input { padding: 4px 6px; }
+.bkt-list { display: flex; flex-direction: column; gap: 8px; align-items: flex-start; }
+.bkt-list > * { align-self: stretch; }
+.bkt-list > button.btn { align-self: flex-start; }
+.bkt { display: flex; align-items: center; gap: 10px; padding: 10px 12px; border-left: 5px solid var(--brand); flex-wrap: wrap; }
+.bkt .btn-row { margin: 0 0 0 auto; }
+.bkt.off, .bkb.off { opacity: .55; }
+.bkt-main { display: flex; flex-direction: column; }
+.bkt-edit { padding: 14px; }
+.bkt-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px 14px; }
+.bkt-grid .wide { grid-column: 1 / -1; }
+.bkt-grid .sb-swatches { font-size: 13px; color: var(--muted); }
+.bkb { padding: 10px 12px; margin-bottom: 8px; display: flex; flex-direction: column; gap: 2px; }
+.bkb .link { align-self: flex-start; }
+@media (max-width: 640px) { .bk-fields, .bkt-grid { grid-template-columns: 1fr; } }

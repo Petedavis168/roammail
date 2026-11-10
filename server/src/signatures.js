@@ -193,11 +193,14 @@ signatures.get('/signature', wrap(async (req, res) => {
   });
 }));
 
+// The builder's settings are plain data (texts, numbers, colours); kept only if small and of the right shape
+const designOk = (d) => !!d && typeof d === 'object' && !Array.isArray(d) && JSON.stringify(d).length <= 20000 && typeof d.style === 'string';
 signatures.put('/signature/personal', wrap(async (req, res) => {
   const list = (Array.isArray(req.body.signatures) ? req.body.signatures : []).slice(0, 20).map((s) => ({
     id: /^[\w-]{1,40}$/.test(s.id) ? s.id : crypto.randomBytes(6).toString('hex'),
     name: String(s.name || 'Signature').slice(0, 60),
     html: cleanHtml(s.html),
+    ...(designOk(s.design) ? { design: s.design } : {}), // the builder's settings, so it can be edited again
   }));
   const valid = (v) => (v === 'company' || v === null || list.some((s) => s.id === v) ? v : null);
   const data = { signatures: list, defaultNew: valid(req.body.defaultNew ?? null), defaultReply: valid(req.body.defaultReply ?? null) };

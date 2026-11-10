@@ -34,6 +34,7 @@ import { appLinks } from './nativepush.js';
 import { clientErrors } from './clienterrors.js';
 import { passkeysApi, passkeyLogin } from './passkeys.js';
 import { ssoApi, ssoPublic } from './sso.js';
+import { bookingApi, bookingPublic, bookingPages } from './booking.js';
 import { aiApi } from './ai.js';
 import { premiumApi } from './premium.js';
 import { calendar } from './calendar.js';
@@ -81,6 +82,7 @@ app.use('/api', (req, res, next) => {
 });
 app.get('/healthz', (req, res) => res.json({ ok: true }));
 app.use(appLinks); // before host routing: these must be served on every host, never redirected
+app.use(bookingPages); // public booking pages, same on every host
 app.use(hosts);
 app.use(ops);
 app.use(abuseDesk);
@@ -98,6 +100,7 @@ app.use('/api', clientErrors); // browser and phone-app error reports (no sign-i
 app.use('/api', publicSecurity);
 app.use('/api', passkeyLogin); // sign in with a passkey (no session yet)
 app.use('/api', ssoPublic); // sign in with Microsoft / Google (no session yet)
+app.use('/api', bookingPublic); // public booking pages: times, booking, cancel links (no sign-in)
 app.use('/api', importsPublic); // Microsoft sign-in callback for imports (no session: sealed state)
 app.use('/api', publicRecovery);
 app.use('/api', requireSetupApi); // server tool may call with a signed request (no session)
@@ -111,6 +114,7 @@ app.use('/api', signatures);
 app.use('/api', securityApi);
 app.use('/api', passkeysApi);
 app.use('/api', ssoApi);
+app.use('/api', bookingApi);
 app.use('/api', aiApi);
 app.use('/api', premiumApi);
 app.use('/api', mailtools);

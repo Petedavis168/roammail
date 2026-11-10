@@ -229,12 +229,12 @@ function WorkSignInAdmin({ org }) {
         <>
           <p><Icon name="check" size={14} /> Connected to your company's <b>{SSO_NAMES[s.provider]}</b> ({s.tenant}). {s.linked} {s.linked === 1 ? 'person has' : 'people have'} linked their account.</p>
           <small className="muted">Each person links their work account once in Settings → Security, then signs in with one click. Only accounts from your company can be used, and your company's own sign-in rules apply. Removing someone in {SSO_NAMES[s.provider]} stops them signing in here.</small>
-          <div className="row-actions"><button className="btn" onClick={disconnect}>Turn off</button></div>
+          <div className="btn-row"><button className="btn" onClick={disconnect}>Turn off</button></div>
         </>
       ) : (
         <>
           <small className="muted">Let people sign in with their Microsoft 365 or Google Workspace work account. Sign in with an admin account from your company to connect it.</small>
-          <div className="row-actions">
+          <div className="btn-row">
             {s.available.microsoft && <button className="btn" onClick={() => connect('microsoft')}>Connect Microsoft 365</button>}
             {s.available.google && <button className="btn" onClick={() => connect('google')}>Connect Google Workspace</button>}
           </div>
