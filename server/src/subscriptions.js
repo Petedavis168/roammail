@@ -21,7 +21,7 @@ import { rateLimit } from './shared.js';
 
 const wrap = (fn) => (req, res, next) => Promise.resolve(fn(req, res, next)).catch(next);
 const fail = (status, message) => Object.assign(new Error(message), { status, expose: true });
-const EMAIL_RE = /^[^\s@<>"]+@[^\s@<>"]+\.[^\s@<>"]+$/;
+const EMAIL_RE = /^[^\s@<>"]{1,64}@[^\s@<>".]{1,63}(?:\.[^\s@<>".]{1,63}){1,8}$/; // no backtracking blow-up on long input
 const SCAN_LIMIT = 3000; // most recent list emails looked at
 const cache = new Map(); // email -> { at, list }
 const CACHE_MS = 5 * 60e3;
