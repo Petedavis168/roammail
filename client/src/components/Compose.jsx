@@ -61,7 +61,13 @@ function Composer({ c, me, prefs, sigData, identities, onClose, onSend, focusInd
   // password protection: recipients get a link; the password goes separately
   const [protect, setProtect] = useState(false);
   const [sec, setSec] = useState({ password: '', hint: '', days: 7, follow: 'later', show: false });
-  const genPassword = () => { const a = 'abcdefghjkmnpqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ23456789'; const r = crypto.getRandomValues(new Uint32Array(14)); setSec((x) => ({ ...x, password: [...r].map((n) => a[n % a.length]).join('').replace(/(.{4})(?=.)/g, '$1-'), show: true })); };
+  const genPassword = () => {
+    const a = 'abcdefghjkmnpqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ23456789'; // no look-alikes (0/O, 1/l/I)
+    const out = [];
+    const limit = 256 - (256 % a.length); // reject the top few values so every character is equally likely
+    while (out.length < 14) { const [b] = crypto.getRandomValues(new Uint8Array(1)); if (b < limit) out.push(a[b % a.length]); }
+    setSec((x) => ({ ...x, password: out.join('').replace(/(.{4})(?=.)/g, '$1-'), show: true }));
+  };
   const editor = useRef();
   const fileInput = useRef();
   const dirty = useRef(false);

@@ -72,7 +72,7 @@ test('receipts: request delivery and read receipts, reader answers once, status 
   st = (await alice.get('/api/receipts', { messageId: msgId })).data;
   assert.ok(st.recipients[0].read, 'read'); assert.ok(st.recipients[0].delivered, 'delivered');
   const left = (await alice.get('/api/messages', { folder: 'INBOX' })).data.messages;
-  assert.ok(!left.some((x) => /^Read: Contract attached|Delivery Status/.test(x.subject)), 'reports moved out of the inbox');
+  assert.ok(!left.some((x) => /^(Read: Contract attached|Delivery Status)/.test(x.subject)), 'reports moved out of the inbox');
   const filed = (await alice.get('/api/messages', { folder: 'Receipts' })).data.messages;
   assert.equal(filed.length, 2);
 
