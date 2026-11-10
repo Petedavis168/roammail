@@ -10,6 +10,7 @@ import { presets, fmtWhen, localInputValue } from '../snooze.js';
 import { queue, flushOutbox, isOffline } from '../outbox.js';
 import { offlineAllowed } from '../api.js';
 import { t as tr } from '../i18n.js';
+import { GALLERY, customFields, builtinValues, fillTemplate, fieldLabel } from '../templategallery.js';
 
 const sigBlock = (html) => (html ? `<div class="signature" data-sig="1"><br>${safeHtml(html)}</div>` : '');
 
@@ -86,14 +87,32 @@ function Composer({ c, me, prefs, sigData, identities, onClose, onSend, focusInd
   const [tplMenu, setTplMenu] = useState(false);
   const [templates, setTemplates] = useState(null);
   const openTemplates = () => { setTplMenu((x) => !x); if (!templates) api.get('/api/templates').then(setTemplates).catch(() => setTemplates({ personal: [], company: [] })); };
-  const useTemplate = (t) => {
-    setTplMenu(false);
-    if (t.subject && !subject) setSubject(t.subject);
+  const [tplQ, setTplQ] = useState('');
+  const [tplFill, setTplFill] = useState(null); // { t, values } while asking for the fill-in fields
+  const insertTemplate = (t, values) => {
+    const f = fillTemplate(t, { ...builtinValues({ to, me }), ...values });
+    if (f.subject && !subject.trim()) setSubject(f.subject);
     const ed = editor.current; if (!ed) return;
     ed.focus();
-    document.execCommand('insertHTML', false, safeHtml(t.html));
+    document.execCommand('insertHTML', false, safeHtml(f.html));
     markDirty();
   };
+  const useTemplate = (t) => {
+    setTplMenu(false); setTplQ('');
+    const ask = customFields(t);
+    if (ask.length) setTplFill({ t, values: Object.fromEntries(ask.map((k) => [k, ''])) });
+    else insertTemplate(t, {});
+  };
+  // Colleagues who are out of office (business accounts): shown under the To line
+  const [away, setAway] = useState([]);
+  const rcptKey = [...to, ...cc].map((r) => r.address?.toLowerCase()).filter(Boolean).sort().join(',');
+  useEffect(() => {
+    if (!me.orgDomains?.length || !rcptKey) { setAway([]); return; }
+    const inOrg = rcptKey.split(',').filter((a) => me.orgDomains.includes(a.split('@')[1]));
+    if (!inOrg.length) { setAway([]); return; }
+    const h = setTimeout(() => api.get(`/api/ooo?emails=${encodeURIComponent(inOrg.join(','))}`).then((r) => setAway(r.away || [])).catch(() => {}), 400);
+    return () => clearTimeout(h);
+  }, [rcptKey]);
   const [sendMenu, setSendMenu] = useState(false);
   const [pickTime, setPickTime] = useState(false);
   const [customTime, setCustomTime] = useState(() => localInputValue(new Date(Date.now() + 3600e3)));
@@ -214,6 +233,12 @@ function Composer({ c, me, prefs, sigData, identities, onClose, onSend, focusInd
           right={!showCc && <button type="button" className="link small" onClick={() => setShowCc(true)}>{tr("Cc Bcc")}</button>} />
         {showCc && <RecipientInput label={tr("Cc")} value={cc} onChange={setCc} />}
         {showCc && <RecipientInput label={tr("Bcc")} value={bcc} onChange={setBcc} />}
+        {away.map((a) => (
+          <div className="away-note" key={a.email} role="note"><Icon name="clock" size={14} />
+            <span><b>{a.email}</b> {tr('is out of office')}{a.until ? ` ${tr('until')} ${new Date(`${a.until}T12:00:00`).toLocaleDateString(undefined, { weekday: 'short', day: 'numeric', month: 'short' })}` : ''}.
+              {a.cover && <> {tr('Contact')} <button type="button" className="link" onClick={() => !to.some((r) => r.address?.toLowerCase() === a.cover) && setTo((x) => [...x, { address: a.cover, name: a.coverName || '' }])}>{a.coverName || a.cover}</button> {tr('instead')}.</>}</span>
+          </div>
+        ))}
         <input className="subject-input" placeholder={tr("Subject")} value={subject} onChange={(e) => setSubject(e.target.value)} aria-label={tr("Subject")} />
         {protect && (
           <div className="protect-panel">
@@ -260,6 +285,16 @@ function Composer({ c, me, prefs, sigData, identities, onClose, onSend, focusInd
           </div>
         )}
         {init.forwardUid && <div className="muted small c-note">{tr("Original attachments will be included.")}</div>}
+        {tplFill && (
+          <form className="tpl-fill" onSubmit={(e) => { e.preventDefault(); insertTemplate(tplFill.t, tplFill.values); setTplFill(null); }}>
+            <b>{tr('Fill in')} “{tplFill.t.name}”</b>
+            {Object.keys(tplFill.values).map((k, i) => (
+              <label key={k}>{fieldLabel(k)}<input autoFocus={i === 0} value={tplFill.values[k]} onChange={(e) => setTplFill((f) => ({ ...f, values: { ...f.values, [k]: e.target.value } }))} /></label>
+            ))}
+            <div className="actions"><button className="btn primary" type="submit">{tr('Insert')}</button><button className="btn" type="button" onClick={() => setTplFill(null)}>{tr('Cancel')}</button></div>
+            <div className="muted small">{tr('Anything left empty stays as a blank you can fill in later.')}</div>
+          </form>
+        )}
         <div className="composer-foot">
           <div className="split-send dd">
             <button className="btn primary" onClick={() => send()} title={tr("Send (Ctrl+Enter)")}><Icon name="send" size={16} />{' '}{tr("Send")}</button>
@@ -305,17 +340,24 @@ function Composer({ c, me, prefs, sigData, identities, onClose, onSend, focusInd
               )}
             </div>
             <div className="dd">
-              {tplMenu && (
-                <div className="menu up" onMouseLeave={() => setTplMenu(false)}>
-                  <div className="menu-head"><b>{tr("Templates")}</b></div>
-                  {!templates && <div className="menu-note">{tr("Loading…")}</div>}
-                  {templates?.company?.length > 0 && <div className="menu-note">{tr("Company")}</div>}
-                  {templates?.company?.map((t) => <button key={`c${t.id}`} onClick={() => useTemplate(t)}><span className="ic-space" /> {t.name}</button>)}
-                  {templates?.company?.length > 0 && templates?.personal?.length > 0 && <div className="menu-note">{tr("Mine")}</div>}
-                  {templates?.personal?.map((t) => <button key={t.id} onClick={() => useTemplate(t)}><span className="ic-space" /> {t.name}</button>)}
-                  {templates && !templates.personal.length && !templates.company.length && <div className="menu-note">{tr("Create templates in Settings → Templates.")}</div>}
-                </div>
-              )}
+              {tplMenu && (() => {
+                const match = (t) => !tplQ || `${t.name} ${t.subject} ${t.category || ''}`.toLowerCase().includes(tplQ.toLowerCase());
+                const comp = (templates?.company || []).filter(match); const mine = (templates?.personal || []).filter(match);
+                const ready = GALLERY.filter(match);
+                return (
+                  <div className="menu up tpl-menu" onMouseLeave={() => setTplMenu(false)}>
+                    <div className="menu-head"><b>{tr("Templates")}</b></div>
+                    <input type="search" autoFocus placeholder={tr('Search templates')} value={tplQ} onChange={(e) => setTplQ(e.target.value)} aria-label={tr('Search templates')} />
+                    {!templates && <div className="menu-note">{tr("Loading…")}</div>}
+                    {comp.length > 0 && <div className="menu-note">{tr("Company")}</div>}
+                    {comp.map((t) => <button key={`c${t.id}`} onClick={() => useTemplate(t)}><Icon name="copy" size={15} /> {t.name}</button>)}
+                    {mine.length > 0 && <div className="menu-note">{tr("Mine")}</div>}
+                    {mine.map((t) => <button key={t.id} onClick={() => useTemplate(t)}><Icon name="copy" size={15} /> {t.name}</button>)}
+                    {ready.length > 0 && <div className="menu-note">{tr("Ready-made")}</div>}
+                    {ready.map((t) => <button key={t.id} onClick={() => useTemplate(t)}><Icon name="copy" size={15} /> {t.name}</button>)}
+                  </div>
+                );
+              })()}
             </div>
             <div className="dd">
               {sigMenu && (

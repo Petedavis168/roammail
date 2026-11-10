@@ -3,6 +3,7 @@ import { Icon } from '../icons.jsx';
 import Booking from './settings/Booking.jsx';
 import Signatures from './settings/Signatures.jsx';
 import Templates from './settings/Templates.jsx';
+import { NudgeSettings } from './Nudges.jsx';
 import { pushState, enablePush, disablePush } from '../push.js';
 
 function PushToggle() {
@@ -71,6 +72,8 @@ function General({ prefs, setPrefs, me }) {
       <label className="row-field">{t("Undo send")}{' '}<select value={prefs.undoSeconds} onChange={set('undoSeconds')}>
           {[0, 5, 10, 20, 30].map((s) => <option key={s} value={s}>{s ? `${s} seconds` : 'Off'}</option>)}
         </select></label>
+      <h3>{t("Follow-ups")}</h3>
+      <NudgeSettings />
       <h3>{t("Privacy")}</h3>
       <label className="row-field">{t("Ask for receipts on emails I send")}{' '}<select value={prefs.requestReceipts} onChange={set('requestReceipts')}><option value="ask">{t("Choose for each email")}</option><option value="always">{t("Always (delivery and read)")}</option><option value="never">{t("Never")}</option></select></label>
       <label className="row-field">{t("When someone asks me for a read receipt")}{' '}<select value={prefs.sendReceipts} onChange={set('sendReceipts')}><option value="ask">{t("Ask me")}</option><option value="always">{t("Always send one")}</option><option value="never">{t("Never send one")}</option></select></label>
@@ -166,7 +169,7 @@ function Apps({ me, sigData }) {
 
 export const TABS = [
   ['general', 'General', 'settings'], ['signatures', 'Signatures', 'pen'], ['booking', 'Booking page', 'calendar'], ['templates', 'Templates', 'mail'], ['security', 'Security', 'lock'],
-  ['autoreply', 'Automatic replies', 'reply'], ['junk', 'Junk & spam', 'junk'], ['rules', 'Rules', 'filter'], ['import', 'Import mail', 'import'], ['apps', 'Phone & apps', 'phone'], ['privacy', 'Privacy', 'shield'], ['premium', 'Premium', 'spark'],
+  ['autoreply', 'Out of office', 'reply'], ['junk', 'Junk & spam', 'junk'], ['rules', 'Rules', 'filter'], ['import', 'Import mail', 'import'], ['apps', 'Phone & apps', 'phone'], ['privacy', 'Privacy', 'shield'], ['premium', 'Premium', 'spark'],
 ];
 
 export default function SettingsPanel({ prefs, setPrefs, me, folders, sigData, reloadSigs, onClose, initialTab = 'general', importMsg, premiumMsg, ssoMsg }) {

@@ -5,28 +5,98 @@ import { useToast } from '../Toast.jsx';
 import { folderLabel, fmtDate } from '../../util.js';
 import { t } from '../../i18n.js';
 
+const OOO_PRESETS = [
+  ['Vacation', 'Out of office', 'Thanks for your email. I’m on vacation until {back} with limited access to email.{cover}\n\nI’ll reply when I’m back.'],
+  ['Conference / travel', 'Travelling', 'Thanks for your email. I’m travelling until {back} and will be slow to reply.{cover}'],
+  ['Sick day', 'Out sick', 'Thanks for your email. I’m out sick today and will reply as soon as I can.{cover}'],
+  ['Parental leave', 'On leave', 'Thanks for your email. I’m on parental leave until {back}.{cover}'],
+  ['Holiday closure', 'Our office is closed', 'Thanks for your email. Our office is closed for the holidays until {back}. We’ll reply as soon as we’re back.'],
+];
+const fmtDay = (d) => (d ? new Date(`${d}T12:00:00`).toLocaleDateString(undefined, { weekday: 'long', day: 'numeric', month: 'long' }) : '');
+const addDay = (d) => { const x = new Date(`${d}T12:00:00Z`); x.setUTCDate(x.getUTCDate() + 1); return x.toISOString().slice(0, 10); };
+
 export function AutoReply({ me }) {
   const toast = useToast();
   const [v, setV] = useState(null);
-  useEffect(() => { api.get('/api/vacation').then(setV); }, []);
+  const [saving, setSaving] = useState(false);
+  const isBiz = me.orgDomains?.length > 0;
+  useEffect(() => { api.get('/api/vacation').then((x) => setV({ ...x, split: !!x.internalMessage })).catch((e) => toast(e.message, { error: true })); }, []);
   if (!v) return <div className="spinner" />;
+  const set = (k, val) => setV((x) => ({ ...x, [k]: val }));
   const save = async (next) => {
-    try { setV(await api.put('/api/vacation', next)); toast(next.enabled ? 'Automatic replies are on' : 'Automatic replies are off'); } catch (e) { toast(e.message, { error: true }); }
+    setSaving(true);
+    try {
+      const r = await api.put('/api/vacation', { ...next, internalMessage: next.split ? next.internalMessage : '' });
+      setV({ ...r, split: !!r.internalMessage });
+      window.dispatchEvent(new CustomEvent('roammail:ooo', { detail: r }));
+      toast(r.enabled ? (r.activeNow ? t('Out of office is on') : t('Out of office is scheduled')) : t('Out of office is off'));
+    } catch (e) { toast(e.message, { error: true }); }
+    setSaving(false);
   };
+  const usePreset = ([, subject, msg]) => {
+    const cover = v.cover ? `\n\nFor anything urgent, please contact ${v.coverName || v.cover}${v.coverName ? ` (${v.cover})` : ''}.` : '';
+    setV((x) => ({ ...x, subject, message: msg.replace('{back}', fmtDay(x.end) || 'I return').replace('{cover}', cover) }));
+  };
+  const addToCalendar = async () => {
+    if (!v.start) return toast(t('Pick a start date first'), { error: true });
+    try {
+      const cal = (await api.get('/api/calendars'))[0]?.href;
+      if (!cal) throw new Error(t('No calendar found'));
+      await api.post('/api/calendar/events', { calendar: cal, title: t('Out of office'), allDay: true, start: v.start, end: addDay(v.end || v.start), sendInvites: false, busy: true });
+      toast(t('Added to your calendar'));
+    } catch (e) { toast(e.message, { error: true }); }
+  };
+  const status = !v.enabled ? null : v.activeNow ? <span className="pill ok">{t('On now')}{v.end ? ` · ${t('until')} ${fmtDay(v.end)}` : ''}</span>
+    : <span className="pill warn">{t('Scheduled')} · {fmtDay(v.start)}{v.end ? ` – ${fmtDay(v.end)}` : ''}</span>;
+
   return (
-    <div className="settings-section">
-      <p className="muted small">{t("Let people know you're away. Each sender gets one reply per day. Mailing lists don't get replies.")}</p>
-      <label className="check big"><input type="checkbox" checked={v.enabled} onChange={(e) => setV({ ...v, enabled: e.target.checked })} />{' '}{t("Send automatic replies")}</label>
-      <div className={`form ${v.enabled ? '' : 'disabled'}`}>
-        <div className="two-col">
-          <label>{t("Start (optional)")}<input type="date" value={v.start} onChange={(e) => setV({ ...v, start: e.target.value })} /></label>
-          <label>{t("End (optional)")}<input type="date" value={v.end} onChange={(e) => setV({ ...v, end: e.target.value })} /></label>
-        </div>
-        <label>{t("Subject")}<input value={v.subject} onChange={(e) => setV({ ...v, subject: e.target.value })} /></label>
-        <label>{t("Message")}<textarea rows={6} value={v.message} placeholder={'Thanks for your email. I\'m out of the office until Monday with limited access to email.\n\nFor urgent matters please contact ...'} onChange={(e) => setV({ ...v, message: e.target.value })} /></label>
-        {me.orgDomains?.length > 0 && <label className="check"><input type="checkbox" checked={v.onlyOrg} onChange={(e) => setV({ ...v, onlyOrg: e.target.checked })} />{' '}{t("Only reply to people in my organization")}</label>}
+    <div className="settings-section ooo">
+      <div className="ooo-head">
+        <label className="switch big"><input type="checkbox" checked={v.enabled} onChange={(e) => set('enabled', e.target.checked)} aria-label={t('Out of office')} /></label>
+        <div><b>{t('Out of office')}</b> {status}<div className="muted small">{t('Automatic replies while you’re away. Each person gets one reply a day; newsletters and mailing lists never get one.')}</div></div>
       </div>
-      <div><button className="btn primary" onClick={() => save(v)}>{t("Save")}</button></div>
+
+      <div className={`form ${v.enabled ? '' : 'disabled'}`}>
+        <div className="card">
+          <b>{t('When')}</b>
+          <div className="two-col">
+            <label>{t('First day away')}<input type="date" value={v.start} onChange={(e) => set('start', e.target.value)} /></label>
+            <label>{t('Last day away')}<input type="date" value={v.end} min={v.start || undefined} onChange={(e) => set('end', e.target.value)} /></label>
+          </div>
+          <div className="muted small">{t('Leave both empty to turn it on now until you turn it off. It switches itself off after the last day.')}</div>
+          {v.start && <button className="link" type="button" onClick={addToCalendar}><Icon name="calendar" size={14} /> {t('Block these days in my calendar')}</button>}
+        </div>
+
+        {isBiz && (
+          <div className="card">
+            <b>{t('Who covers for me')}</b>
+            <div className="two-col">
+              <label>{t('Name')}<input value={v.coverName} placeholder={t('e.g. Jordan Smith')} onChange={(e) => set('coverName', e.target.value)} /></label>
+              <label>{t('Email')}<input type="email" value={v.cover} placeholder={`name@${me.email.split('@')[1]}`} onChange={(e) => set('cover', e.target.value)} /></label>
+            </div>
+            <label className="check"><input type="checkbox" checked={v.forwardToCover} disabled={!v.cover} onChange={(e) => set('forwardToCover', e.target.checked)} /> {t('Send them a copy of my email while I’m away (not newsletters)')}</label>
+            <label className="check"><input type="checkbox" checked={v.showColleagues} onChange={(e) => set('showColleagues', e.target.checked)} /> {t('Let colleagues see I’m away when they write to me')}</label>
+          </div>
+        )}
+
+        <div className="card">
+          <div className="ooo-msg-head"><b>{t('Message')}</b>
+            <div className="chips">{OOO_PRESETS.map((p) => <button type="button" key={p[0]} className="chip" onClick={() => usePreset(p)}>{t(p[0])}</button>)}</div>
+          </div>
+          <label>{t('Subject')}<input value={v.subject} onChange={(e) => set('subject', e.target.value)} /></label>
+          {isBiz && (
+            <div className="seg ooo-seg">
+              <button type="button" className={!v.split ? 'on' : ''} onClick={() => set('split', false)}>{t('Same reply for everyone')}</button>
+              <button type="button" className={v.split ? 'on' : ''} onClick={() => set('split', true)}>{t('Different reply for my company')}</button>
+            </div>
+          )}
+          {isBiz && v.split && <label>{t('Reply to people in my company')}<textarea rows={4} value={v.internalMessage} placeholder={t('Off until Monday — Jordan has my projects. Ping me on my phone if it’s on fire.')} onChange={(e) => set('internalMessage', e.target.value)} /></label>}
+          {!(isBiz && v.onlyOrg && v.split) && <label>{isBiz && v.split ? t('Reply to everyone else') : t('Reply')}<textarea rows={6} value={v.message} placeholder={t('Thanks for your email. I’m out of the office until Monday with limited access to email.')} onChange={(e) => set('message', e.target.value)} /></label>}
+          {isBiz && <label className="check"><input type="checkbox" checked={v.onlyOrg} onChange={(e) => set('onlyOrg', e.target.checked)} /> {t('Only reply to people in my company')}</label>}
+        </div>
+      </div>
+      <div className="actions"><button className="btn primary" disabled={saving} onClick={() => save(v)}>{saving ? t('Saving…') : t('Save')}</button>
+        {v.enabled && <button className="btn" disabled={saving} onClick={() => save({ ...v, enabled: false })}>{t('Turn off now')}</button>}</div>
     </div>
   );
 }

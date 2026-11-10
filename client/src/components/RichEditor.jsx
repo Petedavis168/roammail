@@ -49,10 +49,10 @@ export default function RichEditor({ value, onChange, placeholders, minHeight = 
             {showPh && (
               <div className="menu" onMouseLeave={() => setShowPh(false)}>
                 {placeholders.map(([k, l]) => (
-                  <button type="button" key={k} onMouseDown={(e) => { e.preventDefault(); setShowPh(false); exec('insertText', k === 'logo' ? '' : `{{${k}}}`); if (k === 'logo') exec('insertHTML', '{{#logo}}<img src="{{logo}}" alt="" width="140">{{/logo}}'); }}>
-                    {l} <small className="muted">{`{{${k}}}`}</small></button>
+                  <button type="button" key={k} onMouseDown={(e) => { e.preventDefault(); setShowPh(false); if (k === '__custom') { const n = prompt(t('Name the field (for example: price, address, start date)')); const key = String(n || '').trim().toLowerCase().replace(/[^a-z0-9 ]/g, '').replace(/\s+/g, '_').slice(0, 40); if (/^[a-z]/.test(key)) exec('insertText', `{{${key}}}`); return; } exec('insertText', k === 'logo' ? '' : `{{${k}}}`); if (k === 'logo') exec('insertHTML', '{{#logo}}<img src="{{logo}}" alt="" width="140">{{/logo}}'); }}>
+                    {l} {k !== '__custom' && <small className="muted">{`{{${k}}}`}</small>}</button>
                 ))}
-                <div className="menu-note">{t("Tip: wrap a line in")}{' '}<code>{'{{#phone}}…{{/phone}}'}</code>{' '}{t("to hide it when the person has no phone number.")}</div>
+                {!placeholders.some(([k]) => k === '__custom') && <div className="menu-note">{t("Tip: wrap a line in")}{' '}<code>{'{{#phone}}…{{/phone}}'}</code>{' '}{t("to hide it when the person has no phone number.")}</div>}
               </div>
             )}
           </div>

@@ -1350,3 +1350,48 @@ a { color: var(--accent); }
 .cmd-empty { padding: 20px; text-align: center; color: var(--muted); }
 .compose-fab { background: linear-gradient(135deg, var(--accent), var(--accent-2)) !important; }
 .link { color: var(--accent); }
+
+/* ---------- Smart templates */
+.tpl-toolbar { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin: 6px 0 12px; }
+.tpl-toolbar .seg { flex: 0 0 auto; }
+.tpl-toolbar .seg button { padding: 7px 14px; }
+.tpl-search { flex: 1; min-width: 160px; }
+.chips { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 12px; }
+.chip { cursor: pointer; }
+.tpl-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 12px; }
+.tpl-card { border: 1px solid var(--border); border-radius: 14px; padding: 14px; background: var(--panel); display: flex; flex-direction: column; gap: 6px; transition: box-shadow .15s, border-color .15s; }
+.tpl-card:hover { border-color: color-mix(in srgb, var(--accent, #2563eb) 40%, var(--border)); box-shadow: 0 6px 20px rgba(15,23,42,.08); }
+.tpl-card-head { display: flex; gap: 8px; align-items: center; justify-content: space-between; }
+.tpl-card-head .pill { background: var(--panel-2); color: var(--muted); font-weight: 600; }
+.tpl-subj { font-weight: 600; }
+.tpl-body { max-height: 120px; overflow: hidden; color: var(--muted); -webkit-mask-image: linear-gradient(#000 70%, transparent); mask-image: linear-gradient(#000 70%, transparent); }
+.tpl-actions { display: flex; gap: 6px; align-items: center; margin-top: auto; padding-top: 6px; }
+.tpl-blank { background: color-mix(in srgb, var(--accent, #2563eb) 14%, transparent); color: var(--accent, #2563eb); border-radius: 5px; padding: 0 5px; font-weight: 600; font-size: .92em; }
+.tpl-preview { border: 1px dashed var(--border); border-radius: 12px; padding: 12px 14px; background: var(--panel-2); display: grid; gap: 6px; }
+.tpl-fill { position: absolute; bottom: 52px; left: 12px; right: 12px; z-index: 30; background: var(--panel); border: 1px solid var(--border); border-radius: 14px; box-shadow: 0 16px 40px rgba(15,23,42,.18); padding: 14px; display: grid; gap: 8px; max-height: 70%; overflow: auto; pointer-events: auto; }
+.tpl-fill label { display: grid; gap: 3px; font-size: 13px; font-weight: 600; }
+.tpl-menu { width: 300px; max-height: 360px; overflow: auto; }
+.tpl-menu input { margin: 4px 8px 6px; width: calc(100% - 16px); }
+.composer:not(.max) { position: relative; }
+
+/* ---------- Out of office */
+.ooo .card { display: grid; gap: 10px; margin-bottom: 12px; }
+.ooo-head { display: flex; gap: 14px; align-items: center; padding: 14px 16px; border-radius: 14px; background: var(--panel-2); margin-bottom: 14px; }
+.ooo-head .pill { margin-left: 6px; }
+.ooo-msg-head { display: flex; justify-content: space-between; align-items: center; gap: 10px; flex-wrap: wrap; }
+.ooo-msg-head .chips { margin: 0; }
+.ooo-seg { max-width: 460px; }
+.ooo-bar { display: flex; align-items: center; gap: 10px; padding: 7px 14px; background: color-mix(in srgb, #f59e0b 14%, var(--panel)); border-bottom: 1px solid color-mix(in srgb, #f59e0b 30%, var(--border)); font-size: 13.5px; }
+.ooo-bar .btn { margin-left: auto; }
+.away-note { display: flex; gap: 8px; align-items: center; margin: 4px 12px; padding: 6px 10px; border-radius: 10px; background: color-mix(in srgb, #f59e0b 12%, var(--panel)); font-size: 13px; }
+
+/* ---------- Follow-up nudges */
+.nudges { margin: 8px 10px 4px; border: 1px solid color-mix(in srgb, var(--accent, #2563eb) 25%, var(--border)); background: color-mix(in srgb, var(--accent, #2563eb) 5%, var(--panel)); border-radius: 14px; padding: 8px 10px; }
+.nudges-head { display: flex; align-items: center; gap: 6px; font-size: 13px; color: var(--accent, #2563eb); }
+.nudges-head .dd { margin-left: auto; }
+.nudge { display: flex; align-items: center; gap: 8px; padding: 6px 2px; border-top: 1px solid var(--border); }
+.nudge:first-of-type { border-top: 0; }
+.nudge-text { flex: 1; min-width: 0; display: grid; font-size: 13.5px; }
+.nudge-text > span { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.nudge-who { font-weight: 600; }
+.nudge-subj { color: var(--text); }

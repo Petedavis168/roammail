@@ -50,6 +50,14 @@ export default function Mail({ me, route, refreshMe, theme, setTheme, onLogout }
   const mailbox = route.id; // the mailbox ID in the URL
   const [sharedBoxes, setSharedBoxes] = useState([]);
   useEffect(() => { api.get('/api/shared-mailboxes').then(setSharedBoxes).catch(() => {}); }, []);
+  // Out of office: a bar while it's on, so it's never left on by mistake
+  const [ooo, setOoo] = useState(null);
+  useEffect(() => {
+    if (me.delegated) return;
+    api.get('/api/vacation').then(setOoo).catch(() => {});
+    const on = (e) => setOoo(e.detail); window.addEventListener('roammail:ooo', on); return () => window.removeEventListener('roammail:ooo', on);
+  }, [me.email]);
+  const oooOff = async () => { try { const r = await api.put('/api/vacation', { ...ooo, enabled: false }); setOoo(r); } catch {} };
   // Switching mailbox = changing the ID in the path (a full page load, so nothing from the other mailbox lingers)
   const switchMailbox = (id) => {
     const m = /^(\d{8}|\d{6}-\d{3}-[A-Z]{2})$/.exec(String(id || '')); // only real mailbox IDs, never another site
@@ -329,6 +337,14 @@ export default function Mail({ me, route, refreshMe, theme, setTheme, onLogout }
   };
 
   // ---------- compose ----------
+  // Follow-up nudge: reply to my own unanswered email, to the same people, quoting it
+  const bump = async (n) => {
+    try {
+      const m = await api.get(`/api/message?folder=${encodeURIComponent(n.folder)}&uid=${n.uid}`);
+      compose({ ...replyDraft({ ...m, folder: n.folder, uid: n.uid }, 'all', me.email), prefillText: t('Hi, just following up on this. Any thoughts?') });
+      api.post('/api/nudges/dismiss', { messageId: n.messageId }).then(() => window.dispatchEvent(new Event('roammail:nudges'))).catch(() => {});
+    } catch (e) { toast(e.message, { error: true }); }
+  };
   const compose = (initial = {}) => setComposers((c) => {
     if (c.length >= 3) { toast(t("Close a draft before opening another")); return c; }
     return [...c, { id: Date.now() + Math.random(), initial }];
@@ -469,6 +485,13 @@ export default function Mail({ me, route, refreshMe, theme, setTheme, onLogout }
           </div>
         </div>
       </header>
+      {ooo?.activeNow && (
+        <div className="ooo-bar" role="status"><Icon name="clock" size={16} />
+          <span>{t('Out of office is on')}{ooo.end ? ` ${t('until')} ${new Date(`${ooo.end}T12:00:00`).toLocaleDateString(undefined, { weekday: 'short', day: 'numeric', month: 'short' })}` : ''}. {t('People who email you get your automatic reply.')}</span>
+          <button className="btn sm" onClick={() => setShowSettings('autoreply')}>{t('Edit')}</button>
+          <button className="btn sm" onClick={oooOff}>{t('Turn off')}</button>
+        </div>
+      )}
 
       <div className="shell">
       <nav className="app-rail" aria-label={t("Apps")}>
@@ -527,7 +550,7 @@ export default function Mail({ me, route, refreshMe, theme, setTheme, onLogout }
                 : folder === '@quarantine' && !search ? <QuarantineList onChanged={setQCount} /> : folder === '@scheduled' && !search ? <ScheduledList onCompose={compose} /> : <MessageList
                 snoozeMap={folder.toLowerCase() === 'snoozed' ? snoozeMap : null}
                 list={list} title={search ? `Results for "${search}"` : folder === '@all' ? 'All inboxes' : folderLabel(currentFolderObj || { name: folder })}
-                search={search} onClearSearch={clearSearch} isInbox={folder === 'INBOX' && !search}
+                search={search} onClearSearch={clearSearch} isInbox={folder === 'INBOX' && !search} onBump={me.delegated ? null : bump}
                 folderUse={currentFolderObj?.specialUse} filter={filter} setFilter={setFilter}
                 selected={selected} setSelected={setSelected} active={active} onOpen={openMessage}
                 act={act} categories={prefs.categories} density={prefs.density} allInboxes={folder === '@all'}

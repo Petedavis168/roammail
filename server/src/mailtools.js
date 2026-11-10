@@ -28,14 +28,29 @@ function cond(c) {
 export function buildSieve({ vacation, rules }, me, orgDomains) {
   const req = new Set(['fileinto', 'imap4flags', 'copy']);
   const lines = [];
-  if (vacation?.enabled && vacation.message) {
-    req.add('vacation');
-    const tests = [];
-    if (vacation.start) { req.add('date'); req.add('relational'); tests.push(`currentdate :value "ge" "date" ${str(vacation.start)}`); }
-    if (vacation.end) { req.add('date'); req.add('relational'); tests.push(`currentdate :value "le" "date" ${str(vacation.end)}`); }
-    if (vacation.onlyOrg && orgDomains.length) tests.push(`address :domain :is "from" [${orgDomains.map(str).join(', ')}]`);
-    tests.push('not header :contains "precedence" ["bulk", "list", "junk"]', 'not exists "list-id"');
-    lines.push(`if allof(${tests.join(', ')}) {\n  vacation :days 1 :subject ${str(vacation.subject || 'Out of office')} :addresses [${str(me)}] ${multiline(vacation.message)};\n}`);
+  if (vacation?.enabled && (vacation.message || vacation.internalMessage)) {
+    const when = [];
+    if (vacation.start) { req.add('date'); req.add('relational'); when.push(`currentdate :value "ge" "date" ${str(vacation.start)}`); }
+    if (vacation.end) { req.add('date'); req.add('relational'); when.push(`currentdate :value "le" "date" ${str(vacation.end)}`); }
+    const notBulk = ['not header :contains "precedence" ["bulk", "list", "junk"]', 'not exists "list-id"', 'not exists "auto-submitted"'];
+    const inOrg = orgDomains.length ? `address :domain :is "from" [${orgDomains.map(str).join(', ')}]` : null;
+    // While away, a teammate gets a copy of everything personal (not mailing lists)
+    if (vacation.forwardToCover && vacation.cover) {
+      lines.push(`# Out of office: copy to ${vacation.cover.replace(/[\r\n]/g, '')}\nif allof(${[...when, ...notBulk].join(', ')}) {\n  redirect :copy ${str(vacation.cover)};\n}`);
+    }
+    const reply = (msg, subject, handle) => `vacation :days 1 :handle ${str(handle)} :subject ${str(subject || 'Out of office')} :addresses [${str(me)}] ${multiline(msg)};`;
+    const internal = vacation.internalMessage && inOrg ? vacation.internalMessage : null;
+    const external = vacation.onlyOrg ? null : vacation.message;
+    if (internal || external) {
+      req.add('vacation');
+      const branches = [];
+      if (internal) branches.push(`if allof(${[...when, ...notBulk, inOrg].join(', ')}) {\n  ${reply(internal, vacation.subject, 'ooo-in')}\n}`);
+      const extTests = [...when, ...notBulk];
+      if (vacation.onlyOrg && inOrg && !internal) extTests.push(inOrg);
+      const extMsg = vacation.onlyOrg ? (internal ? null : vacation.message) : external;
+      if (extMsg) branches.push(`${internal ? 'elsif' : 'if'} allof(${extTests.join(', ')}) {\n  ${reply(extMsg, vacation.subject, 'ooo-out')}\n}`);
+      if (branches.length) lines.push(branches.join(' '));
+    }
   }
   for (const r of (rules || []).filter((x) => x.enabled !== false)) {
     const tests = (r.conditions || []).map(cond).filter(Boolean);
@@ -77,17 +92,45 @@ async function sync(user) {
 export const mailtools = express.Router();
 mailtools.use(requireAuth);
 
-mailtools.get('/vacation', async (req, res) => res.json(await userSetting(req.user.email, 'vacation', { enabled: false, subject: 'Out of office', message: '', start: '', end: '', onlyOrg: false })));
+const VAC_DEFAULT = { enabled: false, subject: 'Out of office', message: '', internalMessage: '', start: '', end: '', onlyOrg: false, cover: '', coverName: '', forwardToCover: false, showColleagues: true };
+const today = () => new Date().toISOString().slice(0, 10);
+export const vacationActive = (v) => !!(v?.enabled && (!v.start || today() >= v.start) && (!v.end || today() <= v.end));
+const vacOut = (v) => ({ ...VAC_DEFAULT, ...v, activeNow: vacationActive(v) });
+
+mailtools.get('/vacation', async (req, res) => res.json(vacOut(await userSetting(req.user.email, 'vacation', VAC_DEFAULT))));
 mailtools.put('/vacation', wrap(async (req, res) => {
   const b = req.body;
   const date = (d) => (/^\d{4}-\d{2}-\d{2}$/.test(d || '') ? d : '');
+  const cover = String(b.cover || '').trim().toLowerCase().slice(0, 254);
+  if (cover && !/^[^\s@<>"]{1,64}@[^\s@<>".]{1,63}(?:\.[^\s@<>".]{1,63}){1,8}$/.test(cover)) throw fail(400, 'Check the email address of the person covering for you');
+  if (cover === req.user.email.toLowerCase()) throw fail(400, 'Pick someone else to cover for you');
   const v = { enabled: !!b.enabled, subject: String(b.subject || 'Out of office').slice(0, 200), message: String(b.message || '').slice(0, 5000),
-    start: date(b.start), end: date(b.end), onlyOrg: !!b.onlyOrg };
-  if (v.enabled && !v.message.trim()) throw fail(400, 'Write the message people will receive');
+    internalMessage: String(b.internalMessage || '').slice(0, 5000), start: date(b.start), end: date(b.end), onlyOrg: !!b.onlyOrg,
+    cover, coverName: String(b.coverName || '').slice(0, 120), forwardToCover: !!(b.forwardToCover && cover), showColleagues: b.showColleagues !== false };
+  if (v.start && v.end && v.end < v.start) throw fail(400, 'The end date is before the start date');
+  if (v.enabled && !v.message.trim() && !v.internalMessage.trim()) throw fail(400, 'Write the message people will receive');
+  if (v.forwardToCover) await assertForwardAllowed(req.user.email, [cover]);
   await setUserSetting(req.user.email, 'vacation', v);
   await sync(req.user);
-  await audit(req.user.email, null, v.enabled ? 'vacation.on' : 'vacation.off');
-  res.json(v);
+  await audit(req.user.email, null, v.enabled ? 'vacation.on' : 'vacation.off', v.forwardToCover ? { cover } : undefined);
+  res.json(vacOut(v));
+}));
+
+// Colleagues who are away: shown under the To line while writing. Only people in your own company, only when they
+// chose to show it, and only the return date and who to contact (never their message).
+mailtools.get('/ooo', wrap(async (req, res) => {
+  const emails = [...new Set(String(req.query.emails || '').toLowerCase().split(',').map((x) => x.trim()).filter(Boolean))].slice(0, 30);
+  const k = await accountKind(req.user.email);
+  if (!k.business || !emails.length) return res.json({ away: [] });
+  const domains = new Set((await q.all("SELECT domain FROM domains WHERE org_id = ? AND status = 'active'", k.orgId)).map((d) => d.domain));
+  const away = [];
+  for (const e of emails) {
+    if (!domains.has(e.split('@')[1]) || e === req.user.email.toLowerCase()) continue;
+    const v = await userSetting(e, 'vacation', null);
+    if (!vacationActive(v) || v.showColleagues === false) continue;
+    away.push({ email: e, until: v.end || null, cover: v.cover || null, coverName: v.coverName || null });
+  }
+  res.json({ away });
 }));
 
 /** Free accounts can't auto-forward; business users only inside the company unless an admin allows external. */

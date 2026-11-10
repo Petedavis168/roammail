@@ -261,11 +261,12 @@ signatures.post('/admin/orgs/:id/signature/preview', wrap(async (req, res) => {
 
 // ---------------------------------------------------------------- templates (canned replies)
 // Personal templates for everyone, plus company templates that business admins share with all staff.
-const cleanTemplates = (list) => (Array.isArray(list) ? list : []).slice(0, 50).map((t) => ({
+const cleanTemplates = (list) => (Array.isArray(list) ? list : []).slice(0, 100).map((t) => ({
   id: /^[\w-]{1,40}$/.test(t.id) ? t.id : crypto.randomBytes(6).toString('hex'),
   name: String(t.name || 'Template').slice(0, 80),
   subject: String(t.subject || '').slice(0, 200),
   html: cleanHtml(t.html),
+  category: String(t.category || '').slice(0, 40),
 }));
 signatures.get('/templates', wrap(async (req, res) => {
   const orgId = await orgIdForEmail(req.user.email);
