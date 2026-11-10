@@ -21,7 +21,7 @@ import { checkSendQuota } from './abuse.js';
 
 const wrap = (fn) => (req, res, next) => Promise.resolve(fn(req, res, next)).catch(next);
 const fail = (status, message) => Object.assign(new Error(message), { status, expose: true });
-const EMAIL_RE = /^[^\s@<>"]+@[^\s@<>"]+\.[^\s@<>"]+$/;
+const EMAIL_RE = /^[^\s@<>"]{1,64}@[^\s@<>".]{1,63}(?:\.[^\s@<>".]{1,63}){1,8}$/; // no backtracking blow-up on long input
 const RECEIPTS_FOLDER = 'Receipts';
 const lastScan = new Map(); // email -> time
 const bare = (id) => String(id || '').trim().replace(/^<|>$/g, '');
