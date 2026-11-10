@@ -4,17 +4,25 @@ import { api } from '../api.js';
 import { escapeHtml } from '../util.js';
 import { nativeFrameLinks } from '../native.js';
 import { t } from '../i18n.js';
+import { isTrackerImage, cleanLink, trackerHost } from '../trackers.js';
 
 // Render an email safely: sanitized HTML in a sandboxed iframe (no scripts),
 // remote images blocked until the user allows them (privacy / tracking pixels).
 export function prepareHtml(msg, allowRemote, disableLinks) {
   let blocked = 0;
+  const trackers = { pixels: [], links: 0 }; // removed always, even when pictures are shown
   const cidMap = Object.fromEntries((msg.attachments || []).filter((a) => a.cid).map((a) => [a.cid, api.attachmentUrl(msg.folder, msg.uid, a.index, true)]));
   const source = msg.html || `<pre style="white-space:pre-wrap;font-family:inherit;margin:0">${quoteText(linkify(escapeHtml(msg.text || '')))}</pre>`;
 
   DOMPurify.addHook('afterSanitizeAttributes', (node) => {
+    if (node.tagName === 'IMG' && isTrackerImage(node, node.getAttribute('src'))) {
+      trackers.pixels.push(trackerHost(node.getAttribute('src')));
+      node.removeAttribute('src'); node.removeAttribute('srcset'); node.setAttribute('style', 'display:none');
+      return;
+    }
     if (node.tagName === 'A') {
       node.setAttribute('target', '_blank'); node.setAttribute('rel', 'noopener noreferrer');
+      if (node.hasAttribute('href')) { const [clean, n] = cleanLink(node.getAttribute('href')); if (n) { node.setAttribute('href', clean); trackers.links += 1; } }
       if (disableLinks && node.hasAttribute('href')) {
         node.setAttribute('title', `Link disabled because this message is in Junk: ${node.getAttribute('href')}`);
         node.removeAttribute('href');
@@ -39,7 +47,7 @@ export function prepareHtml(msg, allowRemote, disableLinks) {
     clean = clean.replace(/(<style[^>]*>)([\s\S]*?)(<\/style>)/gi, (m, a, css, c) => a + css.replace(/(["'])\s*(?:https?:)?\/\/[^"']*\1/gi, () => { blocked++; return '""'; }) + c);
     clean = clean.replace(/style="([^"]*)"/gi, (m, css) => `style="${css.replace(/(&quot;|')\s*(?:https?:)?\/\/.*?\1/gi, () => { blocked++; return "''"; })}"`);
   }
-  return { html: clean, blocked };
+  return { html: clean, blocked, trackers };
 }
 
 // Plain text: the trailing "On … wrote:" + "> …" block becomes a quote that starts collapsed
@@ -81,11 +89,12 @@ const BASE_CSS = `<style>
   table{max-width:100%}
 </style>`;
 
-export default function MessageBody({ msg, allowRemote, onBlocked, disableLinks }) {
+export default function MessageBody({ msg, allowRemote, onBlocked, onTrackers, disableLinks }) {
   const ref = useRef();
   const [height, setHeight] = useState(120);
-  const { html, blocked } = useMemo(() => prepareHtml(msg, allowRemote, disableLinks), [msg, allowRemote, disableLinks]);
+  const { html, blocked, trackers } = useMemo(() => prepareHtml(msg, allowRemote, disableLinks), [msg, allowRemote, disableLinks]);
   useEffect(() => { onBlocked?.(blocked); }, [blocked, onBlocked]);
+  useEffect(() => { onTrackers?.(trackers); }, [trackers, onTrackers]);
 
   const srcDoc = html.replace(/<head>/i, `<head><base target="_blank">${BASE_CSS}`);
 

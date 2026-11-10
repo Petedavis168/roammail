@@ -114,6 +114,9 @@ jobs:
       - name: Booking page tests
         working-directory: server
         run: npm run test:booking
+      - name: Privacy tests (subscriptions, aliases, trackers, look-alikes)
+        working-directory: server
+        run: npm run test:privacy
 
       - name: Logs on failure
         if: failure()

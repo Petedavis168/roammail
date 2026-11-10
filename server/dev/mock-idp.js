@@ -8,6 +8,7 @@ const PORT = Number(process.env.MOCK_IDP_PORT || 8095);
 const BASE = `http://127.0.0.1:${PORT}`;
 const SECRETS = { 'ms-client': 'ms-secret', 'google-client': 'google-secret' };
 let next = null;
+const unsubs = [];
 const codes = new Map();
 const b64 = (o) => Buffer.from(JSON.stringify(o)).toString('base64url');
 
@@ -15,6 +16,8 @@ http.createServer((req, res) => {
   let body = ''; req.on('data', (c) => { body += c; }); req.on('end', () => {
     const u = new URL(req.url, BASE);
     const json = (s, o) => { res.writeHead(s, { 'Content-Type': 'application/json' }); res.end(JSON.stringify(o)); };
+    if (u.pathname.startsWith('/unsub/') && req.method === 'POST') { unsubs.push({ path: u.pathname, body }); return json(200, { ok: true }); } // one-click unsubscribe stand-in
+    if (u.pathname === '/test/unsubs') return json(200, unsubs);
     if (u.pathname === '/test/next' && req.method === 'POST') { next = JSON.parse(body || '{}').claims || null; return json(200, { ok: true }); }
     const ms = u.pathname.startsWith('/ms/');
     if (u.pathname === '/ms/organizations/oauth2/v2.0/authorize' || u.pathname === '/google/o/oauth2/v2/auth') {

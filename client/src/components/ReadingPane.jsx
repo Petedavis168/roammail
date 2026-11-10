@@ -17,6 +17,11 @@ function SecurityBanner({ m, sender, orgDomains }) {
   if (sec.dmarc === 'fail') issues.push(`This message claims to be from ${sender.address?.split('@')[1]} but failed the domain's own authenticity check.`);
   else if (sec.spf === 'fail' && sec.dkim !== 'pass') issues.push('We couldn\'t confirm this message really came from the sender\'s domain.');
   if (sec.spoofedName) issues.push(`The sender's name shows a different email address than the one it was really sent from (${sender.address}).`);
+  const la = sec.lookalike;
+  if (la?.reason === 'similar-domain') issues.unshift(`⚠ This is from ${la.domain}, which looks like ${la.real} but isn't. It may be pretending to be ${la.brand[0].toUpperCase()}${la.brand.slice(1)}.`);
+  else if (la?.reason === 'brand-in-domain') issues.unshift(`⚠ This is from ${la.domain}, which uses a company's name but isn't that company's real address (${la.real}).`);
+  else if (la?.reason === 'brand-name') issues.unshift(`⚠ The sender calls themselves "${sender.name}" but wrote from ${la.domain}, not from ${la.real}.`);
+  else if (la?.reason === 'unusual-characters') issues.unshift(`⚠ The sender's address (${la.domain}) uses look-alike characters from other alphabets.`);
   if (sec.replyToDiffers) issues.push(`Replies will go to ${m.replyTo?.[0]?.address}, not to ${sender.address}.`);
   if (orgDomains.length && orgDomains.some((d) => sender.address?.toLowerCase().endsWith(`@${d}`)) && (sec.spf === 'fail' || sec.dmarc === 'fail')) {
     issues.unshift('⚠ This looks like it is from your own organization, but it was not sent from our servers. It may be a phishing attempt.');
@@ -89,6 +94,8 @@ function ThreadMessage({ m, expanded, onToggle, onReply, prefs, setPrefs, last, 
   const trusted = prefs.showImages === 'always' || prefs.trustedSenders.includes(sender.address?.toLowerCase());
   const [allow, setAllow] = useState(trusted);
   const [blocked, setBlocked] = useState(0);
+  const [trackers, setTrackers] = useState({ pixels: [], links: 0 });
+  const [showTrackers, setShowTrackers] = useState(false);
   const [details, setDetails] = useState(false);
   const [menu, setMenu] = useState(false);
   const files = (m.attachments || []).filter((a) => !a.inline);
@@ -113,7 +120,7 @@ function ThreadMessage({ m, expanded, onToggle, onReply, prefs, setPrefs, last, 
         <div className="who">
           <div><b>{personName(sender)}</b> <span className="muted">&lt;{sender.address}&gt;</span>
             {external && <span className="ext-tag" title={t("This message came from outside your organization")}>{t("External")}</span>}
-            {m.security?.dkim === 'pass' && m.security?.dmarc === 'pass' && <span className="verified" title={t("Sender's domain verified (DKIM + DMARC)")}><Icon name="lock" size={12} /></span>}
+            {m.security?.dkim === 'pass' && m.security?.dmarc === 'pass' && !m.security?.lookalike && <span className="verified" title={t("Sender's domain verified (DKIM + DMARC)")}><Icon name="check" size={11} /> {t("Verified")}</span>}
           </div>
           <div className="muted small" onClick={(e) => { e.stopPropagation(); setDetails((d) => !d); }} style={{ cursor: 'pointer' }}>
             to {[...(m.to || []), ...(m.cc || [])].map((a) => (a.address?.toLowerCase() === me?.email?.toLowerCase() ? 'me' : personName(a))).join(', ') || 'undisclosed recipients'} <Icon name="down" size={12} />
@@ -165,9 +172,21 @@ function ThreadMessage({ m, expanded, onToggle, onReply, prefs, setPrefs, last, 
           <button className="link" onClick={() => { setAllow(true); setPrefs((p) => ({ trustedSenders: [...new Set([...p.trustedSenders, sender.address?.toLowerCase()])] })); }}>{t("Always show from")}{' '}{sender.address}</button>
         </div>
       )}
+      {(trackers.pixels.length > 0 || trackers.links > 0) && (
+        <div className="trk-banner">
+          <Icon name="shield" size={15} />{' '}
+          <button className="link" onClick={() => setShowTrackers((x) => !x)} aria-expanded={showTrackers}>
+            {trackers.pixels.length + trackers.links} {trackers.pixels.length + trackers.links === 1 ? 'tracker' : 'trackers'} blocked
+          </button>
+          {showTrackers && <div className="small muted">
+            {trackers.pixels.length > 0 && <div>{trackers.pixels.length} hidden {trackers.pixels.length === 1 ? 'image' : 'images'} that report when you open this email{[...new Set(trackers.pixels.filter(Boolean))].length ? ` (${[...new Set(trackers.pixels.filter(Boolean))].slice(0, 4).join(', ')})` : ''}</div>}
+            {trackers.links > 0 && <div>Tracking codes removed from {trackers.links} {trackers.links === 1 ? 'link' : 'links'}</div>}
+          </div>}
+        </div>
+      )}
       {unsubUrl && <div className="unsub">{t("Mailing list ·")}{' '}<a href={unsubUrl} target="_blank" rel="noreferrer">{t("Unsubscribe")}</a></div>}
       <div className="tmsg-body" data-msg={`${m.folder}:${m.uid}`}>
-        <MessageBody msg={m} allowRemote={allow && !isJunk} onBlocked={setBlocked} disableLinks={isJunk} />
+        <MessageBody msg={m} allowRemote={allow && !isJunk} onBlocked={setBlocked} onTrackers={setTrackers} disableLinks={isJunk} />
       </div>
       {files.length > 0 && (
         <div className="attachments">

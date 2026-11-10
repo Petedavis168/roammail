@@ -9,6 +9,7 @@ import { requireAuth, revokeSessions, clearSession } from './session.js';
 import { makeClient, closeClient } from './imap.js';
 import { mailcow } from './mailcow.js';
 import { accountKind } from './abuse.js';
+import { deleteAliasesFor } from './aliases.js';
 
 const wrap = (fn) => (req, res, next) => Promise.resolve(fn(req, res, next)).catch(next);
 const fail = (status, message) => Object.assign(new Error(message), { status });
@@ -98,6 +99,7 @@ privacy.post('/account/delete', wrap(async (req, res) => {
   const owns = await q.get('SELECT 1 FROM orgs WHERE owner_email = ?', req.user.email);
   if (owns) throw fail(400, 'You own a business on this service. Transfer or remove it first (Admin → Domains).');
   await closeClient(req.user.sid);
+  await deleteAliasesFor(req.user.email).catch(() => {}); // hide-my-email aliases go with the mailbox
   await mailcow.deleteMailbox(req.user.email);
   const e = req.user.email;
   for (const t of ['user_security', 'user_settings', 'user_signatures', 'profiles', 'jobs', 'password_resets', 'setup_tokens', 'tasks', 'notes', 'followups']) await q.run(`DELETE FROM ${t} WHERE email = ?`, e);

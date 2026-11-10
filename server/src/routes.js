@@ -13,6 +13,7 @@ import { setupState } from './setup.js';
 import { count, gauge } from './ops.js';
 import { getClient, closeClient, withMailbox, specialFolder, makeClient, userTransport } from './imap.js';
 import { parseQuery } from './search.js';
+import { lookalike } from './lookalike.js';
 import { rolesFor, q, twoFactorPolicy } from './db.js';
 import { applyEnforcedSignature } from './signatures.js';
 import { spamInfo } from './spam.js';
@@ -261,6 +262,7 @@ function senderSecurity(parsed) {
     spf: pick('spf'), dkim: pick('dkim'), dmarc: pick('dmarc'),
     spoofedName: !!(nameAddr && nameAddr !== from.address?.toLowerCase()),
     replyToDiffers: !!(replyTo && fromDomain && replyTo.split('@')[1] !== fromDomain),
+    lookalike: lookalike(from.address, from.name), // pretending to be a well-known company?
     spam,
   };
 }

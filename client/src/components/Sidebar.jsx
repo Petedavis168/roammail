@@ -5,7 +5,7 @@ import { folderIcon, folderLabel, SPECIAL_ORDER } from '../util.js';
 import { useToast } from './Toast.jsx';
 import { t } from '../i18n.js';
 
-export default function Sidebar({ folders, current, onSelect, onCompose, reload, onDropMessages, categories, onCategory, onScheduled, onQuarantine, qCount, me, mailboxes = [], mailbox = '', onMailbox, mode = 'full', width = 240, onResizeStart, overlay, allInboxes = null, onAllInboxes }) {
+export default function Sidebar({ folders, current, onSelect, onCompose, reload, onDropMessages, categories, onCategory, onScheduled, onQuarantine, onSubscriptions, onAliases, qCount, me, mailboxes = [], mailbox = '', onMailbox, mode = 'full', width = 240, onResizeStart, overlay, allInboxes = null, onAllInboxes }) {
   const toast = useToast();
   const [collapsed, setCollapsed] = useState(() => JSON.parse(localStorage.getItem('collapsed') || '{}'));
   const [dragOver, setDragOver] = useState(null);
@@ -99,6 +99,16 @@ export default function Sidebar({ folders, current, onSelect, onCompose, reload,
           <span className="twisty" /><Icon name="clock" /><span className="fname">{t("Scheduled")}</span>
         </div>
         {snoozedFolder && <Row f={snoozedFolder} />}
+        {onSubscriptions && (
+          <div className={`folder ${current === '@subscriptions' ? 'on' : ''}`} style={{ paddingLeft: 10 }} onClick={onSubscriptions} role="button" tabIndex={0} title={t("Subscriptions")}>
+            <span className="twisty" /><Icon name="list" /><span className="fname">{t("Subscriptions")}</span>
+          </div>
+        )}
+        {onAliases && (
+          <div className={`folder ${current === '@aliases' ? 'on' : ''}`} style={{ paddingLeft: 10 }} onClick={onAliases} role="button" tabIndex={0} title={t("Aliases")}>
+            <span className="twisty" /><Icon name="shield" /><span className="fname">{t("Aliases")}</span>
+          </div>
+        )}
         {!specials.some((f) => f.specialUse === '\\Junk') && (
           <div className={`folder ${current === '@quarantine' ? 'on' : ''}`} style={{ paddingLeft: 10 }} onClick={onQuarantine} role="button" tabIndex={0}>
             <span className="twisty" /><Icon name="shield" /><span className="fname">{t("Quarantine")}</span>{qCount > 0 && <span className="count muted">{qCount}</span>}
