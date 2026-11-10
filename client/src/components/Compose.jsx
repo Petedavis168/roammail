@@ -6,7 +6,7 @@ import RecipientInput from './RecipientInput.jsx';
 import { useToast } from './Toast.jsx';
 import { signatureHtml, defaultChoice } from '../signatures.js';
 import { safeHtml, onSafePaste } from '../safehtml.js';
-import { presets, fmtWhen, localInputValue } from '../snooze.js';
+import { presets, fmtWhen, localInputValue, bestSendTime } from '../snooze.js';
 import { queue, flushOutbox, isOffline } from '../outbox.js';
 import { offlineAllowed } from '../api.js';
 import { t as tr } from '../i18n.js';
@@ -125,6 +125,14 @@ function Composer({ c, me, prefs, sigData, identities, onClose, onSend, focusInd
     markDirty();
   };
   const [sendMenu, setSendMenu] = useState(false);
+  // Send at the best time for the first person on the To line (from when they usually write to you)
+  const [best, setBest] = useState(null);
+  const firstTo = to[0]?.address?.toLowerCase() || '';
+  useEffect(() => {
+    if (!sendMenu || !firstTo || best?.email === firstTo) return;
+    api.get('/api/people/activity', { email: firstTo }).then((r) => setBest({ email: firstTo, name: to[0]?.name || firstTo.split('@')[0], ...bestSendTime(r.times) }))
+      .catch(() => setBest({ email: firstTo, name: to[0]?.name || firstTo.split('@')[0], ...bestSendTime([]) }));
+  }, [sendMenu, firstTo]);
   const [pickTime, setPickTime] = useState(false);
   const [customTime, setCustomTime] = useState(() => localInputValue(new Date(Date.now() + 3600e3)));
   const sig = sigBlock(signatureHtml(sigData, sigChoice));
@@ -314,6 +322,14 @@ function Composer({ c, me, prefs, sigData, identities, onClose, onSend, focusInd
             {sendMenu && (
               <div className="menu up" onMouseLeave={() => { setSendMenu(false); setPickTime(false); }}>
                 <div className="menu-head"><b>{tr("Schedule send")}</b></div>
+                {firstTo && best?.email === firstTo && (
+                  <button className="best-time" onClick={() => { setSendMenu(false); send(best.at); }}>
+                    <Icon name="spark" size={15} /> <span><b>{tr('Best time for')} {best.name.split(' ')[0]}</b>
+                      <small>{best.usual ? `${tr('They usually email around')} ${new Date(2000, 0, 1, best.hour).toLocaleTimeString([], { hour: 'numeric' })}` : tr('A weekday morning, when most email gets read')}</small></span>
+                    <small className="muted right">{fmtWhen(best.at)}</small>
+                  </button>
+                )}
+                {firstTo && best?.email !== firstTo && <div className="menu-note">{tr('Working out the best time…')}</div>}
                 {presets('send').map(([l, d]) => (
                   <button key={l} onClick={() => { setSendMenu(false); send(d.getTime()); }}>{l}<small className="muted right">{fmtWhen(d)}</small></button>
                 ))}

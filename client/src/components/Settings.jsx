@@ -4,6 +4,7 @@ import Booking from './settings/Booking.jsx';
 import Signatures from './settings/Signatures.jsx';
 import Templates from './settings/Templates.jsx';
 import { NudgeSettings } from './Nudges.jsx';
+import { SWIPE_ACTIONS } from '../swipe.js';
 import { pushState, enablePush, disablePush } from '../push.js';
 
 function PushToggle() {
@@ -68,6 +69,8 @@ function General({ prefs, setPrefs, me }) {
       <label className="row-field">{t("Density")}{' '}<select value={prefs.density} onChange={set('density')}><option value="comfortable">{t("Comfortable")}</option><option value="compact">{t("Compact")}</option></select></label>
       <label className="check"><input type="checkbox" checked={prefs.conversation} onChange={set('conversation')} />{' '}{t("Conversation view (group replies together)")}</label>
       <label className="check"><input type="checkbox" checked={prefs.inboxTabs !== false} onChange={set('inboxTabs')} />{' '}{t("Inbox tabs: Primary, Updates and Newsletters")}</label>
+      <label className="row-field">{t("Swipe left on a message (phones)")}{' '}<select value={prefs.swipeLeft || 'archive'} onChange={set('swipeLeft')}>{SWIPE_ACTIONS.map(([k, l]) => <option key={k} value={k}>{t(l)}</option>)}</select></label>
+      <label className="row-field">{t("Swipe right on a message (phones)")}{' '}<select value={prefs.swipeRight || 'read'} onChange={set('swipeRight')}>{SWIPE_ACTIONS.map(([k, l]) => <option key={k} value={k}>{t(l)}</option>)}</select></label>
       <h3>{t("Writing")}</h3>
       <label className="row-field">{t("Your name (shown to recipients)")}<input value={prefs.displayName} placeholder={me.name || me.email} onChange={set('displayName')} /></label>
       <label className="row-field">{t("Undo send")}{' '}<select value={prefs.undoSeconds} onChange={set('undoSeconds')}>

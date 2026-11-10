@@ -45,6 +45,7 @@ const P = {
   list: 'M9 6h12M9 12h12M9 18h12M4 6h.01M4 12h.01M4 18h.01',
   bell: 'M6 16V11a6 6 0 1 1 12 0v5l2 2H4zM10 20a2 2 0 0 0 4 0',
   square: 'M5 5h14v14H5z',
+  download: 'M12 3v12M7 10l5 5 5-5M5 21h14',
   mic: 'M12 3a3 3 0 0 1 3 3v6a3 3 0 0 1-6 0V6a3 3 0 0 1 3-3zM5 11a7 7 0 0 0 14 0M12 18v3M9 21h6',
   play: 'M7 4l13 8-13 8z',
   stop: 'M6 6h12v12H6z',

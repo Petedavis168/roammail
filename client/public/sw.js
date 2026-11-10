@@ -6,13 +6,14 @@
 //  - push notifications for new mail (web; the phone apps use native push)
 // Everything saved is deleted when you sign out ({type: 'signout'} message) or the server says you're signed out.
 const SHELL = 'shell-v2';
+const SHARE = 'share-v1'; // something shared to Roammail from another app, until the app picks it up
 const DATA = 'mail-v2';
 const MAX_DATA = 300; // saved API answers
 const OFFLINE_API = /^\/api\/(me|folders|messages|message|thread|accounts|identities|signup\/config|ai\/status|premium|push\/key)(\/|$|\?)/;
 
 self.addEventListener('install', (e) => self.skipWaiting());
 self.addEventListener('activate', (e) => e.waitUntil((async () => {
-  for (const k of await caches.keys()) if (![SHELL, DATA].includes(k)) await caches.delete(k);
+  for (const k of await caches.keys()) if (![SHELL, DATA, SHARE].includes(k)) await caches.delete(k);
   await self.clients.claim();
 })()));
 
@@ -29,6 +30,21 @@ async function trim() {
 self.addEventListener('fetch', (e) => {
   const req = e.request;
   const url = new URL(req.url);
+  // "Share" → Roammail from another app (photos, files, links): keep it for a moment and open a new email with it
+  if (req.method === 'POST' && url.origin === self.location.origin && url.pathname === '/share-target') {
+    e.respondWith((async () => {
+      try {
+        const form = await req.formData();
+        const c = await caches.open(SHARE);
+        for (const k of await c.keys()) await c.delete(k);
+        const files = form.getAll('files').filter((f) => f && typeof f === 'object' && f.size <= 25 * 1024 * 1024).slice(0, 10);
+        await c.put('/share/meta', new Response(JSON.stringify({ title: String(form.get('title') || '').slice(0, 300), text: String(form.get('text') || '').slice(0, 5000), url: String(form.get('url') || '').slice(0, 2000), files: files.map((f, i) => ({ i, name: f.name, type: f.type })), at: Date.now() })));
+        await Promise.all(files.map((f, i) => c.put(`/share/file/${i}`, new Response(f, { headers: { 'Content-Type': f.type || 'application/octet-stream' } }))));
+      } catch { /* open the app anyway */ }
+      return Response.redirect('/app?share=1', 303);
+    })());
+    return;
+  }
   if (req.method !== 'GET' || url.origin !== self.location.origin) return;
 
   // Pages: network first, then the saved app page (the app shows whatever mail it has saved)
@@ -77,7 +93,7 @@ self.addEventListener('message', (e) => {
   // only from Roammail's own pages (service workers get an empty e.origin, so check the sending page)
   let from = ''; try { from = new URL(e.source?.url || '').origin; } catch { return; }
   if (from !== self.location.origin) return;
-  if (e.data?.type === 'signout') e.waitUntil(Promise.all([caches.delete(DATA), caches.delete(SHELL)]));
+  if (e.data?.type === 'signout') e.waitUntil(Promise.all([caches.delete(DATA), caches.delete(SHELL), caches.delete(SHARE)]));
   if (e.data?.type === 'shell') e.waitUntil(keepShell(e.source?.id).catch(() => {}));
 });
 

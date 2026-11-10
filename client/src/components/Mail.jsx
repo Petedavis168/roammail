@@ -22,6 +22,8 @@ import SnoozeMenu from './SnoozeMenu.jsx';
 import QuarantineList from './QuarantineList.jsx';
 import SubscriptionsList from './SubscriptionsList.jsx';
 import ScreenerList from './ScreenerList.jsx';
+import ContactCard from './ContactCard.jsx';
+import { installMode as getInstallMode, onInstallChange, promptInstall } from '../install.js';
 import AliasesList from './AliasesList.jsx';
 import CommandBar from './CommandBar.jsx';
 import { TABS as SETTINGS_TABS } from './Settings.jsx';
@@ -51,6 +53,13 @@ export default function Mail({ me, route, refreshMe, theme, setTheme, themePref 
   const mailbox = route.id; // the mailbox ID in the URL
   const [sharedBoxes, setSharedBoxes] = useState([]);
   useEffect(() => { api.get('/api/shared-mailboxes').then(setSharedBoxes).catch(() => {}); }, []);
+  // Contact cards: click any name in an email
+  const [card, setCard] = useState(null);
+  useEffect(() => { const on = (e) => setCard(e.detail); window.addEventListener('roammail:card', on); return () => window.removeEventListener('roammail:card', on); }, []);
+  // Install the app (PWA): the browser's prompt, or how-to on iPhone
+  const [installMode, setInstallMode] = useState(getInstallMode());
+  const [iosInstall, setIosInstall] = useState(false);
+  useEffect(() => onInstallChange(() => setInstallMode(getInstallMode())), []);
   // Screener: how many new people are waiting (badge on the rail; refreshed with the mail)
   const [screenerCount, setScreenerCount] = useState(0);
   const railFolder = folder === '@subscriptions' || folder === '@screener';
@@ -224,17 +233,31 @@ export default function Mail({ me, route, refreshMe, theme, setTheme, themePref 
         }
       });
       es.addEventListener('changed', () => { loadFolders(); if (folderRef.current === 'INBOX') loadRef.current({ quiet: true }); });
-      es.onerror = () => { es.close(); retry = setTimeout(connect, 15000); };
+      es.addEventListener('ready', () => { fails = 0; });
+      // Reconnect quickly (2s, 4s, 8s… up to 30s) so new mail keeps arriving after a network blip
+      es.onerror = () => { es.close(); clearTimeout(retry); retry = setTimeout(connect, Math.min(30000, 2000 * 2 ** fails++)); };
     };
+    let fails = 0;
     connect();
+    // Back on the app (phone unlocked, tab focused, network back): reconnect and check for mail straight away
+    let lastWake = 0;
+    const wake = () => {
+      if (document.hidden || Date.now() - lastWake < 10000) return;
+      lastWake = Date.now();
+      if (!es || es.readyState === 2) { clearTimeout(retry); fails = 0; connect(); }
+      loadFolders(); if (folderRef.current === 'INBOX') loadRef.current({ quiet: true });
+    };
+    document.addEventListener('visibilitychange', wake); window.addEventListener('online', wake); window.addEventListener('focus', wake);
     if ('Notification' in window && Notification.permission === 'default') Notification.requestPermission().catch(() => {});
-    return () => { es?.close(); clearTimeout(retry); };
+    return () => { es?.close(); clearTimeout(retry); document.removeEventListener('visibilitychange', wake); window.removeEventListener('online', wake); window.removeEventListener('focus', wake); };
   }, [loadFolders, prefs.notifications, mailbox]);
 
   // Page title with unread count
   useEffect(() => {
     const inbox = folders.find((f) => f.specialUse === '\\Inbox');
     document.title = `${inbox?.unread ? `(${inbox.unread}) ` : ''}${view === 'admin' ? 'Admin' : folder === '@scheduled' ? 'Scheduled' : folder === '@subscriptions' ? 'Subscriptions' : folder === '@screener' ? 'Screener' : folder === '@aliases' ? 'Aliases' : folder === '@quarantine' ? 'Spam quarantine' : folder === '@all' ? 'All inboxes' : folderLabel(currentFolderObj || { name: 'Inbox' })} - ${me.email}`;
+    // Unread count on the app icon (installed app on Windows, Mac, Android, iPhone)
+    if ('setAppBadge' in navigator) (inbox?.unread ? navigator.setAppBadge(inbox.unread) : navigator.clearAppBadge()).catch(() => {});
   }, [folders, currentFolderObj, me.email, view]);
 
   // ---------- helpers ----------
@@ -358,6 +381,23 @@ export default function Mail({ me, route, refreshMe, theme, setTheme, themePref 
   });
   // Home-screen shortcut "New mail" (/app?compose=1)
   // Also "mailto:" links from the desktop app or the browser (/app?compose=1&mailto=mailto:…)
+  // Shared to Roammail from another app (share sheet): a new email with the link, text and files
+  useEffect(() => {
+    if (new URLSearchParams(location.search).get('share') !== '1' || !('caches' in window)) return;
+    history.replaceState(null, '', location.pathname);
+    (async () => {
+      const c = await caches.open('share-v1');
+      const meta = await (await c.match('/share/meta'))?.json().catch(() => null);
+      if (!meta) { compose({}); return; }
+      const files = [];
+      for (const f of meta.files || []) {
+        const r = await c.match(`/share/file/${f.i}`);
+        if (r) files.push(new File([await r.blob()], f.name || `file-${f.i + 1}`, { type: f.type || 'application/octet-stream' }));
+      }
+      await caches.delete('share-v1');
+      compose({ subject: meta.title || (files.length === 1 ? files[0].name : ''), prefillText: [meta.text, meta.url].filter(Boolean).join('\n'), files });
+    })().catch(() => compose({}));
+  }, []);
   useEffect(() => {
     const p = new URLSearchParams(location.search);
     if (p.get('compose') !== '1') return;
@@ -476,6 +516,7 @@ export default function Mail({ me, route, refreshMe, theme, setTheme, themePref 
               <div className="menu right" onMouseLeave={() => setUserMenu(false)}>
                 <div className="menu-head"><b>{prefs.displayName || me.name || me.email.split('@')[0]}</b><small>{me.email}</small></div>
                 <button onClick={() => { setShowSettings(true); setUserMenu(false); }}><Icon name="settings" />{' '}{t("Settings")}</button>
+                {installMode && <button onClick={async () => { setUserMenu(false); if (installMode === 'ios') setIosInstall(true); else await promptInstall(); }}><Icon name="download" /> {t('Install the Roammail app')}</button>}
                 <div className="menu-note">{t('Appearance')}</div>
                 <div className="theme-pick" role="radiogroup" aria-label={t('Appearance')}>
                   {[['auto', 'phone', 'Device'], ['light', 'sun', 'Light'], ['dark', 'moon', 'Dark']].map(([k, ic, l]) => (
@@ -497,6 +538,27 @@ export default function Mail({ me, route, refreshMe, theme, setTheme, themePref 
           </div>
         </div>
       </header>
+      {card && (
+        <ContactCard person={card.person} anchor={card.anchor} me={me} onClose={() => setCard(null)}
+          onEmail={(p) => compose({ to: [p] })}
+          onMeeting={(p) => { sessionStorage.setItem('calNewWith', JSON.stringify([{ email: p.address, name: p.name }])); setView('calendar'); }}
+          onOpenMessage={(m) => location.assign(`/${route.id}/message/${messageKey(m.folder, m.uid)}`)}
+          onShowAll={(a) => { setView('mail'); setFolder('INBOX'); runSearch(a); }}
+          onBlock={me.delegated ? null : (a) => act.block(a)} />
+      )}
+      {iosInstall && (
+        <div className="modal-wrap" onClick={(e) => e.target === e.currentTarget && setIosInstall(false)}>
+          <div className="modal ios-install" role="dialog" aria-label={t('Install the Roammail app')}>
+            <h3>{t('Add Roammail to your Home Screen')}</h3>
+            <ol>
+              <li>{t('Tap the Share button')} <span className="ios-share" aria-hidden="true">⬆︎</span> {t('at the bottom of Safari')}</li>
+              <li>{t('Scroll down and tap')} <b>{t('Add to Home Screen')}</b></li>
+              <li>{t('Tap')} <b>{t('Add')}</b>. {t('Roammail opens like an app, with notifications and your unread count on the icon.')}</li>
+            </ol>
+            <div className="actions"><button className="btn primary" onClick={() => setIosInstall(false)}>{t('Got it')}</button></div>
+          </div>
+        </div>
+      )}
       {ooo?.activeNow && (
         <div className="ooo-bar" role="status"><Icon name="clock" size={16} />
           <span>{t('Out of office is on')}{ooo.end ? ` ${t('until')} ${new Date(`${ooo.end}T12:00:00`).toLocaleDateString(undefined, { weekday: 'short', day: 'numeric', month: 'short' })}` : ''}. {t('People who email you get your automatic reply.')}</span>
@@ -566,6 +628,11 @@ export default function Mail({ me, route, refreshMe, theme, setTheme, themePref 
                 list={list} title={search ? `Results for "${search}"` : folder === '@all' ? 'All inboxes' : folderLabel(currentFolderObj || { name: folder })}
                 search={search} onClearSearch={clearSearch} isInbox={folder === 'INBOX' && !search} onBump={me.delegated ? null : bump}
                 inboxTab={folder === 'INBOX' && tabsOn && !search ? inboxTab : null} setInboxTab={(x) => { setInboxTab(x); setActive(null); setSelected(new Set()); }}
+                onSwipe={folder === '@all' ? null : (m, side) => {
+                  const what = (side === 'left' ? prefs.swipeLeft : prefs.swipeRight) || (side === 'left' ? 'archive' : 'read');
+                  if (what === 'read') act.read(!m.seen, m.uid); else if (what === 'flag') act.flag(m.uid); else if (act[what]) act[what](m.uid);
+                }}
+                swipe={{ left: prefs.swipeLeft, right: prefs.swipeRight }} onRefresh={() => { loadFolders(); load({ quiet: true }); }}
                 folderUse={currentFolderObj?.specialUse} filter={filter} setFilter={setFilter}
                 selected={selected} setSelected={setSelected} active={active} onOpen={openMessage}
                 act={act} categories={prefs.categories} density={prefs.density} allInboxes={folder === '@all'}

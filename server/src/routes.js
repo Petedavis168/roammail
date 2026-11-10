@@ -19,7 +19,8 @@ import { inboxTabs, TABS } from './inboxtabs.js';
 import { learnRecipients } from './screener.js';
 import { protectEmail, noticeMail, checkSecurePassword } from './secure.js';
 import { rolesFor, q, twoFactorPolicy } from './db.js';
-import { applyEnforcedSignature } from './signatures.js';
+import { applyEnforcedSignature, htmlToText } from './signatures.js';
+import crypto from 'node:crypto';
 import { spamInfo } from './spam.js';
 import { parseInvite } from './calendar.js';
 import { allContacts, directory } from './contacts.js';
@@ -100,6 +101,16 @@ function uidList(uids) {
   const list = (Array.isArray(uids) ? uids : [uids]).map(Number).filter(Boolean);
   if (!list.length) throw Object.assign(new Error('No messages selected'), { status: 400 });
   return list.join(',');
+}
+
+// After-send work (Sent copy, flags, draft) runs one at a time per mailbox, in order, without holding up the reply
+const afterQueues = new Map();
+function afterSend(email, fn) {
+  const prev = afterQueues.get(email) || Promise.resolve();
+  const next = prev.then(fn).catch((e) => console.warn('after-send tasks failed', e.message));
+  afterQueues.set(email, next);
+  next.finally(() => { if (afterQueues.get(email) === next) afterQueues.delete(email); });
+  return next;
 }
 
 function transport(user) {
@@ -462,7 +473,10 @@ function buildMail(user, body, files) {
     bcc: body.bcc || undefined,
     subject: body.subject || '',
     html: body.html || undefined,
-    text: body.text || undefined,
+    // A plain-text version alongside the HTML, and a Message-ID on the sender's own domain: both help mail land
+    // in the inbox rather than spam
+    text: body.text || (body.html ? htmlToText(body.html) : undefined),
+    messageId: `<${crypto.randomUUID()}@${String(address).split('@')[1] || 'localhost'}>`,
     inReplyTo: body.inReplyTo || undefined,
     references: body.references || undefined,
     priority: body.priority || 'normal',
@@ -494,6 +508,10 @@ async function resolveFrom(req) {
 
 api.post('/send', upload.array('attachments'), wrap(async (req, res) => {
   await resolveFrom(req);
+  // A name next to the address ("Casey Adams <casey@…>") reads better and looks less like spam
+  if (!String(req.body.fromName || '').trim() && !req.body._fromAddress) {
+    req.body.fromName = req.user.name || (await q.get('SELECT name FROM profiles WHERE email = ?', req.user.email).catch(() => null))?.name || '';
+  }
   const files = [...(req.files || []), ...(await forwardedAttachments(req.user, req.body))];
   let mail = buildMail(req.user, req.body, files);
   if (!mail.to && !mail.cc && !mail.bcc) return res.status(400).json({ error: 'Add at least one recipient' });
@@ -533,23 +551,29 @@ api.post('/send', upload.array('attachments'), wrap(async (req, res) => {
   count('mail_sent');
   await saveTracked(req.user, mail, rr.track, rcpts).catch((e) => console.warn('receipt tracking failed', e.message));
 
-  // mailcow (Postfix) does not store sent mail itself; append a copy to Sent.
-  try {
-    const sent = await specialFolder(req.user, '\\Sent', { create: true });
-    // your own copy keeps the real content (it's your mailbox), marked so it shows the protection status
-    const raw = await compile(original ? { ...original, messageId: info.messageId, headers: { ...(original.headers || {}), 'X-Roammail-Secure-Id': secure.id } } : { ...mail, messageId: info.messageId });
-    const client = await getClient(req.user);
-    await client.append(sent, raw, ['\\Seen']);
-  } catch (e) { console.warn('Could not save to Sent:', e.message); }
+  // The email is on its way: answer now, and file the Sent copy / flags / draft clean-up right after
+  // (they don't need to hold up the person sending).
+  const after = afterSend(req.user.email, async () => {
+    // mailcow (Postfix) does not store sent mail itself; append a copy to Sent.
+    try {
+      const sent = await specialFolder(req.user, '\\Sent', { create: true });
+      // your own copy keeps the real content (it's your mailbox), marked so it shows the protection status
+      const raw = await compile(original ? { ...original, messageId: info.messageId, headers: { ...(original.headers || {}), 'X-Roammail-Secure-Id': secure.id } } : { ...mail, messageId: info.messageId });
+      const client = await getClient(req.user);
+      await client.append(sent, raw, ['\\Seen']);
+    } catch (e) { console.warn('Could not save to Sent:', e.message); }
 
-  // Mark the original as answered, delete the draft if this came from one
-  if (req.body.replyFolder && req.body.replyUid) {
-    await withMailbox(req.user, req.body.replyFolder, (c) => c.messageFlagsAdd(String(req.body.replyUid), [req.body.forwardUid ? '$Forwarded' : '\\Answered'], { uid: true })).catch(() => {});
-  }
-  if (req.body.draftUid) {
-    const drafts = await specialFolder(req.user, '\\Drafts');
-    if (drafts) await withMailbox(req.user, drafts, (c) => c.messageDelete(String(req.body.draftUid), { uid: true })).catch(() => {});
-  }
+    // Mark the original as answered, delete the draft if this came from one
+    if (req.body.replyFolder && req.body.replyUid) {
+      await withMailbox(req.user, req.body.replyFolder, (c) => c.messageFlagsAdd(String(req.body.replyUid), [req.body.forwardUid ? '$Forwarded' : '\\Answered'], { uid: true })).catch(() => {});
+    }
+    if (req.body.draftUid) {
+      const drafts = await specialFolder(req.user, '\\Drafts');
+      if (drafts) await withMailbox(req.user, drafts, (c) => c.messageDelete(String(req.body.draftUid), { uid: true })).catch(() => {});
+    }
+  });
+  void after;
+
   res.json({ ok: true, messageId: info.messageId, accepted: info.accepted, rejected: info.rejected, secure: secure && { id: secure.id, url: secure.url } });
 }));
 
@@ -574,6 +598,64 @@ async function directoryCached(email) {
   const list = await directory(email); dirCache.set(domain, { at: Date.now(), list }); return list;
 }
 setInterval(() => { const now = Date.now(); for (const [k, v] of contactCache) if (now - v.at > 30 * 60 * 1000) contactCache.delete(k); }, 10 * 60 * 1000).unref();
+// ---------- contact card (click a name): who they are, recent emails both ways, your notes ----------
+api.get('/people/card', wrap(async (req, res) => {
+  const email = String(req.query.email || '').trim().toLowerCase();
+  if (!/^[^\s@<>"]{1,64}@[^\s@<>".]{1,63}(?:\.[^\s@<>".]{1,63}){1,8}$/.test(email)) return res.status(400).json({ error: 'Pick a person' });
+  const [book, dir] = await Promise.all([
+    allContacts(req.user).catch(() => []),
+    directoryCached(req.user.email).catch(() => []),
+  ]);
+  const contact = book.find((c) => (c.emails || []).some((e) => e.value === email)) || null;
+  const coworker = dir.find((p) => p.email === email) || null;
+  // Recent emails: from them (Inbox, Archive) and to them (Sent)
+  const recent = [];
+  let received = 0; let sentCount = 0;
+  const boxes = await (await getClient(req.user)).list();
+  const pick = (use) => boxes.find((b) => b.specialUse === use)?.path;
+  for (const [box, crit, dir2] of [['INBOX', { from: email }, 'in'], [pick('\\Archive'), { from: email }, 'in'], [pick('\\Sent'), { to: email }, 'out']]) {
+    if (!box) continue;
+    try {
+      await withMailbox(req.user, box, async (c) => {
+        const uids = ((await c.search(crit, { uid: true })) || []).sort((a, b) => b - a);
+        if (dir2 === 'in') received += uids.length; else sentCount += uids.length;
+        if (uids.length) for (const m of await fetchSummaries(c, uids.slice(0, 6).join(','), { uid: true })) recent.push({ ...m, folder: box, dir: dir2 });
+      }, { readOnly: true });
+    } catch { /* folder may not exist */ }
+  }
+  recent.sort((a, b) => new Date(b.date) - new Date(a.date));
+  const name = contact?.name || coworker?.name || recent.find((m) => m.dir === 'in' && m.from?.[0]?.name)?.from?.[0]?.name || (recent.length ? (await q.get('SELECT name FROM profiles WHERE email = ?', email).catch(() => null))?.name : '') || ''; // their profile name only if you've emailed each other
+  const notes = await q.all('SELECT id, body, updated_at FROM notes WHERE email = ? AND contact = ? ORDER BY updated_at DESC LIMIT 3', req.user.email, email).catch(() => []);
+  res.json({
+    email, name,
+    title: coworker?.title || contact?.title || '', company: contact?.company || (coworker ? 'Your company' : ''), department: coworker?.department || '',
+    phones: [...(contact?.phones || []).map((p) => ({ value: p.value, type: p.type })), ...(coworker?.phone ? [{ value: coworker.phone, type: 'work' }] : []), ...(coworker?.mobile ? [{ value: coworker.mobile, type: 'mobile' }] : [])].slice(0, 4),
+    address: contact?.address || null, birthday: contact?.birthday || '',
+    inContacts: !!contact, contactHref: contact?.href || null, coworker: !!coworker,
+    stats: { received, sent: sentCount, first: recent.length ? recent[recent.length - 1].date : null, last: recent[0]?.date || null },
+    recent: recent.slice(0, 6).map((m) => ({ uid: m.uid, folder: m.folder, subject: m.subject, date: m.date, dir: m.dir, attachments: !!m.hasAttachments })),
+    notes: notes.map((n) => ({ id: n.id, body: String(n.body).slice(0, 400), updatedAt: n.updated_at })),
+  });
+}));
+
+// When does this person usually write? (times of their recent emails, for "send at the best time")
+api.get('/people/activity', wrap(async (req, res) => {
+  const email = String(req.query.email || '').trim().toLowerCase();
+  if (!/^[^\s@<>"]{1,64}@[^\s@<>".]{1,63}(?:\.[^\s@<>".]{1,63}){1,8}$/.test(email)) return res.status(400).json({ error: 'Pick a person' });
+  const times = [];
+  const boxes = await (await getClient(req.user)).list();
+  for (const box of ['INBOX', boxes.find((b) => b.specialUse === '\\Archive')?.path].filter(Boolean)) {
+    try {
+      await withMailbox(req.user, box, async (c) => {
+        const uids = ((await c.search({ from: email, since: new Date(Date.now() - 180 * 864e5) }, { uid: true })) || []).sort((a, b) => b - a).slice(0, 300);
+        if (!uids.length) return;
+        for await (const m of c.fetch(uids.join(','), { uid: true, internalDate: true }, { uid: true })) times.push(new Date(m.internalDate).getTime());
+      }, { readOnly: true });
+    } catch { /* no such folder */ }
+  }
+  res.json({ email, times: times.sort((a, b) => b - a).slice(0, 300) });
+}));
+
 api.get('/contacts', wrap(async (req, res) => {
   const key = req.user.sid;
   let cached = contactCache.get(key);

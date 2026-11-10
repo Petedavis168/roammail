@@ -1458,3 +1458,62 @@ a { color: var(--accent); }
 .voice-time { font: 600 18px/1 var(--font); display: flex; align-items: center; gap: 8px; font-variant-numeric: tabular-nums; }
 .voice-dot { width: 9px; height: 9px; border-radius: 50%; background: #dc2626; }
 .voice-audio { width: 100%; }
+
+/* ---------- Phone gestures: swipe rows, pull to refresh */
+.rows { overscroll-behavior-y: contain; }
+.row.swiping { position: relative; overflow: hidden; background: #64748b; }
+.row.swiping > * { transform: translateX(var(--dx)); transition: none; }
+.row.swiping::before { content: attr(data-swipe-label); position: absolute; top: 0; bottom: 0; display: flex; align-items: center; color: #fff; font-weight: 700; font-size: 14px; padding: 0 20px; }
+.row.swipe-left::before { right: 0; }
+.row.swipe-right::before { left: 0; }
+.row.swipe-left { background: #94a3b8; }
+.row.swipe-right { background: #94a3b8; }
+.row.swipe-left.swipe-go { background: #16a34a; }
+.row.swipe-right.swipe-go { background: var(--accent, #2563eb); }
+.row.swiped > * { transform: translateX(calc(var(--dx, 0px) * 4)); transition: transform .12s ease-in; }
+.row > * { transition: transform .18s ease-out; }
+.rows.pulling { padding-top: var(--pull); }
+.rows.pulling::before { content: '↓  Pull to check for mail'; display: block; text-align: center; color: var(--muted); font-size: 13px; margin-top: calc(var(--pull) * -1 + 10px); height: 0; }
+.rows.pull-go::before { content: '↻  Release to check for mail'; color: var(--accent, #2563eb); }
+.ios-install ol { display: grid; gap: 10px; padding-left: 20px; line-height: 1.5; }
+.ios-share { display: inline-grid; place-items: center; width: 24px; height: 24px; border-radius: 6px; background: var(--panel-2); color: var(--accent, #2563eb); font-weight: 700; }
+/* Installed app: respect the notch / home bar */
+@media (display-mode: standalone) { body { padding-top: env(safe-area-inset-top); padding-bottom: env(safe-area-inset-bottom); } }
+
+/* ---------- Contact cards */
+.person-link { border: 0; background: none; padding: 0; font: inherit; color: inherit; cursor: pointer; border-radius: 4px; }
+.person-link:hover { color: var(--accent, #2563eb); text-decoration: underline; }
+.person-link.strong { font-weight: 700; }
+.avatar-btn { border: 0; cursor: pointer; }
+.ccard-wrap { position: fixed; inset: 0; z-index: 80; pointer-events: none; }
+.ccard-wrap.sheet { background: rgba(15,23,42,.35); pointer-events: auto; display: flex; align-items: flex-end; }
+.ccard { position: fixed; pointer-events: auto; width: 360px; max-height: min(78vh, 640px); overflow-y: auto; background: var(--panel); border: 1px solid var(--border); border-radius: 18px; box-shadow: 0 24px 60px rgba(15,23,42,.22); padding: 16px; display: grid; gap: 12px; animation: ccIn .14s ease-out; }
+.ccard-wrap.sheet .ccard { position: relative; width: 100%; max-height: 85vh; border-radius: 20px 20px 0 0; padding-bottom: calc(16px + env(safe-area-inset-bottom)); }
+@keyframes ccIn { from { opacity: 0; transform: translateY(4px) scale(.98); } }
+.ccard-head { display: flex; gap: 12px; align-items: center; position: relative; }
+.ccard-avatar { width: 56px; height: 56px; flex: 0 0 56px; border-radius: 50%; display: grid; place-items: center; color: #fff; font-weight: 700; font-size: 20px; }
+.ccard-id { display: grid; min-width: 0; gap: 1px; }
+.ccard-name { font-size: 17px; line-height: 1.25; }
+.ccard-role { color: var(--muted); font-size: 13px; }
+.ccard-email { border: 0; background: none; padding: 0; color: var(--accent, #2563eb); font-size: 13px; text-align: left; cursor: pointer; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ccard-x { position: absolute; top: -4px; right: -4px; }
+.ccard-actions { display: flex; gap: 6px; }
+.ccard-actions > * { flex: 1; display: flex; flex-direction: column; align-items: center; gap: 3px; padding: 9px 4px; border-radius: 12px; border: 1px solid var(--border); background: var(--panel-2); color: var(--text); font-size: 12px; font-weight: 600; text-decoration: none; cursor: pointer; }
+.ccard-actions > button:hover, .ccard-actions > a:hover { border-color: var(--accent, #2563eb); color: var(--accent, #2563eb); }
+.ccard-saved { cursor: default !important; color: var(--ok, #16a34a) !important; }
+.ccard-sec { border-top: 1px solid var(--border); padding-top: 10px; display: grid; gap: 5px; }
+.ccard-sub { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; flex-wrap: wrap; }
+.ccard-row { display: flex; align-items: center; gap: 8px; font-size: 13.5px; }
+.ccard-mail { display: flex; align-items: center; gap: 8px; border: 0; background: none; padding: 6px 6px; border-radius: 8px; text-align: left; color: var(--text); cursor: pointer; font-size: 13.5px; }
+.ccard-mail:hover { background: var(--hover); }
+.ccard-subj { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ccard-note { background: color-mix(in srgb, #f59e0b 10%, var(--panel)); border-radius: 8px; padding: 6px 9px; font-size: 13px; white-space: pre-wrap; }
+.ccard-note-add input { width: 100%; }
+.ccard-loading { display: grid; gap: 8px; }
+.ccard-loading .skel { height: 12px; border-radius: 6px; background: var(--panel-2); }
+.ccard-loading .skel.short { width: 60%; }
+.danger-link { color: var(--danger) !important; }
+.menu .best-time { display: flex; align-items: center; gap: 8px; background: color-mix(in srgb, var(--accent, #2563eb) 7%, var(--panel)); border-radius: 10px; margin: 2px 6px 6px; width: calc(100% - 12px); }
+.menu .best-time span { display: grid; text-align: left; }
+.menu .best-time span small { color: var(--muted); font-weight: 400; }
+.menu .best-time .icon { color: var(--accent, #2563eb); }

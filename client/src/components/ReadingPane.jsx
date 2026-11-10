@@ -5,10 +5,11 @@ import { fmtDate, fmtSize, personName, avatarColor, initials } from '../util.js'
 import MessageBody from './MessageBody.jsx';
 import AiPanel from './AiPanel.jsx';
 import { t } from '../i18n.js';
+import { openCard } from '../people.js';
 
 function AddrList({ label, list }) {
   if (!list?.length) return null;
-  return <div className="addr-line"><span>{label}</span> {list.map((a, i) => <span key={i} title={a.address}>{a.name || a.address}{i < list.length - 1 ? ', ' : ''}</span>)}</div>;
+  return <div className="addr-line"><span>{label}</span> {list.map((a, i) => <span key={i}><button type="button" className="person-link" title={a.address} onClick={(e) => openCard(e, a)}>{a.name || a.address}</button>{i < list.length - 1 ? ', ' : ''}</span>)}</div>;
 }
 
 function SecurityBanner({ m, sender, orgDomains }) {
@@ -210,14 +211,14 @@ function ThreadMessage({ m, expanded, onToggle, onReply, prefs, setPrefs, last, 
   return (
     <article className="tmsg">
       <header className="tmsg-head" onClick={last ? undefined : onToggle}>
-        <span className="avatar lg" style={{ background: avatarColor(sender.address) }}>{initials(sender)}</span>
+        <button type="button" className="avatar lg avatar-btn" style={{ background: avatarColor(sender.address) }} onClick={(e) => openCard(e, sender)} aria-label={`${personName(sender)}: ${t('contact card')}`}>{initials(sender)}</button>
         <div className="who">
-          <div><b>{personName(sender)}</b> <span className="muted">&lt;{sender.address}&gt;</span>
+          <div><button type="button" className="person-link strong" onClick={(e) => openCard(e, sender)}>{personName(sender)}</button> <span className="muted">&lt;{sender.address}&gt;</span>
             {external && <span className="ext-tag" title={t("This message came from outside your organization")}>{t("External")}</span>}
             {m.security?.dkim === 'pass' && m.security?.dmarc === 'pass' && !m.security?.lookalike && <span className="verified" title={t("Sender's domain verified (DKIM + DMARC)")}><Icon name="check" size={11} /> {t("Verified")}</span>}
           </div>
           <div className="muted small" onClick={(e) => { e.stopPropagation(); setDetails((d) => !d); }} style={{ cursor: 'pointer' }}>
-            to {[...(m.to || []), ...(m.cc || [])].map((a) => (a.address?.toLowerCase() === me?.email?.toLowerCase() ? 'me' : personName(a))).join(', ') || 'undisclosed recipients'} <Icon name="down" size={12} />
+            to {[...(m.to || []), ...(m.cc || [])].map((a, i, all) => (<span key={i}>{a.address?.toLowerCase() === me?.email?.toLowerCase() ? 'me' : <button type="button" className="person-link" onClick={(e) => openCard(e, a)}>{personName(a)}</button>}{i < all.length - 1 ? ', ' : ''}</span>))}{!(m.to?.length || m.cc?.length) && 'undisclosed recipients'} <Icon name="down" size={12} />
           </div>
           {details && (
             <div className="details">

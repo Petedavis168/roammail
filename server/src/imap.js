@@ -1,3 +1,4 @@
+import crypto from 'node:crypto';
 // Per-session IMAP connection pool. Opening TLS + LOGIN on every request is slow,
 // so each signed-in session keeps one connection that is closed after idling.
 import { ImapFlow } from 'imapflow';
@@ -115,20 +116,44 @@ export async function specialFolder(user, use, { create = false } = {}) {
   if (hit) return hit.path;
   if (!create) return null;
   const name = FALLBACK_NAMES[use][0];
-  await client.mailboxCreate(name);
+  await client.mailboxCreate(name).catch(() => {}); // two requests at once may both create it: already there is fine
   return name;
 }
 
 /** SMTP transport with the person's own password; a rejected password is handled like an IMAP one (counted, session ended, never retried). */
+// Sending: one pooled SMTP connection per mailbox, kept open for a couple of minutes, so a send doesn't pay for a
+// new TLS handshake and sign-in every time (the slowest part of sending). Keyed by password too: a changed
+// password gets a fresh connection.
+const smtpPool = new Map(); // email|hash -> { t, timer }
+const SMTP_IDLE_MS = 2 * 60e3;
+const poolKey = (user) => `${user.email}|${crypto.createHash('sha256').update(String(user.password)).digest('hex').slice(0, 16)}`;
+function dropTransport(user) { const e = smtpPool.get(poolKey(user)); if (e) { smtpPool.delete(poolKey(user)); clearTimeout(e.timer); e.t.close(); } }
+function pooledTransport(nodemailer, user) {
+  const key = poolKey(user);
+  let e = smtpPool.get(key);
+  if (!e) {
+    const t = nodemailer.createTransport({
+      pool: true, maxConnections: 2, maxMessages: 50, socketTimeout: 60e3,
+      host: config.smtp.host, port: config.smtp.port, secure: config.smtp.secure,
+      auth: { user: user.email, pass: user.password }, tls: { rejectUnauthorized: config.tlsRejectUnauthorized },
+    });
+    e = { t, timer: null };
+    smtpPool.set(key, e);
+  }
+  clearTimeout(e.timer);
+  e.timer = setTimeout(() => { smtpPool.delete(key); e.t.close(); }, SMTP_IDLE_MS);
+  e.timer.unref?.();
+  return e.t;
+}
+
 export function userTransport(nodemailer, user) {
-  const t = nodemailer.createTransport({
-    host: config.smtp.host, port: config.smtp.port, secure: config.smtp.secure,
-    auth: { user: user.email, pass: user.password }, tls: { rejectUnauthorized: config.tlsRejectUnauthorized },
-  });
+  const pooled = pooledTransport(nodemailer, user);
+  const t = { sendMail: (mail) => pooled.sendMail(mail) };
   const send = t.sendMail.bind(t);
   t.sendMail = async (mail) => {
     try { return await send(mail); } catch (err) {
       if (isAuthError(err)) {
+        dropTransport(user);
         await authFailed(user.email, user.password);
         await Promise.resolve(onRejected(user)).catch(() => {});
         throw Object.assign(new Error('Your password was changed. Please sign in again.'), { status: 401 });

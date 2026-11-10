@@ -1,10 +1,10 @@
 {
   "name": "Roammail",
   "short_name": "Roammail",
-  "description": "Your business. Delivered. Email, calendar and contacts.",
+  "description": "Email, calendar and contacts with your name on it. Private, fast and works offline.",
   "start_url": "/app",
   "display": "standalone",
-  "background_color": "#F6F8FA",
+  "background_color": "#F3F5F9",
   "theme_color": "#173D56",
   "icons": [
     {
@@ -42,11 +42,94 @@
   "shortcuts": [
     {
       "name": "New mail",
-      "url": "/app?compose=1"
+      "short_name": "Write",
+      "url": "/app?compose=1",
+      "icons": [
+        {
+          "src": "/icon-192.png",
+          "sizes": "192x192"
+        }
+      ]
+    },
+    {
+      "name": "Inbox",
+      "url": "/app",
+      "icons": [
+        {
+          "src": "/icon-192.png",
+          "sizes": "192x192"
+        }
+      ]
     },
     {
       "name": "Calendar",
-      "url": "/app?view=calendar"
+      "url": "/app?view=calendar",
+      "icons": [
+        {
+          "src": "/icon-192.png",
+          "sizes": "192x192"
+        }
+      ]
+    },
+    {
+      "name": "Contacts",
+      "url": "/app?view=contacts",
+      "icons": [
+        {
+          "src": "/icon-192.png",
+          "sizes": "192x192"
+        }
+      ]
     }
-  ]
+  ],
+  "launch_handler": {
+    "client_mode": [
+      "navigate-existing",
+      "auto"
+    ]
+  },
+  "handle_links": "preferred",
+  "protocol_handlers": [
+    {
+      "protocol": "mailto",
+      "url": "/app?compose=1&mailto=%s"
+    }
+  ],
+  "share_target": {
+    "action": "/share-target",
+    "method": "POST",
+    "enctype": "multipart/form-data",
+    "params": {
+      "title": "title",
+      "text": "text",
+      "url": "url",
+      "files": [
+        {
+          "name": "files",
+          "accept": [
+            "*/*"
+          ]
+        }
+      ]
+    }
+  },
+  "screenshots": [
+    {
+      "src": "/screenshots/wide.png",
+      "sizes": "1280x800",
+      "type": "image/png",
+      "form_factor": "wide",
+      "label": "Your inbox"
+    },
+    {
+      "src": "/screenshots/narrow.png",
+      "sizes": "780x1688",
+      "type": "image/png",
+      "form_factor": "narrow",
+      "label": "Roammail on your phone"
+    }
+  ],
+  "edge_side_panel": {
+    "preferred_width": 420
+  }
 }

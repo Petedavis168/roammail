@@ -224,6 +224,16 @@ export default function Calendar({ me }) {
   const load = () => api.get('/api/calendar/events', { from: range[0].toISOString(), to: range[1].toISOString() })
     .then((r) => setEvents(r.map((e) => ({ ...e, me: me.email })))).catch((e) => setError(e.message));
   useEffect(() => { loadCalendars(); }, []);
+  // "Meeting" from a contact card: a new event with that person invited
+  useEffect(() => {
+    const who = sessionStorage.getItem('calNewWith');
+    if (!who || !calendars?.length) return;
+    sessionStorage.removeItem('calNewWith');
+    try {
+      const d = new Date(); d.setMinutes(0, 0, 0); d.setHours(d.getHours() + 1);
+      setEditing({ start: d.toISOString(), end: new Date(d.getTime() + 1800e3).toISOString(), calendar: calendars.find((c) => !hidden.has(c.href))?.href || calendars[0].href, attendees: JSON.parse(who) });
+    } catch { /* ignore */ }
+  }, [calendars]);
   useEffect(() => { load(); }, [range[0].getTime(), range[1].getTime()]);
 
   const visible = events.filter((e) => !hidden.has(e.calendar));

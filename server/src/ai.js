@@ -60,7 +60,8 @@ Be accurate and brief. Use the language the emails are written in. Don't invent 
 
 const clean = (s, n) => String(s || '').replace(/\r/g, '').replace(/\n{3,}/g, '\n\n').trim().slice(0, n);
 const who = (list) => (list || []).map((a) => (a.name ? `${a.name} <${a.address}>` : a.address)).join(', ');
-const asEmail = (m, n = 6000) => `<email from="${who(m.from).replace(/"/g, "'")}" date="${m.date}" subject="${String(m.subject || '').replace(/"/g, "'")}">\n${clean(m.text || m.snippet, n)}\n</email>`;
+const attrv = (v) => String(v || '').replace(/"/g, "'").replace(/</g, '&lt;').replace(/>/g, '&gt;'); // keep the tag well-formed
+const asEmail = (m, n = 6000) => `<email from="${attrv(who(m.from))}" date="${m.date}" subject="${attrv(m.subject)}">\n${clean(m.text || m.snippet, n)}\n</email>`;
 
 async function ask(task, schema, maxTokens = 1500) {
   let r;

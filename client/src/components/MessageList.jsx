@@ -4,14 +4,29 @@ import { fmtDate, dateGroup, personName, avatarColor, initials } from '../util.j
 import { fmtWhen } from '../snooze.js';
 import NeedsReply from './NeedsReply.jsx';
 import Nudges from './Nudges.jsx';
+import { attachGestures, SWIPE_ACTIONS } from '../swipe.js';
 import { t } from '../i18n.js';
 
 export default function MessageList({ list, title, search, onClearSearch, folderUse, filter, setFilter, selected, setSelected,
-  active, onOpen, act, categories, density, onLoadMore, onEmpty, onMarkAllRead, snoozeMap, allInboxes, isInbox, onBump, inboxTab, setInboxTab }) {
+  active, onOpen, act, categories, density, onLoadMore, onEmpty, onMarkAllRead, snoozeMap, allInboxes, isInbox, onBump, inboxTab, setInboxTab, onSwipe, swipe = {}, onRefresh }) {
   const ref = useRef();
   const { messages, loading, total } = list;
   const showTo = folderUse === '\\Sent' || folderUse === '\\Drafts';
   const catColor = (n) => categories.find((c) => c.name.replace(/[^A-Za-z0-9_-]/g, '') === n)?.color || '#888';
+
+  // Phone gestures: swipe a row, pull down to refresh
+  const live = useRef({});
+  live.current = { messages, onSwipe, onRefresh };
+  const label = (k) => { const a = SWIPE_ACTIONS.find((x) => x[0] === k); return a && a[0] !== 'none' ? t(a[1]) : null; };
+  useEffect(() => {
+    if (!ref.current || !onSwipe) return undefined;
+    return attachGestures(ref.current, {
+      getRow: (el) => live.current.messages.find((m) => String(m.uid) === el.dataset.uid),
+      onSwipe: (m, side) => live.current.onSwipe(m, side),
+      onRefresh: () => live.current.onRefresh?.(),
+      labels: { left: label(swipe.left || 'archive'), right: label(swipe.right || 'read') },
+    });
+  }, [!!onSwipe, swipe.left, swipe.right]);
 
   useEffect(() => {
     const el = ref.current?.querySelector('.row.active');
@@ -107,7 +122,7 @@ export default function MessageList({ list, title, search, onClearSearch, folder
           const person = who?.[0] || { name: '', address: '' };
           return [
             header,
-            <div key={m.uid} role="listitem" aria-current={active === m.uid ? 'true' : undefined}
+            <div key={m.uid} data-uid={m.uid} role="listitem" aria-current={active === m.uid ? 'true' : undefined}
               className={`row ${m.seen ? '' : 'unread'} ${active === m.uid ? 'active' : ''} ${selected.has(m.uid) ? 'selected' : ''}`}
               onClick={(e) => onRowClick(m, e)} draggable={!allInboxes} onDragStart={(e) => onDragStart(m, e)}>
               <div className="row-left" onClick={(e) => toggle(m.uid, e)}>

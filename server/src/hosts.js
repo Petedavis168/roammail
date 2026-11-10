@@ -56,9 +56,11 @@ hosts.get('/app', appLimiter, async (req, res) => {
   if (!emails.length) return res.redirect(302, loginUrl('/'));
   const imp = /^[a-z-]{1,20}$/.test(String(req.query.import || '')) ? String(req.query.import) : '';
   const section = imp ? 'settings' : ['calendar', 'contacts'].includes(req.query.view) ? req.query.view : 'inbox';
-  const qs = imp ? `?import=${imp}` : req.query.compose === '1' ? `?compose=1${/^mailto:[^\s]{1,2000}$/i.test(String(req.query.mailto || '')) ? `&mailto=${encodeURIComponent(String(req.query.mailto))}` : ''}` : ['tasks', 'notes', 'followups'].includes(req.query.panel) ? `?panel=${req.query.panel}` : '';
+  const qs = imp ? `?import=${imp}` : req.query.share === '1' ? '?share=1' : req.query.compose === '1' ? `?compose=1${/^mailto:[^\s]{1,2000}$/i.test(String(req.query.mailto || '')) ? `&mailto=${encodeURIComponent(String(req.query.mailto))}` : ''}` : ['tasks', 'notes', 'followups'].includes(req.query.panel) ? `?panel=${req.query.panel}` : '';
   return res.redirect(302, appUrl(`/${await ensureMailboxId(emails[0])}/${section}${qs}`));
 });
+// Shared from another app before the app's offline helper was installed: just open a new email
+hosts.post('/share-target', (req, res) => res.redirect(303, '/app?compose=1'));
 // Sign-up lives on the sign-in host: roammail.net/signup -> login.roammail.net/signup (query kept)
 hosts.get('/signup', (req, res, next) => {
   if (config.loginHost && String(req.hostname || '').toLowerCase() !== config.loginHost) {
