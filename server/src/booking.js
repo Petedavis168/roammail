@@ -29,7 +29,7 @@ const wrap = (fn) => (req, res, next) => Promise.resolve(fn(req, res, next)).cat
 const fail = (status, message) => Object.assign(new Error(message), { status, expose: true });
 const clip = (s, n) => String(s ?? '').replace(/\r/g, '').trim().slice(0, n);
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
-const EMAIL_RE = /^[^\s@<>"]+@[^\s@<>"]+\.[^\s@<>"]{2,}$/;
+const EMAIL_RE = /^[^\s@<>"]{1,64}@[^\s@<>".]{1,63}(?:\.[^\s@<>".]{1,63}){1,8}$/; // no backtracking blow-up on long input
 const SLUG_RE = /^[a-z0-9](?:[a-z0-9-]{1,38}[a-z0-9])$/;
 const RESERVED = new Set(['admin', 'api', 'app', 'book', 'booking', 'cancel', 'login', 'signup', 'help', 'support', 'roammail', 'www', 'mail', 'assets', 'static']);
 const DAYS = ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat'];
