@@ -147,6 +147,42 @@ function SecureStatus({ id }) {
   );
 }
 
+/** Delivery reports and read receipts, in plain words (the raw report only behind "Technical details"). */
+function ReportCard({ m }) {
+  const [raw, setRaw] = useState(false);
+  const r = m.report;
+  const when = fmtDate(m.date, true);
+  const subj = r.subject ? <> “<b>{r.subject}</b>”</> : null;
+  return (
+    <div className="report-card">
+      {r.recipients.map((x, i) => {
+        const ok = x.kind === 'delivered' || x.kind === 'read';
+        const icon = x.kind === 'failed' ? 'close' : x.kind === 'delayed' ? 'clock' : 'check';
+        const title = x.kind === 'read' ? t('Read') : x.kind === 'delivered' ? t('Delivered') : x.kind === 'failed' ? t('Not delivered') : x.kind === 'delayed' ? t('Delayed') : t('Receipt');
+        return (
+          <div key={i} className={`report-line ${ok ? 'ok' : x.kind}`}>
+            <span className="report-icon"><Icon name={icon} size={18} /></span>
+            <div>
+              <div className="report-title">{title}</div>
+              <div className="report-text">
+                {x.kind === 'read' && <>{t('Your email')}{subj} {t('was opened by')} <b>{x.address}</b>.</>}
+                {x.kind === 'delivered' && <>{t('Your email')}{subj} {t('was delivered to')} <b>{x.address}</b>.</>}
+                {x.kind === 'delayed' && <>{t('Your email')}{subj} {t('to')} <b>{x.address}</b> {t('hasn’t been delivered yet. Their mail server will keep trying — no need to do anything.')}</>}
+                {x.kind === 'failed' && <>{t('Your email')}{subj} {t('couldn’t be delivered to')} <b>{x.address}</b>. {t(x.reason)}</>}
+                {x.kind === 'deleted' && <>{t('Your email')}{subj} {t('was deleted without being read by')} <b>{x.address}</b>.</>}
+                {x.kind === 'other' && <>{t('A receipt came back from')} <b>{x.address}</b>.</>}
+              </div>
+              <div className="muted small">{when}</div>
+            </div>
+          </div>
+        );
+      })}
+      <button className="link small" onClick={() => setRaw((v) => !v)}>{raw ? t('Hide technical details') : t('Technical details')}</button>
+      {raw && <pre className="report-raw">{m.text}</pre>}
+    </div>
+  );
+}
+
 function ThreadMessage({ m, expanded, onToggle, onReply, prefs, setPrefs, last, orgDomains, onBlock, isJunk, me, onAddTask, onFollowUp }) {
   const sender = m.from?.[0] || {};
   const trusted = prefs.showImages === 'always' || prefs.trustedSenders.includes(sender.address?.toLowerCase());
@@ -156,7 +192,7 @@ function ThreadMessage({ m, expanded, onToggle, onReply, prefs, setPrefs, last, 
   const [showTrackers, setShowTrackers] = useState(false);
   const [details, setDetails] = useState(false);
   const [menu, setMenu] = useState(false);
-  const files = (m.attachments || []).filter((a) => !a.inline);
+  const files = m.report ? [] : (m.attachments || []).filter((a) => !a.inline);
   const external = orgDomains.length > 0 && sender.address && !orgDomains.some((d) => sender.address.toLowerCase().endsWith(`@${d}`));
   const lu = m.listUnsubscribe;
   const unsubUrl = !lu ? null : typeof lu === 'object' ? lu.url || null : (/<(https?:[^>]+)>/.exec(lu) || [])[1] || null;
@@ -247,7 +283,7 @@ function ThreadMessage({ m, expanded, onToggle, onReply, prefs, setPrefs, last, 
       )}
       {unsubUrl && <div className="unsub">{t("Mailing list ·")}{' '}<a href={unsubUrl} target="_blank" rel="noreferrer">{t("Unsubscribe")}</a></div>}
       <div className="tmsg-body" data-msg={`${m.folder}:${m.uid}`}>
-        <MessageBody msg={m} allowRemote={allow && !isJunk} onBlocked={setBlocked} onTrackers={setTrackers} disableLinks={isJunk} />
+        {m.report ? <ReportCard m={m} /> : <MessageBody msg={m} allowRemote={allow && !isJunk} onBlocked={setBlocked} onTrackers={setTrackers} disableLinks={isJunk} />}
       </div>
       {files.length > 0 && (
         <div className="attachments">

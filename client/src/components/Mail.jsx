@@ -37,7 +37,7 @@ function parseMailto(m) {
   return { to: list(addr), cc: list(q.get('cc')), bcc: list(q.get('bcc')), subject: (q.get('subject') || '').slice(0, 300), prefillText: (q.get('body') || '').slice(0, 5000) };
 }
 
-export default function Mail({ me, route, refreshMe, theme, setTheme, onLogout }) {
+export default function Mail({ me, route, refreshMe, theme, setTheme, themePref = 'auto', onLogout }) {
   const toast = useToast();
   const [prefs, setPrefs] = usePrefs(me.email);
   const [view, setView] = useState(() => {
@@ -469,7 +469,12 @@ export default function Mail({ me, route, refreshMe, theme, setTheme, onLogout }
               <div className="menu right" onMouseLeave={() => setUserMenu(false)}>
                 <div className="menu-head"><b>{prefs.displayName || me.name || me.email.split('@')[0]}</b><small>{me.email}</small></div>
                 <button onClick={() => { setShowSettings(true); setUserMenu(false); }}><Icon name="settings" />{' '}{t("Settings")}</button>
-                <button onClick={() => { setTheme(theme === 'dark' ? 'light' : 'dark'); setUserMenu(false); }}><Icon name={theme === 'dark' ? 'sun' : 'moon'} /> {theme === 'dark' ? 'Light mode' : 'Dark mode'}</button>
+                <div className="menu-note">{t('Appearance')}</div>
+                <div className="theme-pick" role="radiogroup" aria-label={t('Appearance')}>
+                  {[['auto', 'phone', 'Device'], ['light', 'sun', 'Light'], ['dark', 'moon', 'Dark']].map(([k, ic, l]) => (
+                    <button key={k} role="radio" aria-checked={themePref === k} className={themePref === k ? 'on' : ''} onClick={() => setTheme(k)}><Icon name={ic} size={15} /> {t(l)}</button>
+                  ))}
+                </div>
                 <button onClick={() => { setShowHelp(true); setUserMenu(false); }}><Icon name="key" />{' '}{t("Keyboard shortcuts")}</button>
                 <a className="menu-link" href="/help" target="_blank" rel="noreferrer"><Icon name="external" />{' '}{t("Help center")}</a>
                 {(isAdmin || !inOrg) && <button onClick={() => { setView('admin'); setUserMenu(false); }}><Icon name="shield" /> {isAdmin ? 'Admin portal' : 'Set up business email'}</button>}

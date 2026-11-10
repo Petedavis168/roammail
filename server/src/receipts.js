@@ -45,56 +45,90 @@ export async function saveTracked(user, mail, track, recipients) {
 }
 
 // ---------------------------------------------------------------- reading receipts that came back
+/** Is this text a delivery report or read receipt? (Works even when a mail server mangled the headers.) */
+export const looksLikeReport = (text) => /report-type="?(delivery-status|disposition-notification)|content-type:\s*message\/(delivery-status|disposition-notification)/i.test(String(text || '').slice(0, 200000));
+
 function parseReport(parsed, raw) {
-  const text = raw.toString('utf8');
+  const text = Buffer.isBuffer(raw) ? raw.toString('utf8') : String(raw || '');
   const field = (name, src = text) => (new RegExp(`^${name}:\\s*(.+)$`, 'im').exec(src) || [])[1]?.trim() || '';
   const out = [];
-  if (/report-type="?disposition-notification/i.test(text)) {
+  if (/report-type="?disposition-notification|content-type:\s*message\/disposition-notification/i.test(text)) {
     const disp = field('Disposition').toLowerCase();
     const who = field('Final-Recipient').replace(/^rfc822;\s*/i, '').toLowerCase();
     out.push({ kind: /displayed/.test(disp) ? 'read' : /deleted/.test(disp) ? 'deleted' : 'other', messageId: bare(field('Original-Message-ID')), recipient: who });
-  } else if (/report-type="?delivery-status/i.test(text)) {
+  } else if (/report-type="?delivery-status|content-type:\s*message\/delivery-status/i.test(text)) {
     const envid = field('Original-Envelope-Id');
-    const msgId = bare((/^Message-ID:\s*(.+)$/im.exec(text.split(/report-type="?delivery-status/i)[1] || '') || [])[1]);
-    // one block per recipient: Final-Recipient + Action
+    const at = /report-type="?delivery-status|message\/delivery-status/i.exec(text);
+    const msgId = bare((/^Message-ID:\s*(.+)$/im.exec(at ? text.slice(at.index + at[0].length) : '') || [])[1]);
+    // one block per recipient: Final-Recipient + Action (+ Status, Diagnostic-Code)
     for (const block of text.split(/\r?\n\r?\n/)) {
       const fr = field('Final-Recipient', block); const action = field('Action', block).toLowerCase();
       if (!fr || !action) continue;
       const kind = action.startsWith('delivered') || action.startsWith('relayed') || action.startsWith('expanded') ? 'delivered' : action.startsWith('failed') ? 'failed' : action.startsWith('delayed') ? 'delayed' : null;
-      if (kind) out.push({ kind, envid, messageId: msgId, recipient: fr.replace(/^rfc822;\s*/i, '').toLowerCase() });
+      if (kind) out.push({ kind, envid, messageId: msgId, recipient: fr.replace(/^rfc822;\s*/i, '').toLowerCase(), status: field('Status', block), diagnostic: field('Diagnostic-Code', block).replace(/^smtp;\s*/i, '').slice(0, 300) });
     }
   }
   return out;
 }
 
+/** Plain-English reason for a failed delivery, from the standard status code. */
+function reasonFor(status, diag) {
+  const d = String(diag || '').toLowerCase();
+  if (/^5\.1\.[0-3]/.test(status) || /user unknown|no such user|does not exist|unknown user|address rejected|recipient not found/.test(d)) return 'That email address doesn’t exist. Check it for typos.';
+  if (/^5\.2\.2/.test(status) || /quota|mailbox full|over quota/.test(d)) return 'Their mailbox is full.';
+  if (/^5\.7/.test(status) || /spam|blocked|policy|denied|rejected/.test(d)) return 'Their mail server refused it (it may have looked like spam to them).';
+  if (/^5\.4|^4\.4/.test(status) || /timed? ?out|unreachable|no route|dns/.test(d)) return 'Their mail server couldn’t be reached.';
+  if (/^5\.3\.4/.test(status) || /too (large|big)|size/.test(d)) return 'The email was too large for them.';
+  return 'Their mail server couldn’t accept it.';
+}
+
+/** A friendly summary of a report, for showing instead of its raw contents. */
+export function describeReport(text) {
+  if (!looksLikeReport(text)) return null;
+  const items = parseReport(null, text);
+  if (!items.length) return null;
+  const read = items.some((i) => ['read', 'deleted', 'other'].includes(i.kind));
+  // the original email's subject, from the returned headers
+  const tail = String(text).split(/text\/rfc822-headers|message\/rfc822|original message/i)[1] || '';
+  const subject = (/^Subject:\s*(.+)$/im.exec(tail) || [])[1]?.trim().slice(0, 300) || '';
+  return {
+    type: read ? 'read' : 'delivery',
+    subject,
+    recipients: items.map((i) => ({ address: i.recipient, kind: i.kind, ...(i.kind === 'failed' ? { reason: reasonFor(i.status, i.diagnostic), detail: i.diagnostic || i.status || '' } : {}) })),
+  };
+}
+
 /** Look for receipts in the inbox, record them, and move them to the Receipts folder. At most every few seconds. */
-export async function collectReceipts(user, { force = false } = {}) {
+export async function collectReceipts(user, { force = false, minGap = 3000 } = {}) {
   const prev = lastScan.get(user.email) || 0;
-  if (!force && Date.now() - prev < 3000) return; // the inbox search is cheap; just not on every keystroke
+  if (!force && Date.now() - prev < minGap) return; // the inbox search is cheap; just not on every keystroke
   lastScan.set(user.email, Date.now());
   const found = [];
   await withMailbox(user, 'INBOX', async (client) => {
-    const uids = ((await client.search({ header: { 'content-type': 'multipart/report' } }, { uid: true })) || []).slice(-200);
+    // separate searches (some servers handle OR of several criteria poorly), merged
+    const hits = new Set();
+    for (const crit of [{ header: { 'content-type': 'multipart/report' } }, { header: { from: 'mailer-daemon' } }, { header: { from: 'postmaster' } }]) {
+      for (const u of (await client.search(crit, { uid: true }).catch(() => [])) || []) hits.add(u);
+    }
+    const uids = [...hits].sort((a, b) => a - b).slice(-200);
     for (const uid of uids) {
       const m = await client.fetchOne(String(uid), { source: true, uid: true }, { uid: true });
-      if (!m?.source) continue;
-      let parsed = null;
-      try { parsed = await simpleParser(m.source); } catch { /* raw text is enough */ }
-      found.push({ uid, reports: parseReport(parsed, m.source) });
+      if (!m?.source || m.source.length > 2e6) continue;
+      found.push({ uid, reports: parseReport(null, m.source) });
     }
   });
   if (!found.length) return;
   const moveUids = [];
   for (const f of found) {
-    let matched = false;
+    if (!f.reports.length) continue; // not a report we understand: leave it
     for (const r of f.reports) {
       const row = r.envid ? await q.get('SELECT id FROM receipts WHERE owner = ? AND envid = ?', user.email, r.envid) : null;
       const row2 = row || (r.messageId ? await q.get('SELECT id FROM receipts WHERE owner = ? AND message_id = ?', user.email, r.messageId) : null);
       if (!row2) continue;
-      matched = true;
       await q.run(`INSERT INTO receipt_events(receipt_id, recipient, kind, at) VALUES(?, ?, ?, ?) ON CONFLICT(receipt_id, recipient, kind) DO NOTHING`, row2.id, r.recipient || '', r.kind, Date.now());
     }
-    if (matched) moveUids.push(f.uid);
+    // Good news is filed away (it shows on the email in Sent); a failed delivery stays in the inbox so it isn't missed
+    if (f.reports.every((r) => r.kind === 'delivered' || r.kind === 'read')) moveUids.push(f.uid);
   }
   if (moveUids.length) {
     await (await getClient(user)).mailboxCreate(RECEIPTS_FOLDER).catch(() => {}); // already there is fine

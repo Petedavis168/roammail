@@ -60,7 +60,7 @@ export function Icon({ name, size = 18, fill = 'none', className = '', style }) 
   return (
     <svg className={`icon ${className}`} style={style} width={size} height={size} viewBox="0 0 24 24" fill={fill}
       stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-      <path d={P[name] || P.folder} />
+      {name === 'more' ? <g fill="currentColor" stroke="none"><circle cx="5" cy="12" r="2" /><circle cx="12" cy="12" r="2" /><circle cx="19" cy="12" r="2" /></g> : <path d={P[name] || P.folder} />}
     </svg>
   );
 }

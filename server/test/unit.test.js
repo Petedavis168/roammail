@@ -229,3 +229,18 @@ test('temporary passwords never contain the address name they are for', async ()
   const { tempPassword, TEMP_PASSWORD_RE } = await import('../src/temppass.js');
   for (let i = 0; i < 2000; i++) { const p = tempPassword('cara'); assert.ok(TEMP_PASSWORD_RE.test(p)); assert.ok(!p.toLowerCase().includes('cara'), p); }
 });
+
+test('delivery reports and read receipts are described in plain words', async () => {
+  const { describeReport, looksLikeReport } = await import('../src/receipts.js');
+  // a relay's report whose headers ended early, so it arrives as plain text (seen from SMTP2Go)
+  const mangled = `Content-Type: multipart/report; report-type=delivery-status; boundary=b1\nMIME-Version: 1.0\n\n--b1\nContent-type: text/plain; charset=us-ascii\n\nThis message was created automatically.\n\n--b1\nContent-type: message/delivery-status\n\nReporting-MTA: dns; mail.smtp2go.com\nOriginal-Envelope-ID: c23eaab8589e1b6783\n\nOriginal-Recipient: rfc822;pete@roammail.net\nAction: delivered\nFinal-Recipient: rfc822;someone@gmail.com\nStatus: 2.0.0\n\n--b1\nContent-type: text/rfc822-headers\n\nReturn-path: <pete@roammail.net>\nSubject: Lunch on Friday?\n\n--b1--\n`;
+  assert.ok(looksLikeReport(mangled));
+  const d = describeReport(mangled);
+  assert.equal(d.type, 'delivery'); assert.equal(d.subject, 'Lunch on Friday?');
+  assert.deepEqual(d.recipients, [{ address: 'someone@gmail.com', kind: 'delivered' }]);
+  const bounce = describeReport('Content-Type: message/delivery-status\n\nFinal-Recipient: rfc822;nobody@example.com\nAction: failed\nStatus: 5.1.1\nDiagnostic-Code: smtp; 550 5.1.1 User unknown\n');
+  assert.equal(bounce.recipients[0].kind, 'failed'); assert.match(bounce.recipients[0].reason, /doesn’t exist/);
+  const mdn = describeReport('report-type=disposition-notification\n\nFinal-Recipient: rfc822;ann@example.com\nDisposition: manual-action/MDN-sent-manually; displayed\n');
+  assert.equal(mdn.type, 'read'); assert.equal(mdn.recipients[0].kind, 'read');
+  assert.equal(describeReport('Hello, how are you?'), null);
+});

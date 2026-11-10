@@ -5,6 +5,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import crypto from 'node:crypto';
 import { createRequire } from 'node:module';
+import nodemailer from 'nodemailer';
 
 const require = createRequire(import.meta.url);
 const { chromium } = require('playwright');
@@ -138,5 +139,40 @@ test('out of office, smart templates and follow-up nudges', async () => {
     await page.waitForSelector('.ooo-bar', { state: 'detached' });
     assert.equal((await alice.get('/api/vacation')).data.enabled, false);
     assert.deepEqual(errors, []);
+  } finally { await browser.close(); }
+});
+
+test('delivery reports: good news is filed away, a bounce is shown in plain words', async () => {
+  const me = await signup(`nr${run}`); const other = await signup(`nm${run}`);
+  const email = `nr${run}@${D}`;
+  await sleep(1500);
+  const smtp = nodemailer.createTransport({ host: '127.0.0.1', port: 3025, secure: false, auth: { user: `nm${run}@${D}`, pass: PW }, tls: { rejectUnauthorized: false } });
+  // a "delivered" report whose headers ended early (as a relay sent it), and a bounce
+  const good = `From: Mail Delivery System <mailer-daemon@nm${run}.example>\r\nTo: ${email}\r\nSubject: Successful Mail Delivery Report\r\n\r\nContent-Type: multipart/report; report-type=delivery-status; boundary=b1\r\nMIME-Version: 1.0\r\n\r\n--b1\r\nContent-type: message/delivery-status\r\n\r\nReporting-MTA: dns; relay.example\r\n\r\nAction: delivered\r\nFinal-Recipient: rfc822;friend@example.org\r\nStatus: 2.0.0\r\n\r\n--b1--\r\n`;
+  const bad = `From: Mail Delivery System <mailer-daemon@nm${run}.example>\r\nTo: ${email}\r\nSubject: Undelivered Mail Returned to Sender\r\nMIME-Version: 1.0\r\nContent-Type: multipart/report; report-type=delivery-status; boundary=b2\r\n\r\n--b2\r\nContent-Type: text/plain\r\n\r\nSorry.\r\n\r\n--b2\r\nContent-Type: message/delivery-status\r\n\r\nReporting-MTA: dns; relay.example\r\n\r\nFinal-Recipient: rfc822;typo@example.org\r\nAction: failed\r\nStatus: 5.1.1\r\nDiagnostic-Code: smtp; 550 5.1.1 User unknown\r\n\r\n--b2\r\nContent-Type: text/rfc822-headers\r\n\r\nSubject: Contract\r\n\r\n--b2--\r\n`;
+  await smtp.sendMail({ envelope: { from: `nm${run}@${D}`, to: email }, raw: good });
+  await smtp.sendMail({ envelope: { from: `nm${run}@${D}`, to: email }, raw: bad });
+  void other;
+  await sleep(1500);
+  await me.get('/api/messages?folder=INBOX'); // files the reports (in the background)
+  await sleep(1500);
+  const inbox = (await me.get('/api/messages?folder=INBOX')).data.messages;
+  assert.ok(!inbox.some((m) => m.subject === 'Successful Mail Delivery Report'), 'good news filed away');
+  const b = inbox.find((m) => m.subject === 'Undelivered Mail Returned to Sender');
+  assert.ok(b, 'a bounce stays in the inbox');
+  const full = (await me.get(`/api/message?folder=INBOX&uid=${b.uid}`)).data;
+  assert.equal(full.report.recipients[0].kind, 'failed'); assert.equal(full.report.subject, 'Contract');
+  assert.ok((await me.get('/api/messages?folder=Receipts')).data.messages.some((m) => m.subject === 'Successful Mail Delivery Report'));
+  // and in the browser: plain words, no raw report
+  const browser = await chromium.launch();
+  try {
+    const ctx = await browser.newContext({ viewport: { width: 1300, height: 900 } });
+    const [cn, cv] = me.cookie.split('='); await ctx.addCookies([{ name: cn, value: cv, domain: new URL(BASE).hostname, path: '/' }]);
+    const page = await ctx.newPage();
+    await page.goto(`${BASE}/app`);
+    await page.click('.row >> text=Undelivered Mail Returned to Sender');
+    await page.waitForSelector('.report-line.failed >> text=Not delivered');
+    assert.match(await page.locator('.report-card').innerText(), /couldn’t be delivered to typo@example.org\. That email address doesn’t exist/);
+    assert.equal(await page.locator('.report-raw').count(), 0);
   } finally { await browser.close(); }
 });

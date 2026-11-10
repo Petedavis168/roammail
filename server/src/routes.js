@@ -14,7 +14,7 @@ import { count, gauge } from './ops.js';
 import { getClient, closeClient, withMailbox, specialFolder, makeClient, userTransport } from './imap.js';
 import { parseQuery } from './search.js';
 import { lookalike } from './lookalike.js';
-import { requestReceipts, saveTracked } from './receipts.js';
+import { requestReceipts, saveTracked, describeReport, collectReceipts } from './receipts.js';
 import { protectEmail, noticeMail, checkSecurePassword } from './secure.js';
 import { rolesFor, q, twoFactorPolicy } from './db.js';
 import { applyEnforcedSignature } from './signatures.js';
@@ -169,6 +169,8 @@ api.get('/messages', wrap(async (req, res) => {
   const page = Math.max(0, Number(req.query.page || 0));
   const pageSize = Math.min(200, Math.max(10, Number(req.query.pageSize || 50)));
   const filter = req.query.filter; // unread | flagged | attachments
+  // File delivery reports / read receipts out of the inbox (at most every 30 seconds; never holds up the list)
+  if (folder === 'INBOX' && !req.delegatedMailbox) collectReceipts(req.user, { minGap: 30e3 }).catch((e) => console.warn('receipts scan failed', e.message));
 
   const result = await withMailbox(req.user, folder, async (client) => {
     const total = client.mailbox.exists;
@@ -282,6 +284,11 @@ function fullMessage(folder, msg, parsed) {
     listUnsubscribe: parsed.headers.get('list-unsubscribe') || null,
     secureId: /^[\w-]{10,40}$/.test(String(parsed.headers.get('x-roammail-secure-id') || '')) ? String(parsed.headers.get('x-roammail-secure-id')) : null,
     receiptRequested: !!parsed.headers.get('disposition-notification-to') && !(msg.flags || new Set()).has('$MDNSent'),
+    report: (() => { // delivery reports and read receipts: a plain summary instead of their raw contents
+      const parts = [parsed.text || '', ...(parsed.attachments || []).filter((a) => /^message\/|rfc822-headers/i.test(a.contentType || '') && a.size < 2e6).map((a) => `Content-Type: ${a.contentType}\n\n${a.content.toString('utf8')}`)];
+      const ct = String(parsed.headers.get('content-type')?.value || '') + String(parsed.headers.get('content-type')?.params?.['report-type'] ? ` report-type=${parsed.headers.get('content-type').params['report-type']}` : '');
+      return describeReport(`${ct}\n${parts.join('\n\n')}`);
+    })(),
     security: senderSecurity(parsed),
     spam: spamInfo(parsed.headers.get('x-spamd-result')),
     invite: (() => {

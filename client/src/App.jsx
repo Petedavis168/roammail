@@ -17,12 +17,18 @@ export default function App() {
   // keep the wizard open through its optional steps once it started
   const [wizardOpen, setWizardOpen] = useState(true);
   useEffect(() => { api.signupConfig().then(setHosts).catch(() => {}).finally(() => setHostsReady(true)); }, []);
-  const [theme, setTheme] = useState(() => localStorage.getItem('theme') || (matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'));
-
+  // Theme: follows the device (light/dark) unless the person picks one. 'auto' | 'light' | 'dark'
+  const [themePref, setThemePref] = useState(() => localStorage.getItem('themePref') || 'auto');
+  const darkQuery = matchMedia('(prefers-color-scheme: dark)');
+  const [sysDark, setSysDark] = useState(darkQuery.matches);
+  useEffect(() => { const on = (e) => setSysDark(e.matches); darkQuery.addEventListener('change', on); return () => darkQuery.removeEventListener('change', on); }, []);
+  const theme = themePref === 'auto' ? (sysDark ? 'dark' : 'light') : themePref;
+  const setTheme = (x) => setThemePref(x);
   useEffect(() => {
     document.documentElement.dataset.theme = theme;
+    localStorage.setItem('themePref', themePref);
     localStorage.setItem('theme', theme);
-  }, [theme]);
+  }, [theme, themePref]);
 
   const refreshMe = () => api.me().then(setMe).catch(() => setMe(null));
   useEffect(() => { if (me) refreshPush(); }, [me?.email]); // keeps this device's notifications from expiring
@@ -71,7 +77,7 @@ export default function App() {
       {me && (me.setup?.setupRequired?.length || (me.setup && !me.setup.onboarded && wizardOpen)) ? (
         <SetupWizard me={me} onDone={() => { setWizardOpen(false); refreshMe(); }} onLogout={() => signOut(false)} />
       ) : me ? (
-        <Mail me={me} route={route} refreshMe={refreshMe} theme={theme} setTheme={setTheme} onLogout={signOut} />
+        <Mail me={me} route={route} refreshMe={refreshMe} theme={theme} setTheme={setTheme} themePref={themePref} onLogout={signOut} />
       ) : (
         <Login mode={route.page} onLogin={afterAuth} />
       )}
