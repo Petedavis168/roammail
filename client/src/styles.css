@@ -1196,3 +1196,15 @@ a.g-passkey { text-decoration: none; color: inherit; box-sizing: border-box; }
 .rcpt-status { padding: 4px 16px; display: flex; flex-direction: column; gap: 2px; }
 .rcpt-status .ok { color: var(--ok); }
 .rcpt-status .bad { color: var(--danger, #b91c1c); }
+/* ---- password-protected email ---- */
+.protect-panel { margin: 6px 12px; padding: 10px 12px; border: 1px solid var(--border); border-left: 4px solid var(--ok); border-radius: 8px; background: var(--panel-2); display: flex; flex-direction: column; gap: 8px; }
+.protect-title { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; font-size: 13px; }
+.protect-title .link { margin-left: auto; }
+.protect-row { display: flex; gap: 6px; flex-wrap: wrap; }
+.protect-row input { flex: 1; min-width: 160px; }
+.pw-wrap { position: fixed; inset: 0; background: rgba(0,0,0,.35); z-index: 300; pointer-events: auto; } /* inside .composers, which lets clicks through */
+.pw-share h3 { display: flex; gap: 8px; align-items: center; margin-top: 0; }
+.pw-box { display: flex; align-items: center; gap: 10px; padding: 10px 12px; background: var(--panel-2); border: 1px solid var(--border); border-radius: 8px; margin: 10px 0; }
+.pw-box code { flex: 1; font-size: 17px; letter-spacing: .5px; word-break: break-all; }
+.sec-status { padding: 6px 16px; display: flex; gap: 10px; align-items: center; flex-wrap: wrap; font-size: 13px; color: var(--ok); }
+.sec-status.off { color: var(--muted); }

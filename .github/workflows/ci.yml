@@ -120,6 +120,9 @@ jobs:
       - name: Receipts tests
         working-directory: server
         run: npm run test:receipts
+      - name: Password-protected email tests
+        working-directory: server
+        run: npm run test:secure
 
       - name: Logs on failure
         if: failure()

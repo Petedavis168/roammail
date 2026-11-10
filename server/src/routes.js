@@ -15,6 +15,7 @@ import { getClient, closeClient, withMailbox, specialFolder, makeClient, userTra
 import { parseQuery } from './search.js';
 import { lookalike } from './lookalike.js';
 import { requestReceipts, saveTracked } from './receipts.js';
+import { protectEmail, noticeMail, checkSecurePassword } from './secure.js';
 import { rolesFor, q, twoFactorPolicy } from './db.js';
 import { applyEnforcedSignature } from './signatures.js';
 import { spamInfo } from './spam.js';
@@ -279,6 +280,7 @@ function fullMessage(folder, msg, parsed) {
     html: parsed.html || null,
     text: parsed.text || '',
     listUnsubscribe: parsed.headers.get('list-unsubscribe') || null,
+    secureId: /^[\w-]{10,40}$/.test(String(parsed.headers.get('x-roammail-secure-id') || '')) ? String(parsed.headers.get('x-roammail-secure-id')) : null,
     receiptRequested: !!parsed.headers.get('disposition-notification-to') && !(msg.flags || new Set()).has('$MDNSent'),
     security: senderSecurity(parsed),
     spam: spamInfo(parsed.headers.get('x-spamd-result')),
@@ -480,6 +482,14 @@ api.post('/send', upload.array('attachments'), wrap(async (req, res) => {
   const rr = requestReceipts(req.user, mail, { read: req.body.readReceipt === 'true', delivery: req.body.deliveryReceipt === 'true' });
   mail = rr.mail;
   const rcpts = [mail.to, mail.cc, mail.bcc].filter(Boolean).flatMap((v) => addressparser(v)).map((a) => String(a.address || '').toLowerCase()).filter(Boolean);
+  // Password-protected: the recipients get a link; the real email is kept encrypted with the password
+  let original = null; let secure = null;
+  if (req.body.protect === 'true') {
+    const password = checkSecurePassword(req.body.securePassword);
+    original = mail;
+    secure = await protectEmail(req, mail, { password, hint: req.body.secureHint, days: req.body.secureDays, recipients: rcpts });
+    mail = noticeMail(mail, req.user, secure, String(req.body.secureHint || '').slice(0, 200));
+  }
 
   // Schedule send: store the finished message and send it later from the job worker
   const sendAt = Number(req.body.sendAt || 0);
@@ -494,7 +504,7 @@ api.post('/send', upload.array('attachments'), wrap(async (req, res) => {
       if (drafts) await withMailbox(req.user, drafts, (c) => c.messageDelete(String(req.body.draftUid), { uid: true })).catch(() => {});
     }
     await saveTracked(req.user, mail, rr.track, rcpts);
-    return res.json({ ok: true, scheduled: true, id, sendAt });
+    return res.json({ ok: true, scheduled: true, id, sendAt, secure: secure && { id: secure.id, url: secure.url } });
   }
   const info = await transport(req.user).sendMail(mail);
   count('mail_sent');
@@ -503,7 +513,8 @@ api.post('/send', upload.array('attachments'), wrap(async (req, res) => {
   // mailcow (Postfix) does not store sent mail itself; append a copy to Sent.
   try {
     const sent = await specialFolder(req.user, '\\Sent', { create: true });
-    const raw = await compile({ ...mail, messageId: info.messageId });
+    // your own copy keeps the real content (it's your mailbox), marked so it shows the protection status
+    const raw = await compile(original ? { ...original, messageId: info.messageId, headers: { ...(original.headers || {}), 'X-Roammail-Secure-Id': secure.id } } : { ...mail, messageId: info.messageId });
     const client = await getClient(req.user);
     await client.append(sent, raw, ['\\Seen']);
   } catch (e) { console.warn('Could not save to Sent:', e.message); }
@@ -516,7 +527,7 @@ api.post('/send', upload.array('attachments'), wrap(async (req, res) => {
     const drafts = await specialFolder(req.user, '\\Drafts');
     if (drafts) await withMailbox(req.user, drafts, (c) => c.messageDelete(String(req.body.draftUid), { uid: true })).catch(() => {});
   }
-  res.json({ ok: true, messageId: info.messageId, accepted: info.accepted, rejected: info.rejected });
+  res.json({ ok: true, messageId: info.messageId, accepted: info.accepted, rejected: info.rejected, secure: secure && { id: secure.id, url: secure.url } });
 }));
 
 api.post('/drafts', upload.array('attachments'), wrap(async (req, res) => {

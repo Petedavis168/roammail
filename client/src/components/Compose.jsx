@@ -58,6 +58,10 @@ function Composer({ c, me, prefs, sigData, identities, onClose, onSend, focusInd
   const [readR, setReadR] = useState(prefs.requestReceipts === 'always');
   const [delivR, setDelivR] = useState(prefs.requestReceipts === 'always');
   const [rcptMenu, setRcptMenu] = useState(false);
+  // password protection: recipients get a link; the password goes separately
+  const [protect, setProtect] = useState(false);
+  const [sec, setSec] = useState({ password: '', hint: '', days: 7, follow: 'later', show: false });
+  const genPassword = () => { const a = 'abcdefghjkmnpqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ23456789'; const r = crypto.getRandomValues(new Uint32Array(14)); setSec((x) => ({ ...x, password: [...r].map((n) => a[n % a.length]).join('').replace(/(.{4})(?=.)/g, '$1-'), show: true })); };
   const editor = useRef();
   const fileInput = useRef();
   const dirty = useRef(false);
@@ -128,7 +132,8 @@ function Composer({ c, me, prefs, sigData, identities, onClose, onSend, focusInd
     to, cc, bcc, subject, files, html: editor.current?.innerHTML || '', text: editor.current?.innerText || '',
     inReplyTo: init.inReplyTo, references: init.references, replyFolder: init.replyFolder, replyUid: init.replyUid,
     forwardFolder: init.forwardFolder, forwardUid: init.forwardUid, draftUid: draft.uid, draftFolder: draft.folder,
-    priority: important ? 'high' : 'normal', readReceipt: readR, deliveryReceipt: delivR, fromAddress, asMailbox: fromChoices.find((i) => i.address === fromAddress)?.mailboxId,
+    priority: important ? 'high' : 'normal', readReceipt: readR, deliveryReceipt: delivR,
+    ...(protect ? { protect: true, securePassword: sec.password, secureHint: sec.hint, secureDays: sec.days, pwFollow: sec.follow } : {}), fromAddress, asMailbox: fromChoices.find((i) => i.address === fromAddress)?.mailboxId,
     fromName: fromAddress !== me.email ? ((identities || []).find((i) => i.address === fromAddress)?.name || '') : (prefs.displayName || me.name || ''),
   });
 
@@ -160,6 +165,7 @@ function Composer({ c, me, prefs, sigData, identities, onClose, onSend, focusInd
     if (!to.length && !cc.length && !bcc.length) return toast(tr("Add at least one recipient"), { error: true });
     const bad = [...to, ...cc, ...bcc].find((a) => !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(a.address));
     if (bad) return toast(`"${bad.address}" isn't a valid email address`, { error: true });
+    if (protect && sec.password.length < 8) return toast(tr("Choose a password of at least 8 characters, or tap Generate"), { error: true });
     if (!subject.trim() && !confirm(tr("Send this message without a subject?"))) return;
     const text = (editor.current?.innerText || '').toLowerCase();
     if (/\b(attached|attachment|enclosed)\b/.test(text.split('wrote:')[0]) && !files.length && !init.forwardUid && !confirm(tr("You mentioned an attachment but none is attached. Send anyway?"))) return;
@@ -202,6 +208,26 @@ function Composer({ c, me, prefs, sigData, identities, onClose, onSend, focusInd
         {showCc && <RecipientInput label={tr("Cc")} value={cc} onChange={setCc} />}
         {showCc && <RecipientInput label={tr("Bcc")} value={bcc} onChange={setBcc} />}
         <input className="subject-input" placeholder={tr("Subject")} value={subject} onChange={(e) => setSubject(e.target.value)} aria-label={tr("Subject")} />
+        {protect && (
+          <div className="protect-panel">
+            <div className="protect-title"><Icon name="lock" size={14} /> <b>{tr("Password-protected")}</b> <span className="muted small">{tr("They get a secure link. Send the password separately.")}</span>
+              <button type="button" className="link" onClick={() => setProtect(false)}>{tr("Remove")}</button></div>
+            <div className="protect-row">
+              <input type={sec.show ? 'text' : 'password'} value={sec.password} onChange={(e) => setSec({ ...sec, password: e.target.value })} placeholder={tr("Password (8+ characters)")} aria-label={tr("Password")} autoComplete="new-password" />
+              <button type="button" className="btn sm" onClick={() => setSec({ ...sec, show: !sec.show })}>{sec.show ? tr("Hide") : tr("Show")}</button>
+              <button type="button" className="btn sm" onClick={genPassword}>{tr("Generate")}</button>
+            </div>
+            <div className="protect-row">
+              <input value={sec.hint} onChange={(e) => setSec({ ...sec, hint: e.target.value })} placeholder={tr("Hint (optional, shown to them)")} maxLength={200} aria-label={tr("Password hint")} />
+              <select value={sec.days} onChange={(e) => setSec({ ...sec, days: Number(e.target.value) })} aria-label={tr("Expires")}>
+                {[[1, 'Expires in 1 day'], [7, 'Expires in 7 days'], [14, 'Expires in 14 days'], [30, 'Expires in 30 days']].map(([v, l]) => <option key={v} value={v}>{tr(l)}</option>)}
+              </select>
+            </div>
+            <label className="row-field small">{tr("Send the password")}{' '}<select value={sec.follow} onChange={(e) => setSec({ ...sec, follow: e.target.value })}>
+              <option value="later">{tr("By email, 5 minutes later")}</option><option value="now">{tr("By email, straight after")}</option><option value="manual">{tr("I'll send it myself (text, call…)")}</option>
+            </select></label>
+          </div>
+        )}
         <div className="editor-wrap">
           {!ready && <div className="list-msg"><div className="spinner" /></div>}
           <div ref={editor} className="editor" contentEditable suppressContentEditableWarning onInput={markDirty} aria-label={tr("Message body")} role="textbox" aria-multiline="true"
@@ -254,6 +280,7 @@ function Composer({ c, me, prefs, sigData, identities, onClose, onSend, focusInd
             <button type="button" className="icon-btn" title={tr("Bulleted list")} onMouseDown={(e) => { e.preventDefault(); exec('insertUnorderedList'); }}><Icon name="list" size={16} /></button>
             <button type="button" className="icon-btn" title={tr("Insert link")} onMouseDown={(e) => { e.preventDefault(); addLink(); }}><Icon name="link" size={16} /></button>
             <button type="button" className={`icon-btn ${important ? 'on-red' : ''}`} title={tr("High importance")} onClick={() => setImportant((x) => !x)}>!</button>
+            <button type="button" className={`icon-btn ${protect ? 'on' : ''}`} title={tr("Protect with a password")} aria-label={tr("Protect with a password")} aria-pressed={protect} onClick={() => { setProtect((x) => !x); if (!protect && !sec.password) genPassword(); }}><Icon name="lock" size={16} /></button>
             {prefs.requestReceipts !== 'never' && (
               <div className="dd">
                 <button type="button" className={`icon-btn ${readR || delivR ? 'on' : ''}`} title={tr("Receipts")} aria-label={tr("Receipts")} aria-expanded={rcptMenu} onClick={() => setRcptMenu((x) => !x)}><Icon name="check" size={16} />{readR && <Icon name="check" size={16} />}</button>
@@ -310,11 +337,33 @@ function toForm(p) {
   fd.append('to', list(p.to)); fd.append('cc', list(p.cc)); fd.append('bcc', list(p.bcc));
   fd.append('subject', p.subject);
   fd.append('html', p.html); fd.append('text', p.text);
-  for (const k of ['inReplyTo', 'references', 'replyFolder', 'replyUid', 'forwardFolder', 'forwardUid', 'draftUid', 'priority', 'fromName', 'fromAddress', 'sendAt']) {
+  for (const k of ['inReplyTo', 'references', 'replyFolder', 'replyUid', 'forwardFolder', 'forwardUid', 'draftUid', 'priority', 'fromName', 'fromAddress', 'sendAt', 'readReceipt', 'deliveryReceipt', 'protect', 'securePassword', 'secureHint', 'secureDays']) {
     if (p[k]) fd.append(k, p[k]);
   }
   for (const f of p.files) fd.append('attachments', f, f.name);
   return fd;
+}
+
+// After sending a protected email: copy the password, text it, or email it now
+function PasswordShare({ s, onClose }) {
+  const toast = useToast();
+  const [sent, setSent] = useState(false);
+  const smsBody = encodeURIComponent(`The password for the protected email I just sent you: ${s.password}`);
+  return (
+    <div className="modal-wrap pw-wrap" role="dialog" aria-modal="true" aria-label={tr("Send the password")}>
+      <div className="modal pw-share">
+        <h3><Icon name="lock" size={16} /> {tr("Protected email sent")}</h3>
+        <p>{tr("Now send the password a different way, so the link and the password never travel together.")}</p>
+        <div className="pw-box"><code>{s.password}</code><button className="btn sm" onClick={() => navigator.clipboard?.writeText(s.password).then(() => toast(tr("Copied")))}><Icon name="copy" size={14} /> {tr("Copy")}</button></div>
+        <div className="btn-row">
+          <a className="btn" href={`sms:?&body=${smsBody}`}>{tr("Text it")}</a>
+          <button className="btn" disabled={sent} onClick={() => api.post(`/api/secure/${s.id}/send-password`, { password: s.password, delayMinutes: 0 }).then(() => { setSent(true); toast(tr("Password emailed separately")); }).catch((e) => toast(e.message, { error: true }))}>{sent ? tr("Emailed") : tr("Email it separately")}</button>
+          <button className="btn primary" onClick={onClose}>{tr("Done")}</button>
+        </div>
+        <p className="muted small">{tr("We don't keep the password. If it's lost, send the email again.")}</p>
+      </div>
+    </div>
+  );
 }
 
 export default function ComposeManager({ composers, setComposers, me, prefs, sigData, onSent }) {
@@ -322,6 +371,7 @@ export default function ComposeManager({ composers, setComposers, me, prefs, sig
   useEffect(() => { api.get('/api/identities').then(setIdentities).catch(() => setIdentities([])); }, []);
   const toast = useToast();
   const [focused, setFocused] = useState(null);
+  const [share, setShare] = useState(null); // a protected email whose password the sender sends themselves
   const remove = (id) => setComposers((cs) => cs.filter((c) => c.id !== id));
   // Outbox: send what was written while offline as soon as we're back online
   useEffect(() => {
@@ -343,11 +393,18 @@ export default function ComposeManager({ composers, setComposers, me, prefs, sig
       if (undone) return;
       const form = toForm(payload);
       try {
-        await api.form('/api/send', form, payload.asMailbox);
-        toast(tr("Message sent"));
+        const r = await api.form('/api/send', form, payload.asMailbox);
         onSent();
+        if (r?.secure) {
+          if (payload.pwFollow === 'manual') { setShare({ ...r.secure, password: payload.securePassword }); return; }
+          await api.post(`/api/secure/${r.secure.id}/send-password`, { password: payload.securePassword, delayMinutes: payload.pwFollow === 'now' ? 0 : 5 })
+            .then(() => toast(payload.pwFollow === 'now' ? tr("Protected email sent. The password followed in a separate email.") : tr("Protected email sent. The password will follow in a separate email in 5 minutes.")))
+            .catch((e) => { toast(e.message, { error: true }); setShare({ ...r.secure, password: payload.securePassword }); });
+          return;
+        }
+        toast(tr("Message sent"));
       } catch (e) {
-        if (isOffline(e) && offlineAllowed()) { // no connection: keep it on this device and send it when we're back online
+        if (isOffline(e) && offlineAllowed() && !payload.protect) { // protected emails are never stored on the device (they hold the password) // no connection: keep it on this device and send it when we're back online
           try { await queue(form, payload.asMailbox, payload.subject || '(no subject)'); toast(tr("You’re offline. Saved to your Outbox; it will send when you reconnect.")); return; } catch { /* fall through */ }
         }
         toast(`Couldn't send: ${e.message}`, { error: true, duration: 8000 });
@@ -374,6 +431,7 @@ export default function ComposeManager({ composers, setComposers, me, prefs, sig
 
   return (
     <div className="composers">
+      {share && <PasswordShare s={share} onClose={() => setShare(null)} />}
       {composers.map((c, i) => (
         <Composer key={c.id} c={c} me={me} prefs={prefs} sigData={sigData} identities={identities} count={composers.length} focusIndex={i}
           setFocus={() => setFocused(c.id)} onClose={() => remove(c.id)} onSend={(p) => onSend(c, p)} />

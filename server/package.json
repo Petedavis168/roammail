@@ -28,6 +28,7 @@
     "test:booking": "node --disable-warning=ExperimentalWarning --test test/booking.test.js",
     "test:privacy": "node --disable-warning=ExperimentalWarning --test test/privacy.test.js",
     "test:receipts": "node --disable-warning=ExperimentalWarning --test test/receipts.test.js",
+    "test:secure": "node --disable-warning=ExperimentalWarning --test test/secure.test.js",
     "test:nativepush": "NODE_ENV=test node --disable-warning=ExperimentalWarning --test test/nativepush.test.js"
   },
   "keywords": [],

@@ -202,6 +202,12 @@ CREATE TABLE IF NOT EXISTS receipts (
 );
 CREATE UNIQUE INDEX IF NOT EXISTS receipts_msg ON receipts(owner, message_id);
 CREATE TABLE IF NOT EXISTS receipt_events (receipt_id INTEGER NOT NULL, recipient TEXT NOT NULL, kind TEXT NOT NULL, at INTEGER NOT NULL, PRIMARY KEY (receipt_id, recipient, kind));
+CREATE TABLE IF NOT EXISTS secure_messages (
+  id TEXT PRIMARY KEY, owner TEXT NOT NULL, sender_name TEXT, data TEXT, salt TEXT NOT NULL, iv TEXT NOT NULL, tag TEXT NOT NULL, hint TEXT, recipients TEXT,
+  expires_at INTEGER NOT NULL, created_at INTEGER NOT NULL, attempts INTEGER NOT NULL DEFAULT 0, locked_until INTEGER, opened_at INTEGER, opens INTEGER NOT NULL DEFAULT 0,
+  replies INTEGER NOT NULL DEFAULT 0, revoked INTEGER NOT NULL DEFAULT 0
+);
+CREATE INDEX IF NOT EXISTS secure_messages_owner ON secure_messages(owner);
 CREATE TABLE IF NOT EXISTS sso_links (
   provider TEXT NOT NULL, subject TEXT NOT NULL, email TEXT NOT NULL, tenant TEXT NOT NULL, label TEXT, creds TEXT NOT NULL,
   created_at INTEGER NOT NULL, last_used INTEGER, PRIMARY KEY (provider, subject)
