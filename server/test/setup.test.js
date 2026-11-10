@@ -45,6 +45,8 @@ test('free sign-up: 2-step verification is asked for, can be postponed 3 times, 
   assert.equal(blocked.status, 403); assert.equal(blocked.data.code, 'setup_required');
   const me = await c.get('/api/me');
   assert.equal(me.status, 200); assert.equal(me.data.setup.snoozesLeft, 3); assert.equal(me.data.setup.twoFactorRequired, false);
+  assert.equal(me.data.setup.recoveryEmail, 'recovery@example.org', 'the sign-up recovery email counts: the wizard won’t ask again');
+  assert.equal(me.data.setup.onboarded, false, 'ordinary people get the first-sign-in tour');
   for (let left = 2; left >= 0; left--) {
     const r = await c.post('/api/setup/2fa/remind');
     assert.equal(r.status, 200); assert.equal(r.data.snoozesLeft, left); assert.deepEqual(r.data.setupRequired, []);
@@ -81,6 +83,7 @@ test('super-admins cannot postpone 2-step verification; turning it on completes 
   await sleep(1200);
   assert.equal((await c.get('/api/me')).data.setup.twoFactorRequired, true);
   assert.equal((await c.post('/api/setup/2fa/remind')).status, 403);
+  assert.equal((await c.get('/api/me')).data.setup.onboarded, true, 'site owners never get the optional tour');
   const { secret } = (await c.post('/api/security/2fa/setup')).data;
   assert.equal((await c.post('/api/security/2fa/enable', { code: totp(secret) })).status, 200);
   assert.deepEqual((await c.get('/api/me')).data.setup.setupRequired, []);

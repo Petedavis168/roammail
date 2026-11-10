@@ -49,18 +49,21 @@ async function twoFactorRequired(email) {
 export async function setupState(email) {
   const e = String(email).toLowerCase();
   const s = (await row(e)) || { must_change_password: 0, twofa_snoozes: 0, twofa_snooze_until: 0 };
-  const sec = await q.get('SELECT totp_enabled, recovery_email, recovery_verified FROM user_security WHERE email = ?', e);
+  const sec = await q.get('SELECT totp_enabled, recovery_email, recovery_verified, recovery_pending FROM user_security WHERE email = ?', e);
   const required = await twoFactorRequired(e);
   const snoozed = !required && Number(s.twofa_snooze_until || 0) > Date.now();
   const steps = [];
   if (s.must_change_password) steps.push('password');
   if (!sec?.totp_enabled && !snoozed) steps.push('2fa');
+  // a recovery email given at sign-up counts (it can be confirmed later in Settings -> Security)
+  const fromSignup = sec?.recovery_email || sec?.recovery_pending ? null : (await q.get('SELECT recovery_email FROM signups WHERE email = ?', e))?.recovery_email;
   return {
     setupRequired: steps,
     twoFactorRequired: required,
     snoozesLeft: required ? 0 : Math.max(0, MAX_2FA_SNOOZES - Number(s.twofa_snoozes || 0)),
-    recoveryEmail: sec?.recovery_email || '', recoveryVerified: !!sec?.recovery_verified,
-    onboarded: !!s.onboarded_at,
+    recoveryEmail: sec?.recovery_email || sec?.recovery_pending || fromSignup || '', recoveryVerified: !!sec?.recovery_verified,
+    // site owners never get the optional first-sign-in tour (required steps above still apply)
+    onboarded: !!s.onboarded_at || config.superAdmins.includes(e),
   };
 }
 
