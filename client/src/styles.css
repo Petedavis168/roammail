@@ -1208,3 +1208,4 @@ a.g-passkey { text-decoration: none; color: inherit; box-sizing: border-box; }
 .pw-box code { flex: 1; font-size: 17px; letter-spacing: .5px; word-break: break-all; }
 .sec-status { padding: 6px 16px; display: flex; gap: 10px; align-items: center; flex-wrap: wrap; font-size: 13px; color: var(--ok); }
 .sec-status.off { color: var(--muted); }
+.update-bar { position: fixed; left: 50%; bottom: 20px; transform: translateX(-50%); z-index: 400; display: flex; gap: 12px; align-items: center; background: var(--panel); color: var(--text); border: 1px solid var(--border); border-radius: 10px; box-shadow: 0 8px 28px rgba(0,0,0,.18); padding: 10px 14px; font-size: 14px; max-width: calc(100vw - 24px); flex-wrap: wrap; }
