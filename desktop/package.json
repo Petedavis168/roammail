@@ -1,0 +1,39 @@
+{
+  "name": "roammail-desktop",
+  "productName": "Roammail",
+  "version": "1.0.0",
+  "description": "Roammail for Mac, Windows and Linux",
+  "author": "Friendly Web Services",
+  "homepage": "https://roammail.net",
+  "main": "main.js",
+  "private": true,
+  "scripts": {
+    "start": "electron .",
+    "check": "node --check main.js && node --check preload.js && node scripts/check.mjs",
+    "dist": "electron-builder --publish never"
+  },
+  "devDependencies": {
+    "electron": "^45.2.3",
+    "electron-builder": "^26.0.0"
+  },
+  "build": {
+    "appId": "net.roammail.desktop",
+    "productName": "Roammail",
+    "copyright": "Friendly Web Services",
+    "files": ["main.js", "preload.js", "offline.html", "build/icon.png"],
+    "directories": { "output": "dist", "buildResources": "build" },
+    "protocols": [{ "name": "Email", "schemes": ["mailto"] }],
+    "mac": {
+      "category": "public.app-category.productivity",
+      "target": [{ "target": "dmg", "arch": ["universal"] }, { "target": "zip", "arch": ["universal"] }],
+      "hardenedRuntime": true,
+      "entitlements": "build/entitlements.mac.plist",
+      "entitlementsInherit": "build/entitlements.mac.plist",
+      "notarize": false
+    },
+    "dmg": { "title": "Roammail" },
+    "win": { "target": [{ "target": "nsis", "arch": ["x64", "arm64"] }] },
+    "nsis": { "oneClick": false, "perMachine": false, "allowToChangeInstallationDirectory": true, "shortcutName": "Roammail" },
+    "linux": { "target": ["AppImage", "deb"], "category": "Office;Email", "mimeTypes": ["x-scheme-handler/mailto"] }
+  }
+}

@@ -26,6 +26,15 @@ import { t } from '../i18n.js';
 const Calendar = lazy(() => import('./calendar/Calendar.jsx'));
 const Contacts = lazy(() => import('./contacts/Contacts.jsx'));
 
+/** "mailto:ann@x.com,bob@y.com?cc=c@z.com&subject=Hi&body=Hello" -> a new email ready to write */
+function parseMailto(m) {
+  if (!m || !/^mailto:/i.test(m)) return {};
+  const [addr, query = ''] = m.slice(7).split('?');
+  const q = new URLSearchParams(query);
+  const list = (v) => decodeURIComponent(v || '').split(',').map((a) => a.trim()).filter((a) => /^[^\s@<>"]+@[^\s@<>"]+$/.test(a)).slice(0, 50).map((address) => ({ name: '', address }));
+  return { to: list(addr), cc: list(q.get('cc')), bcc: list(q.get('bcc')), subject: (q.get('subject') || '').slice(0, 300), prefillText: (q.get('body') || '').slice(0, 5000) };
+}
+
 export default function Mail({ me, route, refreshMe, theme, setTheme, onLogout }) {
   const toast = useToast();
   const [prefs, setPrefs] = usePrefs(me.email);
@@ -317,7 +326,13 @@ export default function Mail({ me, route, refreshMe, theme, setTheme, onLogout }
     return [...c, { id: Date.now() + Math.random(), initial }];
   });
   // Home-screen shortcut "New mail" (/app?compose=1)
-  useEffect(() => { if (new URLSearchParams(location.search).get('compose') === '1') { compose(); history.replaceState(null, '', location.pathname); } }, []);
+  // Also "mailto:" links from the desktop app or the browser (/app?compose=1&mailto=mailto:…)
+  useEffect(() => {
+    const p = new URLSearchParams(location.search);
+    if (p.get('compose') !== '1') return;
+    compose(parseMailto(p.get('mailto')));
+    history.replaceState(null, '', location.pathname);
+  }, []);
   const addTaskFrom = (m) => {
     if (!m) { setPanel('tasks'); setPanelTab('tasks'); return; }
     setTaskSeed({ title: m.subject && m.subject !== '(no subject)' ? m.subject : '', message: { key: messageKey(m.folder || listFolder, m.uid), subject: m.subject, mailboxId: route.id } });

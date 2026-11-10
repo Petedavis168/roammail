@@ -1,0 +1,10 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'"><title>Roammail</title>
+<style>body{font-family:-apple-system,Segoe UI,Roboto,Arial,sans-serif;background:#173D56;color:#fff;display:grid;place-items:center;height:100vh;margin:0;text-align:center}button{margin-top:16px;padding:10px 22px;border:0;border-radius:8px;font:inherit;font-weight:700;cursor:pointer}</style></head>
+<body><div><h2>You're offline</h2><p>Roammail will be here when you reconnect.</p><button id="retry">Try again</button></div>
+<script>
+  const back = new URLSearchParams(location.search).get('retry') || 'https://roammail.net/app';
+  const go = () => { if (/^https:\/\//.test(back)) location.href = back; };
+  document.getElementById('retry').onclick = go;
+  window.addEventListener('online', go);
+</script></body></html>
