@@ -37,6 +37,8 @@ import { ssoApi, ssoPublic } from './sso.js';
 import { bookingApi, bookingPublic, bookingPages } from './booking.js';
 import { subscriptionsApi } from './subscriptions.js';
 import { aliasesApi } from './aliases.js';
+import { receiptsApi } from './receipts.js';
+import { secureApi, securePublic, securePages } from './secure.js';
 import { aiApi } from './ai.js';
 import { premiumApi } from './premium.js';
 import { calendar } from './calendar.js';
@@ -85,6 +87,7 @@ app.use('/api', (req, res, next) => {
 app.get('/healthz', (req, res) => res.json({ ok: true }));
 app.use(appLinks); // before host routing: these must be served on every host, never redirected
 app.use(bookingPages); // public booking pages, same on every host
+app.use(securePages); // password-protected email page, same on every host
 app.use(hosts);
 app.use(ops);
 app.use(abuseDesk);
@@ -103,6 +106,7 @@ app.use('/api', publicSecurity);
 app.use('/api', passkeyLogin); // sign in with a passkey (no session yet)
 app.use('/api', ssoPublic); // sign in with Microsoft / Google (no session yet)
 app.use('/api', bookingPublic); // public booking pages: times, booking, cancel links (no sign-in)
+app.use('/api', securePublic); // password-protected emails: open, attachments, reply (no sign-in)
 app.use('/api', importsPublic); // Microsoft sign-in callback for imports (no session: sealed state)
 app.use('/api', publicRecovery);
 app.use('/api', requireSetupApi); // server tool may call with a signed request (no session)
@@ -119,6 +123,8 @@ app.use('/api', ssoApi);
 app.use('/api', bookingApi);
 app.use('/api', subscriptionsApi);
 app.use('/api', aliasesApi);
+app.use('/api', receiptsApi);
+app.use('/api', secureApi);
 app.use('/api', aiApi);
 app.use('/api', premiumApi);
 app.use('/api', mailtools);

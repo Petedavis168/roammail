@@ -196,6 +196,18 @@ CREATE TABLE IF NOT EXISTS user_aliases (
   id INTEGER PRIMARY KEY AUTOINCREMENT, email TEXT NOT NULL, address TEXT NOT NULL UNIQUE, mailcow_id TEXT NOT NULL, note TEXT, active INTEGER NOT NULL DEFAULT 1, created_at INTEGER NOT NULL
 );
 CREATE INDEX IF NOT EXISTS user_aliases_email ON user_aliases(email);
+CREATE TABLE IF NOT EXISTS receipts (
+  id INTEGER PRIMARY KEY AUTOINCREMENT, owner TEXT NOT NULL, message_id TEXT NOT NULL, envid TEXT, subject TEXT, recipients TEXT NOT NULL,
+  read_requested INTEGER NOT NULL DEFAULT 0, delivery_requested INTEGER NOT NULL DEFAULT 0, sent_at INTEGER NOT NULL
+);
+CREATE UNIQUE INDEX IF NOT EXISTS receipts_msg ON receipts(owner, message_id);
+CREATE TABLE IF NOT EXISTS receipt_events (receipt_id INTEGER NOT NULL, recipient TEXT NOT NULL, kind TEXT NOT NULL, at INTEGER NOT NULL, PRIMARY KEY (receipt_id, recipient, kind));
+CREATE TABLE IF NOT EXISTS secure_messages (
+  id TEXT PRIMARY KEY, owner TEXT NOT NULL, sender_name TEXT, data TEXT, salt TEXT NOT NULL, iv TEXT NOT NULL, tag TEXT NOT NULL, hint TEXT, recipients TEXT,
+  expires_at INTEGER NOT NULL, created_at INTEGER NOT NULL, attempts INTEGER NOT NULL DEFAULT 0, locked_until INTEGER, opened_at INTEGER, opens INTEGER NOT NULL DEFAULT 0,
+  replies INTEGER NOT NULL DEFAULT 0, revoked INTEGER NOT NULL DEFAULT 0
+);
+CREATE INDEX IF NOT EXISTS secure_messages_owner ON secure_messages(owner);
 CREATE TABLE IF NOT EXISTS sso_links (
   provider TEXT NOT NULL, subject TEXT NOT NULL, email TEXT NOT NULL, tenant TEXT NOT NULL, label TEXT, creds TEXT NOT NULL,
   created_at INTEGER NOT NULL, last_used INTEGER, PRIMARY KEY (provider, subject)

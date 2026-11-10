@@ -117,6 +117,12 @@ jobs:
       - name: Privacy tests (subscriptions, aliases, trackers, look-alikes)
         working-directory: server
         run: npm run test:privacy
+      - name: Receipts tests
+        working-directory: server
+        run: npm run test:receipts
+      - name: Password-protected email tests
+        working-directory: server
+        run: npm run test:secure
 
       - name: Logs on failure
         if: failure()

@@ -89,6 +89,64 @@ function InviteCard({ m, me }) {
   );
 }
 
+// Someone asked for a read receipt: ask, always send, or never send (Settings -> General)
+function ReceiptAsk({ m, prefs, sender }) {
+  const [state, setState] = useState(m.receiptRequested && prefs.sendReceipts === 'ask' ? 'ask' : 'done');
+  useEffect(() => {
+    if (!m.receiptRequested || prefs.sendReceipts === 'ask') return;
+    api.post('/api/receipts/send', { folder: m.folder, uid: m.uid, decline: prefs.sendReceipts === 'never' }).catch(() => {});
+  }, [m.folder, m.uid]);
+  if (state !== 'ask') return state === 'sent' ? <div className="img-banner"><Icon name="check" size={15} /> {t("Read receipt sent.")}</div> : null;
+  const answer = (decline) => api.post('/api/receipts/send', { folder: m.folder, uid: m.uid, decline }).then(() => setState(decline ? 'done' : 'sent')).catch(() => setState('done'));
+  return (
+    <div className="img-banner">
+      <Icon name="check" size={15} /> {personName(sender)} {t("asked for a read receipt.")}{' '}
+      <button className="link" onClick={() => answer(false)}>{t("Send receipt")}</button>
+      <button className="link" onClick={() => answer(true)}>{t("Don't send")}</button>
+    </div>
+  );
+}
+
+// On my own sent email: delivered / read for each recipient, when I asked for receipts
+function ReceiptStatus({ m }) {
+  const [r, setR] = useState(null);
+  useEffect(() => { if (m.messageId) api.get('/api/receipts', { messageId: m.messageId }).then(setR).catch(() => {}); }, [m.messageId]);
+  if (!r) return null;
+  const when = (t2) => new Date(t2).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
+  return (
+    <div className="rcpt-status">
+      {r.recipients.map((p) => (
+        <div key={p.address} className="small">
+          <b>{p.address}</b>{' '}
+          {p.failed ? <span className="bad">{t("Not delivered")} · {when(p.failed)}</span>
+            : <>
+              {r.deliveryRequested && (p.delivered ? <span className="ok"><Icon name="check" size={12} /> {t("Delivered")} {when(p.delivered)}</span> : <span className="muted">{t("Delivery receipt requested")}</span>)}
+              {r.readRequested && (p.read ? <span className="ok"> <Icon name="check" size={12} /><Icon name="check" size={12} /> {t("Read")} {when(p.read)}</span> : <span className="muted"> · {t("Read receipt requested")}</span>)}
+            </>}
+        </div>
+      ))}
+    </div>
+  );
+}
+
+// My own password-protected email: opened yet? expires when? withdraw it
+function SecureStatus({ id }) {
+  const [s, setS] = useState(null);
+  const load = () => api.get(`/api/secure/${id}`).then(setS).catch(() => {});
+  useEffect(() => { load(); }, [id]);
+  if (!s) return null;
+  const when = (t2) => new Date(t2).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
+  const off = s.revoked || s.expired || s.locked;
+  return (
+    <div className={`sec-status ${off ? 'off' : ''}`}>
+      <Icon name="lock" size={14} /> <b>{t("Password-protected")}</b>
+      <span>{s.revoked ? t("Withdrawn") : s.expired ? t("Expired") : s.locked ? t("Locked after too many wrong passwords") : s.openedAt ? `${t("Opened")} ${when(s.openedAt)}` : t("Not opened yet")}</span>
+      {!off && <span className="muted">· {t("Expires")} {when(s.expiresAt)}</span>}
+      {!off && <button className="link" onClick={() => confirm(t("Withdraw this email? The link will stop working and the encrypted copy is deleted.")) && api.post(`/api/secure/${id}/revoke`).then(load)}>{t("Withdraw")}</button>}
+    </div>
+  );
+}
+
 function ThreadMessage({ m, expanded, onToggle, onReply, prefs, setPrefs, last, orgDomains, onBlock, isJunk, me, onAddTask, onFollowUp }) {
   const sender = m.from?.[0] || {};
   const trusted = prefs.showImages === 'always' || prefs.trustedSenders.includes(sender.address?.toLowerCase());
@@ -165,6 +223,9 @@ function ThreadMessage({ m, expanded, onToggle, onReply, prefs, setPrefs, last, 
       {isJunk && <WhyJunk m={m} />}
       {!isJunk && <InviteCard m={m} me={me} />}
       <SecurityBanner m={m} sender={sender} orgDomains={orgDomains} />
+      {!isJunk && sender.address?.toLowerCase() !== me?.email?.toLowerCase() && <ReceiptAsk m={m} prefs={prefs} sender={sender} />}
+      {sender.address?.toLowerCase() === me?.email?.toLowerCase() && <ReceiptStatus m={m} />}
+      {m.secureId && sender.address?.toLowerCase() === me?.email?.toLowerCase() && <SecureStatus id={m.secureId} />}
       {isJunk && <div className="img-banner"><Icon name="shield" size={16} />{' '}{t("Links and pictures are turned off in Junk. Mark it as not junk to use them.")}</div>}
       {blocked > 0 && !allow && !isJunk && (
         <div className="img-banner">

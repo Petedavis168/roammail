@@ -10,7 +10,7 @@ const LABELS = ['Too weak', 'Weak', 'Fair', 'Good', 'Strong', 'Strong'];
 export default function SetupWizard({ me, onDone, onLogout }) {
   const st = me.setup;
   const steps = [...(st.setupRequired.includes('password') ? ['password'] : []), ...(st.setupRequired.includes('2fa') ? ['2fa'] : []),
-    ...(!st.recoveryVerified ? ['recovery'] : []), 'extras'];
+    ...(!st.recoveryVerified && !st.recoveryEmail ? ['recovery'] : []), 'extras']; // only ask if they haven't given one
   const [i, setI] = useState(0);
   const [pw, setPw] = useState(''); const [pw2, setPw2] = useState('');
   const [newPassword, setNewPassword] = useState('');
