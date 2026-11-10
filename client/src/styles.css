@@ -257,9 +257,9 @@ kbd { font: 12px ui-monospace, monospace; background: var(--panel-2); border: 1p
 .c-file { display: inline-flex; align-items: center; gap: 4px; background: var(--panel-2); border: 1px solid var(--border); border-radius: 5px; padding: 3px 4px 3px 8px; font-size: 12.5px; max-width: 100%; }
 .c-file button { border: 0; background: none; color: var(--muted); font-size: 15px; }
 .c-note { padding: 0 12px 4px; }
-.composer-foot { display: flex; align-items: center; gap: 8px; padding: 10px 12px; border-top: 1px solid var(--border); }
+.composer-foot { display: flex; align-items: center; gap: 8px; padding: 10px 12px; border-top: 1px solid var(--border); flex-wrap: wrap; row-gap: 6px; } /* wraps instead of cutting off buttons */
 .composer-foot .btn.primary { border-radius: 18px; padding: 8px 20px; }
-.fmt { display: flex; }
+.fmt { display: flex; flex-wrap: wrap; min-width: 0; }
 .saving { flex: 1; text-align: right; }
 
 /* ---------- toasts ---------- */
@@ -1209,3 +1209,6 @@ a.g-passkey { text-decoration: none; color: inherit; box-sizing: border-box; }
 .sec-status { padding: 6px 16px; display: flex; gap: 10px; align-items: center; flex-wrap: wrap; font-size: 13px; color: var(--ok); }
 .sec-status.off { color: var(--muted); }
 .update-bar { position: fixed; left: 50%; bottom: 20px; transform: translateX(-50%); z-index: 400; display: flex; gap: 12px; align-items: center; background: var(--panel); color: var(--text); border: 1px solid var(--border); border-radius: 10px; box-shadow: 0 8px 28px rgba(0,0,0,.18); padding: 10px 14px; font-size: 14px; max-width: calc(100vw - 24px); flex-wrap: wrap; }
+.app-rail button small { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.app-rail button small.rail-long { font-size: 8.5px; letter-spacing: -0.2px; }
+.sidebar { overflow-x: hidden; } /* no sideways scrollbar under the folders */

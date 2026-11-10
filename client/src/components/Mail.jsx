@@ -465,8 +465,9 @@ export default function Mail({ me, route, refreshMe, theme, setTheme, onLogout }
       <div className="shell">
       <nav className="app-rail" aria-label={t("Apps")}>
         {[['mail', 'mail', 'Mail'], ['calendar', 'calendar', 'Calendar'], ['contacts', 'users', 'Contacts']].map(([v, i, l]) => (
-          <button key={v} className={view === v ? 'on' : ''} onClick={() => setView(v)} title={l} aria-label={l}><Icon name={i} size={20} /><small>{l}</small></button>
+          <button key={v} className={view === v && !(v === 'mail' && folder === '@subscriptions') ? 'on' : ''} onClick={() => { setView(v); if (v === 'mail' && folder === '@subscriptions') setFolder('INBOX'); }} title={l} aria-label={l}><Icon name={i} size={20} /><small>{l}</small></button>
         ))}
+        <button className={view === 'mail' && folder === '@subscriptions' ? 'on' : ''} onClick={() => { setView('mail'); setFolder('@subscriptions'); clearSearch(); setActive(null); }} title={t("Subscriptions")} aria-label={t("Subscriptions")}><Icon name="list" size={20} /><small className="rail-long">{t("Subscriptions")}</small></button>
         {multi && (
           <div className="rail-accounts" aria-label={t("Accounts")}>
             {accounts.map((a, i) => (
@@ -494,7 +495,6 @@ export default function Mail({ me, route, refreshMe, theme, setTheme, onLogout }
               me={me} mailboxes={sharedBoxes} mailbox={mailbox} onMailbox={switchMailbox}
               onSelect={(p) => { setFolder(p); clearSearch(); setFilter(''); if (vw < 1280) setNavPeek(false); }}
               onDropMessages={(dest, uids) => act.move(dest, uids)} onScheduled={() => { setFolder('@scheduled'); clearSearch(); }} onQuarantine={() => { setFolder('@quarantine'); clearSearch(); }} qCount={qCount}
-              onSubscriptions={mailbox && !me.delegated ? () => { setFolder('@subscriptions'); clearSearch(); setActive(null); if (vw < 1280) setNavPeek(false); } : null}
               onAliases={!me.delegated ? () => { setFolder('@aliases'); clearSearch(); setActive(null); if (vw < 1280) setNavPeek(false); } : null}
               allInboxes={multi ? accounts.reduce((n, a) => n + (a.unread || 0), 0) : null} onAllInboxes={() => { setFolder('@all'); clearSearch(); }}
               categories={prefs.categories} onCategory={(c) => runSearch(`label:${catKeyword(c.name).slice(4)}`)} />
