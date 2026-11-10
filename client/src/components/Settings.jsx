@@ -164,7 +164,7 @@ function Apps({ me, sigData }) {
   );
 }
 
-const TABS = [
+export const TABS = [
   ['general', 'General', 'settings'], ['signatures', 'Signatures', 'pen'], ['booking', 'Booking page', 'calendar'], ['templates', 'Templates', 'mail'], ['security', 'Security', 'lock'],
   ['autoreply', 'Automatic replies', 'reply'], ['junk', 'Junk & spam', 'junk'], ['rules', 'Rules', 'filter'], ['import', 'Import mail', 'import'], ['apps', 'Phone & apps', 'phone'], ['privacy', 'Privacy', 'shield'], ['premium', 'Premium', 'spark'],
 ];

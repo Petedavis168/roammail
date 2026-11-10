@@ -22,6 +22,8 @@ import SnoozeMenu from './SnoozeMenu.jsx';
 import QuarantineList from './QuarantineList.jsx';
 import SubscriptionsList from './SubscriptionsList.jsx';
 import AliasesList from './AliasesList.jsx';
+import CommandBar from './CommandBar.jsx';
+import { TABS as SETTINGS_TABS } from './Settings.jsx';
 import { t } from '../i18n.js';
 const Calendar = lazy(() => import('./calendar/Calendar.jsx'));
 const Contacts = lazy(() => import('./contacts/Contacts.jsx'));
@@ -60,7 +62,13 @@ export default function Mail({ me, route, refreshMe, theme, setTheme, onLogout }
   const [selected, setSelected] = useState(new Set());
   const [active, setActive] = useState(null); // uid
   const [composers, setComposers] = useState([]);
-  const [showSettings, setShowSettings] = useState(false);
+  const [showSettings, setShowSettings] = useState(false); // true, or the name of a settings page to open
+  const [palette, setPalette] = useState(false);
+  useEffect(() => {
+    const onCmdK = (e) => { if ((e.ctrlKey || e.metaKey) && !e.shiftKey && !e.altKey && e.key.toLowerCase() === 'k') { e.preventDefault(); setPalette((x) => !x); } };
+    window.addEventListener('keydown', onCmdK);
+    return () => window.removeEventListener('keydown', onCmdK);
+  }, []);
   const [showHelp, setShowHelp] = useState(false);
   // Sidebar (item 11): 240 px by default, drag to 200-320 px, collapses to a 64 px rail ( [ key ),
   // collapses automatically under 1280 px and becomes a slide-in drawer under 900 px.
@@ -414,7 +422,7 @@ export default function Mail({ me, route, refreshMe, theme, setTheme, onLogout }
     <div className={`app density-${prefs.density}`}>
       <header className="topbar">
         <button className="icon-btn on-dark" onClick={toggleNav} aria-label={t("Toggle navigation")} title={t("Collapse or expand navigation ([)")} aria-expanded={navMode === 'full' || (navMode === 'drawer' && navPeek)}><Icon name="menu" /></button>
-        <div className="brand" onClick={() => { setView('mail'); setFolder('INBOX'); clearSearch(); }}><img src="/roammail-mark-white.png" alt="" /> <span>{t("Roammail")}</span></div>
+        <div className="brand" onClick={() => { setView('mail'); setFolder('INBOX'); clearSearch(); }}><img className="logo-light" src="/assets/roammail-symbol.png" alt="" /><img className="logo-dark" src="/roammail-mark-white.png" alt="" /> <span>{t("Roammail")}</span></div>
         {view === 'mail' ? (
           <form className="search" onSubmit={(e) => { e.preventDefault(); runSearch(searchInput); }}>
             <Icon name="search" />
@@ -549,8 +557,19 @@ export default function Mail({ me, route, refreshMe, theme, setTheme, onLogout }
       {snoozeFor && <SnoozeMenu onPick={act.doSnooze} onClose={() => setSnoozeFor(null)} />}
       <ComposeManager composers={composers} setComposers={setComposers} me={me} prefs={prefs} sigData={sigData}
         onSent={() => { loadFolders(); if (listFolder === special('\\Sent') || listFolder === special('\\Drafts')) load({ quiet: true }); }} />
-      {showSettings && <SettingsPanel prefs={prefs} setPrefs={setPrefs} me={me} folders={folders} sigData={sigData} reloadSigs={reloadSigs} onClose={() => setShowSettings(false)} initialTab={importMsg ? 'import' : premiumMsg ? 'premium' : ssoMsg ? 'security' : undefined} importMsg={importMsg} premiumMsg={premiumMsg} ssoMsg={ssoMsg} />}
+      {showSettings && <SettingsPanel prefs={prefs} setPrefs={setPrefs} me={me} folders={folders} sigData={sigData} reloadSigs={reloadSigs} onClose={() => setShowSettings(false)} initialTab={typeof showSettings === 'string' ? showSettings : importMsg ? 'import' : premiumMsg ? 'premium' : ssoMsg ? 'security' : undefined} importMsg={importMsg} premiumMsg={premiumMsg} ssoMsg={ssoMsg} />}
       {showHelp && <ShortcutsHelp onClose={() => setShowHelp(false)} />}
+      {palette && <CommandBar onClose={() => setPalette(false)} settingsTabs={SETTINGS_TABS}
+        folders={folders.map((f) => ({ ...f, label: folderLabel(f) }))}
+        actions={{
+          compose: () => compose(),
+          folder: (p) => { setView('mail'); setFolder(p); clearSearch(); setActive(null); },
+          view: (v) => setView(v),
+          settings: (tab) => setShowSettings(tab),
+          search: (q) => { setView('mail'); if (folder.startsWith('@')) setFolder('INBOX'); runSearch(q); },
+          toggleTheme: () => setTheme(theme === 'dark' ? 'light' : 'dark'),
+          shortcuts: () => setShowHelp(true),
+        }} />}
     </div>
   );
 }

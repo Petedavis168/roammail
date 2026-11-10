@@ -58,6 +58,7 @@ function Composer({ c, me, prefs, sigData, identities, onClose, onSend, focusInd
   const [readR, setReadR] = useState(prefs.requestReceipts === 'always');
   const [delivR, setDelivR] = useState(prefs.requestReceipts === 'always');
   const [rcptMenu, setRcptMenu] = useState(false);
+  const [moreMenu, setMoreMenu] = useState(false);
   // password protection: recipients get a link; the password goes separately
   const [protect, setProtect] = useState(false);
   const [sec, setSec] = useState({ password: '', hint: '', days: 7, follow: 'later', show: false });
@@ -282,25 +283,28 @@ function Composer({ c, me, prefs, sigData, identities, onClose, onSend, focusInd
             <button type="button" className="icon-btn" title={tr("Attach files")} onClick={() => fileInput.current.click()}><Icon name="clip" size={16} /></button>
             <button type="button" className="icon-btn" title={tr("Bold")} onMouseDown={(e) => { e.preventDefault(); exec('bold'); }}><Icon name="bold" size={16} /></button>
             <button type="button" className="icon-btn" title={tr("Italic")} onMouseDown={(e) => { e.preventDefault(); exec('italic'); }}><Icon name="italic" size={16} /></button>
-            <button type="button" className="icon-btn" title={tr("Underline")} onMouseDown={(e) => { e.preventDefault(); exec('underline'); }}><Icon name="underline" size={16} /></button>
-            <button type="button" className="icon-btn" title={tr("Bulleted list")} onMouseDown={(e) => { e.preventDefault(); exec('insertUnorderedList'); }}><Icon name="list" size={16} /></button>
             <button type="button" className="icon-btn" title={tr("Insert link")} onMouseDown={(e) => { e.preventDefault(); addLink(); }}><Icon name="link" size={16} /></button>
-            <button type="button" className={`icon-btn ${important ? 'on-red' : ''}`} title={tr("High importance")} onClick={() => setImportant((x) => !x)}>!</button>
             <button type="button" className={`icon-btn ${protect ? 'on' : ''}`} title={tr("Protect with a password")} aria-label={tr("Protect with a password")} aria-pressed={protect} onClick={() => { setProtect((x) => !x); if (!protect && !sec.password) genPassword(); }}><Icon name="lock" size={16} /></button>
-            {prefs.requestReceipts !== 'never' && (
-              <div className="dd">
-                <button type="button" className={`icon-btn ${readR || delivR ? 'on' : ''}`} title={tr("Receipts")} aria-label={tr("Receipts")} aria-expanded={rcptMenu} onClick={() => setRcptMenu((x) => !x)}><Icon name="check" size={16} />{readR && <Icon name="check" size={16} />}</button>
-                {rcptMenu && (
-                  <div className="menu up rcpt-menu" onMouseLeave={() => setRcptMenu(false)}>
-                    <label className="check"><input type="checkbox" checked={delivR} onChange={(e) => setDelivR(e.target.checked)} /> {tr("Request a delivery receipt")}</label>
-                    <label className="check"><input type="checkbox" checked={readR} onChange={(e) => setReadR(e.target.checked)} /> {tr("Request a read receipt")}</label>
-                    <small className="muted">{tr("The recipient's mail app may ask them first, so a read receipt isn't guaranteed.")}</small>
-                  </div>
-                )}
-              </div>
-            )}
             <div className="dd">
-              <button type="button" className="icon-btn" title={tr("Insert a template")} onClick={openTemplates}>📄</button>
+              <button type="button" className={`icon-btn ${important || readR || delivR ? 'on' : ''}`} title={tr("More options")} aria-label={tr("More options")} aria-expanded={moreMenu} onClick={() => setMoreMenu((x) => !x)}><Icon name="more" size={16} /></button>
+              {moreMenu && (
+                <div className="menu up more-menu" onMouseLeave={() => setMoreMenu(false)}>
+                  <button onMouseDown={(e) => { e.preventDefault(); exec('underline'); }}><Icon name="underline" size={15} /> {tr("Underline")}</button>
+                  <button onMouseDown={(e) => { e.preventDefault(); exec('insertUnorderedList'); }}><Icon name="list" size={15} /> {tr("Bulleted list")}</button>
+                  <button onMouseDown={(e) => { e.preventDefault(); exec('insertOrderedList'); }}><span className="ic-num">1.</span> {tr("Numbered list")}</button>
+                  <div className="menu-sep" />
+                  <button onClick={() => setImportant((x) => !x)}><Icon name={important ? 'check' : 'alert'} size={15} /> {tr("Important")}</button>
+                  {prefs.requestReceipts !== 'never' && <>
+                    <button onClick={() => setDelivR((x) => !x)}><Icon name={delivR ? 'check' : 'send'} size={15} /> {tr("Delivery receipt")}</button>
+                    <button onClick={() => setReadR((x) => !x)}><Icon name={readR ? 'check' : 'mail'} size={15} /> {tr("Read receipt")}</button>
+                  </>}
+                  <div className="menu-sep" />
+                  <button onClick={() => { setMoreMenu(false); openTemplates(); }}><Icon name="copy" size={15} /> {tr("Template")}…</button>
+                  <button onClick={() => { setMoreMenu(false); setSigMenu(true); }}><Icon name="pen" size={15} /> {tr("Signature")}…</button>
+                </div>
+              )}
+            </div>
+            <div className="dd">
               {tplMenu && (
                 <div className="menu up" onMouseLeave={() => setTplMenu(false)}>
                   <div className="menu-head"><b>{tr("Templates")}</b></div>
@@ -314,7 +318,6 @@ function Composer({ c, me, prefs, sigData, identities, onClose, onSend, focusInd
               )}
             </div>
             <div className="dd">
-              <button type="button" className="icon-btn" title={tr("Signature")} onClick={() => setSigMenu((x) => !x)}><Icon name="pen" size={16} /></button>
               {sigMenu && (
                 <div className="menu up" onMouseLeave={() => setSigMenu(false)}>
                   <div className="menu-head"><b>{tr("Signature")}</b></div>

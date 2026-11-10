@@ -119,7 +119,7 @@ test('password-protected email: link only, opens with the separate password, loc
     const generated = await page.locator('input[aria-label="Password"]').inputValue();
     assert.ok(generated.length >= 14, 'a strong password was generated');
     await page.locator('.protect-panel select').last().selectOption('manual');
-    await page.click('[aria-label="Receipts"]'); await page.check('text=Request a read receipt');
+    await page.click('[aria-label="More options"]'); await page.click('.more-menu >> text=Read receipt');
     const sendReq = page.waitForRequest((r) => r.url().endsWith('/api/send'));
     await page.click('.composer >> button:has-text("Send")');
     const posted = (await sendReq).postData() || '';

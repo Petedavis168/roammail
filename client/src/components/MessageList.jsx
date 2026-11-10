@@ -137,7 +137,12 @@ export default function MessageList({ list, title, search, onClearSearch, folder
           ];
         })}
         </div>
-        {loading && <div className="list-msg"><div className="spinner" /></div>}
+        {loading && messages.length === 0 && (
+          <div aria-label="Loading" role="status">{[0, 1, 2, 3, 4, 5].map((i) => (
+            <div key={i} className="skel-row"><span className="skel circle" /><div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 8 }}><span className="skel line" style={{ width: `${40 + (i * 13) % 30}%` }} /><span className="skel line" style={{ width: `${70 + (i * 7) % 25}%` }} /></div></div>
+          ))}</div>
+        )}
+        {loading && messages.length > 0 && <div className="list-msg"><div className="spinner" /></div>}
         {!loading && messages.length === 0 && (
           <div className="empty">
             <Icon name={search ? 'search' : filter ? 'filter' : folderUse === '\\Junk' ? 'shield' : 'inbox'} size={40} />
