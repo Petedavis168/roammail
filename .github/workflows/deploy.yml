@@ -1,0 +1,72 @@
+# Deploy Roammail to production (AWS ECS, cluster "roammail", us-east-2).
+# Run it from GitHub: Actions > "Deploy" > Run workflow > pick the branch. Claude can also start it.
+# GitHub signs in to AWS with a short-lived token (OpenID Connect): no AWS password or key is stored anywhere.
+# The AWS role it uses (roammail-github-deploy) may only push the app image and update the two Roammail services.
+name: Deploy
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirm:
+        description: Type "deploy" to deploy this branch to roammail.net
+        required: true
+
+permissions:
+  contents: read
+  id-token: write # for the short-lived AWS sign-in
+
+concurrency:
+  group: deploy-production
+  cancel-in-progress: false
+
+env:
+  AWS_REGION: us-east-2
+  AWS_ROLE: arn:aws:iam::515579969872:role/roammail-github-deploy
+  REPO: 515579969872.dkr.ecr.us-east-2.amazonaws.com/roammail-app
+  CLUSTER: roammail
+
+jobs:
+  checks:
+    if: inputs.confirm == 'deploy'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22 }
+      - name: Unit tests and client build
+        run: |
+          (cd server && npm ci && npm run -s test)
+          (cd client && npm ci && npx vite build)
+
+  deploy:
+    needs: checks
+    runs-on: ubuntu-latest
+    environment: production # add required reviewers here in GitHub settings if you want an approval step
+    steps:
+      - uses: actions/checkout@v4
+      - uses: aws-actions/configure-aws-credentials@v4
+        with: { role-to-assume: '${{ env.AWS_ROLE }}', aws-region: '${{ env.AWS_REGION }}' }
+      - uses: aws-actions/amazon-ecr-login@v2
+      - name: Build and push the image
+        run: |
+          TAG=$(git rev-parse --short HEAD)
+          echo "TAG=$TAG" >> "$GITHUB_ENV"
+          docker build --platform linux/amd64 -t "$REPO:$TAG" -t "$REPO:latest" .
+          docker push "$REPO:$TAG" && docker push "$REPO:latest"
+      - name: Update the web and worker services (same settings, new image)
+        run: |
+          for SVC in roammail-web roammail-worker; do
+            TD=$(aws ecs describe-services --cluster "$CLUSTER" --services "$SVC" --query 'services[0].taskDefinition' --output text)
+            aws ecs describe-task-definition --task-definition "$TD" --query taskDefinition --output json \
+              | jq --arg img "$REPO:$TAG" '{family, taskRoleArn, executionRoleArn, networkMode, containerDefinitions, volumes, placementConstraints, requiresCompatibilities, cpu, memory, runtimePlatform, ephemeralStorage}
+                  | with_entries(select(.value != null)) | .containerDefinitions |= map(.image = $img)' > td.json
+            NEW=$(aws ecs register-task-definition --cli-input-json file://td.json --query taskDefinition.taskDefinitionArn --output text)
+            aws ecs update-service --cluster "$CLUSTER" --service "$SVC" --task-definition "$NEW" > /dev/null
+            echo "$SVC -> $NEW"
+          done
+      - name: Wait until the new version is running
+        run: aws ecs wait services-stable --cluster "$CLUSTER" --services roammail-web roammail-worker
+      - name: Check the site
+        run: |
+          for i in 1 2 3 4 5 6; do curl -fsS https://roammail.net/healthz && exit 0; sleep 10; done; exit 1
+      - run: echo "Deployed roammail-app:$TAG" >> "$GITHUB_STEP_SUMMARY"
