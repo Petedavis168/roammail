@@ -21,7 +21,7 @@ const DEFAULTS = { enabled: true, days: 3, onlyQuestions: true };
 const dayMs = () => (process.env.NODE_ENV !== 'production' && process.env.NUDGE_DAY_MS ? Number(process.env.NUDGE_DAY_MS) : 864e5);
 
 const ids = (s) => String(s || '').match(/<[^<>\s]+>/g) || [];
-const AUTO_SUBJECT = /^(read|delivered|automatic reply|out of office|auto|accepted|declined|tentative|invitation|updated invitation|canceled|cancelled)\b|password for my protected email|sent you a protected email/i;
+const AUTO_SUBJECT = /(?:^(?:read|delivered|automatic reply|out of office|auto|accepted|declined|tentative|invitation|updated invitation|canceled|cancelled)\b)|(?:password for my protected email)|(?:sent you a protected email)/i;
 const NO_REPLY = /(^|[._-])(no-?reply|do-?not-?reply|notifications?|mailer-daemon|postmaster|bounce)/i;
 
 /** The plain-text part of a message (to look for a question), from its body structure. */

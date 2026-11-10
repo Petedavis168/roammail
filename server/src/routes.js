@@ -285,7 +285,7 @@ function fullMessage(folder, msg, parsed) {
     secureId: /^[\w-]{10,40}$/.test(String(parsed.headers.get('x-roammail-secure-id') || '')) ? String(parsed.headers.get('x-roammail-secure-id')) : null,
     receiptRequested: !!parsed.headers.get('disposition-notification-to') && !(msg.flags || new Set()).has('$MDNSent'),
     report: (() => { // delivery reports and read receipts: a plain summary instead of their raw contents
-      const parts = [parsed.text || '', ...(parsed.attachments || []).filter((a) => /^message\/|rfc822-headers/i.test(a.contentType || '') && a.size < 2e6).map((a) => `Content-Type: ${a.contentType}\n\n${a.content.toString('utf8')}`)];
+      const parts = [parsed.text || '', ...(parsed.attachments || []).filter((a) => /^(?:message\/|text\/rfc822-headers)/i.test(a.contentType || '') && a.size < 2e6).map((a) => `Content-Type: ${a.contentType}\n\n${a.content.toString('utf8')}`)];
       const ct = String(parsed.headers.get('content-type')?.value || '') + String(parsed.headers.get('content-type')?.params?.['report-type'] ? ` report-type=${parsed.headers.get('content-type').params['report-type']}` : '');
       return describeReport(`${ct}\n${parts.join('\n\n')}`);
     })(),
