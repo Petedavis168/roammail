@@ -63,8 +63,8 @@ function createWindow() {
   });
 
   // No connection: a friendly page with a retry button
-  win.webContents.on('did-fail-load', (_e, code, _desc, url, isMain) => {
-    if (isMain && code !== -3) win.loadFile(path.join(__dirname, 'offline.html'), { query: { retry: url || `${BASE}/app` } });
+  win.webContents.on('did-fail-load', (_e, code, _desc, _url, isMain) => {
+    if (isMain && code !== -3) win.loadFile(path.join(__dirname, 'offline.html'));
   });
   win.on('closed', () => { win = null; });
 }

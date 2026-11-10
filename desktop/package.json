@@ -3,7 +3,10 @@
   "productName": "Roammail",
   "version": "1.0.0",
   "description": "Roammail for Mac, Windows and Linux",
-  "author": "Friendly Web Services",
+  "author": {
+    "name": "Friendly Web Services",
+    "email": "support@roammail.net"
+  },
   "homepage": "https://roammail.net",
   "main": "main.js",
   "private": true,
@@ -20,20 +23,75 @@
     "appId": "net.roammail.desktop",
     "productName": "Roammail",
     "copyright": "Friendly Web Services",
-    "files": ["main.js", "preload.js", "offline.html", "build/icon.png"],
-    "directories": { "output": "dist", "buildResources": "build" },
-    "protocols": [{ "name": "Email", "schemes": ["mailto"] }],
+    "files": [
+      "main.js",
+      "preload.js",
+      "offline.html",
+      "build/icon.png"
+    ],
+    "directories": {
+      "output": "dist",
+      "buildResources": "build"
+    },
+    "protocols": [
+      {
+        "name": "Email",
+        "schemes": [
+          "mailto"
+        ]
+      }
+    ],
     "mac": {
       "category": "public.app-category.productivity",
-      "target": [{ "target": "dmg", "arch": ["universal"] }, { "target": "zip", "arch": ["universal"] }],
+      "target": [
+        {
+          "target": "dmg",
+          "arch": [
+            "universal"
+          ]
+        },
+        {
+          "target": "zip",
+          "arch": [
+            "universal"
+          ]
+        }
+      ],
       "hardenedRuntime": true,
       "entitlements": "build/entitlements.mac.plist",
       "entitlementsInherit": "build/entitlements.mac.plist",
       "notarize": false
     },
-    "dmg": { "title": "Roammail" },
-    "win": { "target": [{ "target": "nsis", "arch": ["x64", "arm64"] }] },
-    "nsis": { "oneClick": false, "perMachine": false, "allowToChangeInstallationDirectory": true, "shortcutName": "Roammail" },
-    "linux": { "target": ["AppImage", "deb"], "category": "Office;Email", "mimeTypes": ["x-scheme-handler/mailto"] }
+    "dmg": {
+      "title": "Roammail"
+    },
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64",
+            "arm64"
+          ]
+        }
+      ]
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true,
+      "shortcutName": "Roammail"
+    },
+    "linux": {
+      "target": [
+        "AppImage",
+        "deb"
+      ],
+      "category": "Office;Email",
+      "mimeTypes": [
+        "x-scheme-handler/mailto"
+      ],
+      "maintainer": "Roammail <support@roammail.net>"
+    }
   }
 }
