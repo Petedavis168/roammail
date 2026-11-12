@@ -3,6 +3,7 @@ import { Icon } from '../icons.jsx';
 import Booking from './settings/Booking.jsx';
 import Signatures from './settings/Signatures.jsx';
 import Templates from './settings/Templates.jsx';
+import Referrals from './settings/Referrals.jsx';
 import { NudgeSettings } from './Nudges.jsx';
 import { SWIPE_ACTIONS } from '../swipe.js';
 import { sayNewMail, naturalVoices, isNatural, PHRASES, STYLES } from '../voice.js';
@@ -220,7 +221,7 @@ function Apps({ me, sigData }) {
 
 export const TABS = [
   ['general', 'General', 'settings'], ['signatures', 'Signatures', 'pen'], ['booking', 'Booking page', 'calendar'], ['templates', 'Templates', 'mail'], ['security', 'Security', 'lock'],
-  ['autoreply', 'Out of office', 'reply'], ['junk', 'Junk & spam', 'junk'], ['rules', 'Rules', 'filter'], ['import', 'Import mail', 'import'], ['apps', 'Phone & apps', 'phone'], ['privacy', 'Privacy', 'shield'], ['premium', 'Premium', 'spark'],
+  ['autoreply', 'Out of office', 'reply'], ['junk', 'Junk & spam', 'junk'], ['rules', 'Rules', 'filter'], ['import', 'Import mail', 'import'], ['apps', 'Phone & apps', 'phone'], ['privacy', 'Privacy', 'shield'], ['premium', 'Premium', 'spark'], ['refer', 'Refer a friend', 'users'],
 ];
 
 export default function SettingsPanel({ prefs, setPrefs, me, folders, sigData, reloadSigs, onClose, initialTab = 'general', importMsg, premiumMsg, ssoMsg }) {
@@ -243,6 +244,7 @@ export default function SettingsPanel({ prefs, setPrefs, me, folders, sigData, r
             {tab === 'booking' && <Booking />}
             {tab === 'signatures' && <Signatures sigData={sigData} reloadSigs={reloadSigs} prefs={prefs} setPrefs={setPrefs} me={me} />}
             {tab === 'templates' && <Templates />}
+            {tab === 'refer' && <Referrals />}
             {tab === 'security' && <Security me={me} ssoMsg={ssoMsg} />}
             {tab === 'autoreply' && <AutoReply me={me} />}
             {tab === 'junk' && <SpamSettings />}

@@ -78,6 +78,17 @@ export default function Mail({ me, route, refreshMe, theme, setTheme, themePref 
     setShowSettings('rules');
   };
   useEffect(() => { const on = (e) => makeRule(e.detail); window.addEventListener('roammail:makerule', on); return () => window.removeEventListener('roammail:makerule', on); }, []);
+  // Report scam / phishing: to Junk, and (if it came from a Roammail address) reported to us
+  const reportScam = async (m) => {
+    if (!m?.uid || !confirm(t('Report this email as a scam or phishing? It will move to Junk.'))) return;
+    try {
+      const r = await api.post('/api/report-scam', { folder: m.folder || listFolder, uid: m.uid });
+      setList((l) => ({ ...l, messages: l.messages.filter((x) => x.uid !== m.uid) })); setActive(null); loadFolders();
+      toast(r.reported ? t('Thanks. We moved it to Junk and our team will look into the sender.') : t('Moved to Junk. Thanks for reporting it.'));
+    } catch (e) { toast(e.message, { error: true }); }
+  };
+  const reportRef = useRef(reportScam); reportRef.current = reportScam;
+  useEffect(() => { const on = (e) => reportRef.current(e.detail); window.addEventListener('roammail:reportscam', on); return () => window.removeEventListener('roammail:reportscam', on); }, []);
   // Contact cards: click any name in an email
   const [card, setCard] = useState(null);
   useEffect(() => { const on = (e) => setCard(e.detail); window.addEventListener('roammail:card', on); return () => window.removeEventListener('roammail:card', on); }, []);
@@ -585,6 +596,7 @@ export default function Mail({ me, route, refreshMe, theme, setTheme, themePref 
             ['clock', 'Snooze…', () => act.snooze(rowMenu.m.uid)],
             null,
             ['filter', 'Make a rule…', () => makeRule(rowMenu.m)],
+            ['shield', 'Report scam', () => reportScam({ ...rowMenu.m, folder: listFolder })],
             ['users', 'Contact card', () => window.dispatchEvent(new CustomEvent('roammail:card', { detail: { person: rowMenu.m.from?.[0] || {}, anchor: null } }))],
             ...(me.delegated ? [] : [['block', `Block ${rowMenu.m.from?.[0]?.address || 'sender'}`, () => act.block(rowMenu.m.from?.[0]?.address)]]),
           ].map((x, i) => (x ? <button key={x[1]} role="menuitem" onClick={() => { setRowMenu(null); Promise.resolve(x[2]()).catch((e) => toast(e.message, { error: true })); }}><Icon name={x[0]} size={15} /> {t(x[1])}</button> : <div key={`s${i}`} className="menu-sep" />))}

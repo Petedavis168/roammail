@@ -18,9 +18,10 @@ import { requestReceipts, saveTracked, describeReport, collectReceipts } from '.
 import { inboxTabs, TABS } from './inboxtabs.js';
 import { attachmentRisk, scanInfo } from './mailsafety.js';
 import { learnRecipients } from './screener.js';
-import { recordDelivered, recordRead } from './status.js';
+import { recordDelivered, recordRead, isRoammail } from './status.js';
 import { setLiveSender } from './live.js';
 import { groupsFor } from './contactgroups.js';
+import { checkOutgoing } from './scamguard.js';
 import { protectEmail, noticeMail, checkSecurePassword } from './secure.js';
 import { rolesFor, q, twoFactorPolicy } from './db.js';
 import { applyEnforcedSignature, htmlToText } from './signatures.js';
@@ -338,11 +339,20 @@ function fullMessage(folder, msg, parsed) {
   };
 }
 
+/** Sent from one Roammail account to others only: it never travelled over the public internet. */
+async function privateDelivery(m) {
+  const people = [...(m.from || []), ...(m.to || []), ...(m.cc || [])].map((a) => a.address).filter(Boolean);
+  if (!people.length || m.security?.dmarc === 'fail' || m.security?.spoofedName || m.security?.lookalike) return false;
+  for (const a of people) if (!(await isRoammail(a))) return false;
+  return true;
+}
+
 api.get('/message', wrap(async (req, res) => {
   const { folder = 'INBOX', uid } = req.query;
   const r = await loadMessage(req.user, folder, uid, { markSeen: req.query.peek !== '1' });
   if (!r) return res.status(404).json({ error: 'Message not found' });
   const full = fullMessage(folder, r.msg, r.parsed);
+  full.privateDelivery = await privateDelivery(full).catch(() => false);
   if (req.query.peek !== '1' && !req.delegatedMailbox) recordRead(req.user.email, full).catch(() => {});
   res.json(full);
 }));
@@ -391,6 +401,7 @@ export async function loadThread(user, folder = 'INBOX', uid, { markSeen = true 
 api.get('/thread', wrap(async (req, res) => {
   const t = await loadThread(req.user, req.query.folder || 'INBOX', req.query.uid);
   if (!t) return res.status(404).json({ error: 'Message not found' });
+  for (const m of t.messages || []) m.privateDelivery = await privateDelivery(m).catch(() => false);
   if (!req.delegatedMailbox) for (const m of t.messages || []) recordRead(req.user.email, m).catch(() => {});
   res.json(t);
 }));
@@ -531,6 +542,7 @@ api.post('/send', upload.array('attachments'), wrap(async (req, res) => {
   const rcptCount = [mail.to, mail.cc, mail.bcc].filter(Boolean).flatMap((v) => addressparser(v)).filter((a) => a.address).length;
   await checkSendQuota(req.user.email, rcptCount);
   mail = await applyEnforcedSignature(req.user, mail, !!(req.body.inReplyTo || req.body.forwardUid));
+  await checkOutgoing(req.user.email, mail); // new free accounts: refuse clear scams / phishing
   // delivery / read receipts, if asked for
   const rr = requestReceipts(req.user, mail, { read: req.body.readReceipt === 'true', delivery: req.body.deliveryReceipt === 'true' });
   mail = rr.mail;

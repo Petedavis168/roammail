@@ -333,7 +333,7 @@ function ReadyToSwitch({ me }) {
 export function ImportMail({ me, importMsg }) {
   const toast = useToast();
   const [d, setD] = useState(null);
-  const [f, setF] = useState({ provider: 'gmail', user: '', password: '', host: '' });
+  const [f, setF] = useState({ provider: 'gmail', user: '', password: '', host: '', years: 5 });
   const [found, setFound] = useState(null);
   const [busy, setBusy] = useState('');
   const load = () => api.get('/api/imports').then(setD).catch((e) => toast(e.message, { error: true }));
@@ -383,7 +383,14 @@ export function ImportMail({ me, importMsg }) {
       ) : (
         <form className="card form" onSubmit={start}>
           {f.provider === 'other' && <label>{t("IMAP server")}<input value={f.host} placeholder="imap.example.com" onChange={set('host')} required /></label>}
-          <label>{t("Old email address")}<input type="email" value={f.user} onChange={set('user')} required autoComplete="off" /></label>
+          <label>{t("Old email address")}<input type="email" value={f.user} required autoComplete="off" onChange={(e) => {
+            // pick the right service from the address (one less thing to choose)
+            const dom = e.target.value.split('@')[1]?.toLowerCase() || '';
+            const guess = /^(gmail|googlemail)\.com$/.test(dom) ? 'gmail' : /^(yahoo|ymail|rocketmail)\./.test(dom) ? 'yahoo' : /^(aol|aim)\.com$/.test(dom) ? 'aol' : /^(icloud|me|mac)\.com$/.test(dom) ? 'icloud' : /^(outlook|hotmail|live|msn)\./.test(dom) ? 'outlook' : null;
+            setFound(null); setF({ ...f, user: e.target.value, ...(guess && d.providers[guess] && guess !== f.provider ? { provider: guess } : {}) });
+          }} /></label>
+          <label>{t("How far back")}<select value={f.years} onChange={(e) => setF({ ...f, years: Number(e.target.value) })}>
+            <option value={1}>{t("The last year")}</option><option value={2}>{t("The last 2 years")}</option><option value={5}>{t("The last 5 years")}</option><option value={10}>{t("The last 10 years")}</option><option value={0}>{t("Everything")}</option></select></label>
           <label>{f.provider === 'other' ? 'Password' : 'App password'}<input type="password" value={f.password} onChange={set('password')} required autoComplete="new-password" /></label>
           <div className="callout info"><Icon name="lock" size={16} /><small>{p.help} {p.appPasswordUrl && <a href={p.appPasswordUrl} target="_blank" rel="noreferrer">{t("Open the app password page")}</a>}{' '}{t("An app password only allows mail access and can be revoked any time. We never see or keep your main password.")}</small></div>
           {found && <div className="callout ok"><Icon name="check" size={16} /><small>{t("Connected. Found about")}{' '}<b>{found.messages.toLocaleString()}</b>{' '}{t("messages in")}{' '}{found.folders} folders.</small></div>}

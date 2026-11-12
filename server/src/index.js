@@ -20,7 +20,7 @@ import { hosts, siteRouter, ID_PATH, notFound } from './hosts.js';
 import { requireAuth } from './session.js';
 import { setupApi, requireSetupApi } from './setup.js';
 import { abuseDesk, outboundAdmin, startOutboundChecks } from './outbound.js';
-import { ops, metricsMiddleware, startMetricsLog, gauge, startDbBackups } from './ops.js';
+import { startStatusRecorder, ops, metricsMiddleware, startMetricsLog, gauge, startDbBackups } from './ops.js';
 import { q } from './db.js';
 import { publicAccounts, accounts } from './accounts.js';
 import { publicSecurity, securityApi } from './security.js';
@@ -42,6 +42,9 @@ import { voiceApi, voicePages } from './voice.js';
 import { statusApi } from './status.js';
 import { contactGroups } from './contactgroups.js';
 import { catchupApi } from './catchup.js';
+import { scamApi } from './scamguard.js';
+import { referralsApi, startReferralRewards } from './referrals.js';
+import { endExpiredGifts } from './premium.js';
 import { aliasesApi } from './aliases.js';
 import { receiptsApi } from './receipts.js';
 import { secureApi, securePublic, securePages } from './secure.js';
@@ -136,6 +139,8 @@ app.use('/api', voiceApi);
 app.use('/api', statusApi);
 app.use('/api', contactGroups);
 app.use('/api', catchupApi);
+app.use('/api', scamApi);
+app.use('/api', referralsApi);
 app.use('/api', aliasesApi);
 app.use('/api', receiptsApi);
 app.use('/api', secureApi);
@@ -223,6 +228,9 @@ gauge('push_watchers', () => pushStats().watching);
 if (config.runsBackground) {
   await startJobs();
   await startRetention();
+  startStatusRecorder(); // uptime history for the status page
+  startReferralRewards(); // refer a friend: free months once the friend is a real, active user
+  setInterval(() => endExpiredGifts().catch((e) => console.error('APP_ERROR gifts', e.message)), 6 * 3600e3).unref();
   setInterval(() => processTwoFactorResets().catch((e) => console.error('APP_ERROR 2fa resets', e)), 10 * 60 * 1000).unref();
 }
 app.listen(config.port, () => {

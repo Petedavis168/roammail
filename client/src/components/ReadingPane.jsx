@@ -247,6 +247,7 @@ function ThreadMessage({ m, expanded, onToggle, onReply, prefs, setPrefs, last, 
           <div><button type="button" className="person-link strong" onClick={(e) => openCard(e, sender)}>{personName(sender)}</button> <span className="muted">&lt;{sender.address}&gt;</span>
             {external && <span className="ext-tag" title={t("This message came from outside your organization")}>{t("External")}</span>}
             {m.security?.dkim === 'pass' && m.security?.dmarc === 'pass' && !m.security?.lookalike && <span className="verified" title={t("Sender's domain verified (DKIM + DMARC)")}><Icon name="check" size={11} /> {t("Verified")}</span>}
+            {m.privateDelivery && <span className="private-pill" title={t('Sent between Roammail accounts: it never travelled over the public internet, and was encrypted on the way')}><Icon name="lock" size={11} /> {t('Private')}</span>}
             {m.scan?.checked && !m.scan.virus && !m.scan.phish && sender.address?.toLowerCase() !== me?.email?.toLowerCase() && <span className="scanned" title={t('Checked when it arrived: no viruses found, and scanned for spam and phishing')}><Icon name="shield" size={11} /> {t('Scanned')}</span>}
           </div>
           <div className="muted small" onClick={(e) => { e.stopPropagation(); setDetails((d) => !d); }} style={{ cursor: 'pointer' }}>
@@ -282,6 +283,7 @@ function ThreadMessage({ m, expanded, onToggle, onReply, prefs, setPrefs, last, 
                   ))}
                 </>}
                 <button onClick={() => { setMenu(false); window.dispatchEvent(new CustomEvent('roammail:makerule', { detail: m })); }}><Icon name="filter" />{' '}{t("Make a rule…")}</button>
+                <button onClick={() => { setMenu(false); window.dispatchEvent(new CustomEvent('roammail:reportscam', { detail: m })); }}><Icon name="shield" />{' '}{t("Report scam or phishing")}</button>
                 {sender.address && <button onClick={() => { setMenu(false); onBlock(sender.address); }}><Icon name="block" />{' '}{t("Block")}{' '}{sender.address}</button>}
                 <button onClick={() => window.open(mailUrl(`/api/raw?folder=${encodeURIComponent(m.folder)}&uid=${m.uid}`), '_blank')}><Icon name="external" />{' '}{t("View source")}</button>
                 <button onClick={() => { const f = document.querySelector(`[data-msg="${m.folder}:${m.uid}"] iframe`); f?.contentWindow?.print(); }}><Icon name="print" />{' '}{t("Print")}</button>

@@ -48,6 +48,10 @@ export default function Login({ onLogin, mode = 'signin' }) {
   const signupType = params.get('type') === 'domain' ? 'domain' : 'free';
   const billing = ['monthly', 'yearly'].includes(params.get('billing')) ? params.get('billing') : '';
   const [step, setStep] = useState(resetToken ? 'reset' : mode === 'signup' || params.get('signup') ? 'name' : 'email');
+  // Refer a friend: ?ref=CODE on the sign-up link (kept for this visit)
+  const [refCode] = useState(() => { const r = new URLSearchParams(location.search).get('ref'); if (r && /^[A-Za-z2-9]{8}$/.test(r)) sessionStorage.setItem('ref', r.toUpperCase()); return sessionStorage.getItem('ref') || ''; });
+  const startedAt = useRef(Date.now()); // bot check: real people take more than a couple of seconds
+  const [hp, setHp] = useState(''); // hidden field only bots fill in
   const [f, setF] = useState({ email: '', password: '', code: '', first: '', last: '', purpose: signupType === 'domain' ? 'business' : 'personal', username: '', custom: false, pw: '', pw2: '', recovery: '', terms: false, phone: '', code: '', phoneToken: null, birthday: '', bizDomain: '', bizLocal: '', bizName: '', codeSent: false, remember: localStorage.getItem('remember') ? localStorage.getItem('remember') === '1' : isNative() }); // the phone apps keep you signed in by default
   const [show, setShow] = useState(false);
   const [error, setError] = useState('');
@@ -303,13 +307,14 @@ export default function Login({ onLogin, mode = 'signin' }) {
     <Shell>
       <Card title={t("Privacy and Terms")} subtitle={`Almost done, ${f.first}.`}
         onSubmit={(e) => { e.preventDefault(); if (!f.terms) return setError(t("Please agree to continue")); run(async () => {
-          const r = await api.signup({ name: `${f.first} ${f.last}`.trim(), username, password: f.pw, recoveryEmail: f.recovery, captcha, acceptTerms: true, phoneToken: f.phoneToken, birthday: f.birthday, phone: f.phone, remember: isNative(),
+          const r = await api.signup({ name: `${f.first} ${f.last}`.trim(), username, password: f.pw, recoveryEmail: f.recovery, captcha, acceptTerms: true, phoneToken: f.phoneToken, birthday: f.birthday, phone: f.phone, remember: isNative(), website: hp, formMs: Date.now() - startedAt.current, ...(refCode ? { ref: refCode } : {}),
             ...(f.purpose === 'business' && f.bizDomain ? { business: { domain: f.bizDomain, local: f.bizLocal, orgName: f.bizName } } : {}) });
           // Own-domain sign-ups go straight on to connecting the domain (and choosing monthly/yearly)
           if (f.purpose === 'business') localStorage.setItem('startBusiness', '1');
           onLogin({ ...r, redirect: f.purpose === 'business' ? `${r.redirect}?setup=domain${billing ? `&billing=${billing}` : ''}` : r.redirect });
         }); }}
         footer={<><button type="button" className="g-link" onClick={() => go('recovery')}>{t("Back")}</button><button className="g-btn" disabled={busy}>{busy ? 'Creating your account…' : 'Create account'}</button></>}>
+        <input className="hp-field" name="website" tabIndex={-1} autoComplete="off" aria-hidden="true" value={hp} onChange={(e) => setHp(e.target.value)} />
         <div className="g-review">
           <div><Icon name="mail" size={16} /> <b>{username}@{cfg.domain}</b></div>
           <ul>

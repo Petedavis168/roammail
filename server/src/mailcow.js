@@ -92,9 +92,9 @@ export const mailcow = {
     try { return list(await call('GET', 'get/syncjob_source/all')); } catch { return null; } // null = old mailcow
   },
   addSyncSource: ({ name, host, port }) => call('POST', 'add/syncjob_source', { name, description: 'Created by webmail import', host, port, enc: 'SSL', verify_cert: 1, auth_type: 'PLAIN', scope: 'all' }),
-  addSyncJob: async (email, { host, port, user, password }) => {
+  addSyncJob: async (email, { host, port, user, password, maxage = 0 }) => {
     const common = {
-      username: email, user1: user, password1: password, mins_interval: 20, subfolder2: '', maxage: 0, maxbytespersecond: 0,
+      username: email, user1: user, password1: password, mins_interval: 20, subfolder2: '', maxage: Math.max(0, Math.round(Number(maxage) || 0)), maxbytespersecond: 0,
       timeout1: 600, timeout2: 600, exclude: '(?i)spam|(?i)junk|(?i)trash|(?i)bin|(?i)all mail|(?i)important|(?i)starred',
       delete2duplicates: 1, delete1: 0, delete2: 0, automap: 1, skipcrossduplicates: 1, subscribeall: 1, active: 1,
     };

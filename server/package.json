@@ -34,6 +34,7 @@
     "test:batch25": "node --disable-warning=ExperimentalWarning --test test/batch25.test.js",
     "test:live": "node --disable-warning=ExperimentalWarning --test test/live.test.js",
     "test:rules": "node --disable-warning=ExperimentalWarning --test test/rules.test.js",
+    "test:batch3": "node --disable-warning=ExperimentalWarning --test test/batch3.test.js",
     "test:nativepush": "NODE_ENV=test node --disable-warning=ExperimentalWarning --test test/nativepush.test.js"
   },
   "keywords": [],
