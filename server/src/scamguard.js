@@ -60,7 +60,8 @@ const SHORTENERS = /\b(bit\.ly|tinyurl\.com|t\.co|goo\.gl|ow\.ly|is\.gd|buff\.ly
 
 /** Score an outgoing email. Returns { score, reasons }. 0 = fine; 6+ = clear scam. */
 export function scamScore({ fromName = '', subject = '', text = '', html = '' }) {
-  const body = `${subject}\n${text || String(html).replace(/<[^>]+>/g, ' ')}`.slice(0, 100000);
+  const page = String(html).slice(0, 200000);
+  const body = `${subject}\n${text || page.replace(/<[^<>]*>/g, ' ')}`.slice(0, 100000);
   const reasons = []; let score = 0;
   const hit = (n, why) => { score += n; reasons.push(why); };
   const p = PHISH.filter((r) => r.test(body)).length; if (p) hit(Math.min(6, p * 3), 'asks people to verify or re-enter account details');
@@ -70,10 +71,11 @@ export function scamScore({ fromName = '', subject = '', text = '', html = '' })
   if (SHORTENERS.test(body)) hit(1, 'shortened links');
   if (/https?:\/\/\d{1,3}(\.\d{1,3}){3}/.test(body)) hit(3, 'links to a bare IP address');
   // a link whose text shows one site but goes to another
-  for (const m of String(html).matchAll(/<a\b[^>]*href=["']https?:\/\/([^/"'?#]+)[^>]*>([^<]{4,120})<\/a>/gi)) {
-    const shown = /([a-z0-9-]+\.)+[a-z]{2,}/i.exec(m[2])?.[0]?.toLowerCase();
-    const real = m[1].toLowerCase().replace(/^www\./, '');
-    if (shown && !real.endsWith(shown.replace(/^www\./, '')) && !shown.replace(/^www\./, '').endsWith(real)) { hit(3, `a link shows ${shown} but goes to ${real}`); break; }
+  for (const m of page.matchAll(/<a\s([^<>]{0,2000})>([^<]{4,120})<\/a>/gi)) {
+    const real = /\bhref\s?=\s?["']https?:\/\/([^/"'?#\s]{1,253})/i.exec(m[1])?.[1]?.toLowerCase().replace(/^www\./, '');
+    const shown = m[2].split(/\s+/).map((w) => w.replace(/^[^a-z0-9]+|[^a-z0-9]+$/gi, '').toLowerCase())
+      .find((w) => w.length <= 253 && /^[a-z0-9-]{1,63}(?:\.[a-z0-9-]{1,63}){1,6}$/.test(w) && /\.[a-z]{2,}$/.test(w))?.replace(/^www\./, '');
+    if (real && shown && !real.endsWith(shown) && !shown.endsWith(real)) { hit(3, `a link shows ${shown} but goes to ${real}`); break; }
   }
   if (/<input\b|<form\b/i.test(html)) hit(3, 'a form inside the email');
   return { score, reasons };

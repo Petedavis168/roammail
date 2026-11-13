@@ -15,8 +15,17 @@ const wrap = (fn) => (req, res, next) => Promise.resolve(fn(req, res, next)).cat
 const fail = (status, message) => Object.assign(new Error(message), { status, expose: true });
 const EMAIL_RE = /^[^\s@<>"]{1,64}@[^\s@<>".]{1,63}(?:\.[^\s@<>".]{1,63}){1,8}$/;
 // School domains: US .edu, k12, and academic second-level domains around the world
-const SCHOOL = /(\.edu|\.k12\.[a-z]{2}\.us|\.ac\.[a-z]{2}|\.edu\.[a-z]{2}|\.sch\.[a-z]{2}|\.uni-[a-z-]+\.de|\.student\.[a-z.]+)$/i;
-export const isSchoolEmail = (e) => EMAIL_RE.test(e) && SCHOOL.test(e.split('@')[1]);
+function isSchoolDomain(domain) {
+  const l = String(domain || '').toLowerCase().split('.');
+  if (l.length < 2 || l.length > 10 || l.some((x) => !/^[a-z0-9-]{1,63}$/.test(x))) return false;
+  const n = l.length; const at = (i) => l[n - i];
+  if (at(1) === 'edu') return true;
+  if (n >= 4 && at(1) === 'us' && /^[a-z]{2}$/.test(at(2)) && at(3) === 'k12') return true;
+  if (n >= 3 && /^[a-z]{2}$/.test(at(1)) && ['ac', 'edu', 'sch'].includes(at(2))) return true;
+  if (at(1) === 'de' && at(2).startsWith('uni-')) return true;
+  return l.slice(0, -1).includes('student') && l.indexOf('student') > 0;
+}
+export const isSchoolEmail = (e) => EMAIL_RE.test(e) && isSchoolDomain(e.split('@')[1]);
 const isPersonal = (email) => email.split('@')[1] === config.signup.domain;
 const hash = (e) => crypto.createHash('sha256').update(`student:${e.toLowerCase()}`).digest('hex');
 
