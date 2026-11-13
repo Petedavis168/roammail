@@ -1,6 +1,7 @@
 import { createPortal } from 'react-dom';
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { api, mailUrl } from '../api.js';
+import { listKey, cachedList, saveList, warmList, prefetch } from '../fastcache.js';
 import { messageKey, parseMessageKey, sectionForFolder, folderForSection, loginHref } from '../nav.js';
 import { Icon } from '../icons.jsx';
 import { usePrefs, catKeyword } from '../prefs.js';
@@ -199,9 +200,17 @@ export default function Mail({ me, route, refreshMe, theme, setTheme, themePref 
   // ---------- loading ----------
   const loadFolders = useCallback(() => api.folders().then(setFolders).catch(() => {}), []);
 
+  const listKeyRef = useRef(null);
+  // keep the instant copy in step with what's on screen (archived, read, deleted ...)
+  useEffect(() => { if (listKeyRef.current && !list.loading && !list.page && list.messages && listKeyRef.current.split('|')[1] === list.folder) saveList(listKeyRef.current, { messages: list.messages, total: list.total, folder: list.folder, tabs: list.tabs || null }); }, [list]);
   const load = useCallback(async ({ page = 0, append = false, quiet = false } = {}) => {
     const id = ++reqId.current;
-    if (!quiet) setList((l) => ({ ...l, loading: true, ...(append ? {} : { messages: page ? l.messages : [] }) }));
+    const tab = folder === 'INBOX' && tabsOn ? inboxTab : null;
+    const key = !page && !append && !search && folder !== '@all' ? listKey(folder, filter, tab) : null;
+    listKeyRef.current = key;
+    const have = key && cachedList(key);
+    if (have) setList(() => ({ ...have, page: 0, loading: false, folder: have.folder || folder })); // show the last copy at once
+    else if (!quiet) setList((l) => ({ ...l, loading: true, ...(append ? {} : { messages: page ? l.messages : [] }) }));
     try {
       const r = folder === '@all' && !search
         ? await api.get('/api/all-inboxes').then((x) => ({ ...x, messages: x.messages.map((m) => ({ ...m, origUid: m.uid, uid: `${m.mailboxId}:${m.uid}` })) }))
@@ -211,6 +220,7 @@ export default function Mail({ me, route, refreshMe, theme, setTheme, themePref 
         messages: append ? [...l.messages, ...r.messages.filter((m) => !l.messages.some((x) => x.uid === m.uid))] : r.messages,
         total: r.total, page, loading: false, folder: r.folder || folder, tabs: r.tabs || null,
       }));
+      if (key) { saveList(key, { messages: r.messages, total: r.total, folder: r.folder || folder, tabs: r.tabs || null }); warmList(r.folder || folder, r.messages, prefsRef.current?.conversation); }
     } catch (e) {
       if (id !== reqId.current) return;
       setList((l) => ({ ...l, loading: false }));
@@ -750,6 +760,7 @@ export default function Mail({ me, route, refreshMe, theme, setTheme, themePref 
                 swipe={{ left: prefs.swipeLeft, right: prefs.swipeRight }} onRefresh={() => { loadFolders(); load({ quiet: true }); }}
                 folderUse={currentFolderObj?.specialUse} filter={filter} setFilter={setFilter}
                 selected={selected} setSelected={setSelected} active={active} onOpen={openMessage}
+                onHover={folder === '@all' ? undefined : (m) => prefetch(listFolder, m.uid, prefs.conversation)}
                 act={act} categories={prefs.categories} density={prefs.density} allInboxes={folder === '@all'}
                 onLoadMore={() => !search && list.messages.length < list.total && !list.loading && load({ page: list.page + 1, append: true })}
                 onEmpty={act.emptyFolder} onMarkAllRead={act.markAllRead}

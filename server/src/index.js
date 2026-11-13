@@ -52,6 +52,7 @@ import { aliasesApi } from './aliases.js';
 import { receiptsApi } from './receipts.js';
 import { secureApi, securePublic, securePages } from './secure.js';
 import { aiApi } from './ai.js';
+import { appAssets, compressJson } from './fastserve.js';
 import { premiumApi } from './premium.js';
 import { calendar } from './calendar.js';
 import { contacts } from './contacts.js';
@@ -78,6 +79,7 @@ app.use(helmet({
   crossOriginEmbedderPolicy: false,
 }));
 app.use(metricsMiddleware);
+app.use('/api', compressJson); // smaller mail lists and messages
 app.use(billingWebhook); // Stripe → raw body, verified by signature
 app.use(cookieParser());
 app.use(express.json({ limit: '2mb', verify: (req, res, buf) => { req.rawBody = buf; } }));
@@ -206,6 +208,7 @@ app.get('/robots.txt', staticLimiter, (req, res) => {
   res.type('text/plain').set('Cache-Control', 'public, max-age=86400').send(body);
 });
 if (fs.existsSync(dist)) {
+  app.use(appAssets(dist)); // compressed, kept by browsers for a year (names change each release)
   app.use(express.static(dist, { index: false, maxAge: '1h' }));
   // Only real app pages get the app; anything else is a real 404 (no soft-404s for scanners and search engines)
   app.get(/^\/(?!api\/).*/, staticLimiter, (req, res) => {

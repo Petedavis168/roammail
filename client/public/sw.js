@@ -5,10 +5,11 @@
 //    (always fetched fresh when online; the saved copy is only used when the network fails)
 //  - push notifications for new mail (web; the phone apps use native push)
 // Everything saved is deleted when you sign out ({type: 'signout'} message) or the server says you're signed out.
-const SHELL = 'shell-v2';
+const SHELL = 'shell-v3';
 const SHARE = 'share-v1'; // something shared to Roammail from another app, until the app picks it up
 const DATA = 'mail-v2';
 const MAX_DATA = 300; // saved API answers
+let signedOutAt = 0; // answers to requests made before sign-out are never saved
 const OFFLINE_API = /^\/api\/(me|folders|messages|message|thread|accounts|identities|signup\/config|ai\/status|premium|push\/key)(\/|$|\?)/;
 
 self.addEventListener('install', (e) => self.skipWaiting());
@@ -56,7 +57,7 @@ self.addEventListener('fetch', (e) => {
     return;
   }
   // Built code and styles have unique names: keep them
-  if (url.pathname.startsWith('/assets/')) {
+  if (url.pathname.startsWith('/app-assets/')) {
     e.respondWith(caches.match(req).then((hit) => hit || fetch(req).then((res) => {
       if (res.ok) { const copy = res.clone(); caches.open(SHELL).then((c) => c.put(req, copy)); }
       return res;
@@ -65,7 +66,9 @@ self.addEventListener('fetch', (e) => {
   }
   // Mail data: always fresh when online; the saved copy only when the network fails
   if (OFFLINE_API.test(url.pathname + url.search) && !url.pathname.startsWith('/api/attachment')) {
+    const started = Date.now();
     e.respondWith(fetch(req).then((res) => {
+      if (started <= signedOutAt) return res;
       if (res.status === 401) e.waitUntil(caches.delete(DATA)); // signed out: forget the saved mail
       // keep a copy only for people who chose to stay signed in
       else if (res.ok && req.headers.get('x-offline-ok') === '1') { const copy = res.clone(); e.waitUntil(caches.open(DATA).then((c) => c.put(req, copy)).then(trim)); }
@@ -86,13 +89,14 @@ async function keepShell(clientId) {
   const html = await res.text();
   const c = await caches.open(SHELL);
   await c.put('/__shell', new Response(html, { headers: { 'Content-Type': 'text/html; charset=utf-8' } }));
-  const assets = [...html.matchAll(/(?:src|href)="(\/assets\/[^"]+)"/g)].map((m) => m[1]);
+  const assets = [...html.matchAll(/(?:src|href)="(\/app-assets\/[^"]+)"/g)].map((m) => m[1]);
   await Promise.all(assets.map(async (a) => { if (!(await c.match(a))) { const r = await fetch(a); if (r.ok) await c.put(a, r); } }));
 }
 self.addEventListener('message', (e) => {
   // only from Roammail's own pages (service workers get an empty e.origin, so check the sending page)
   let from = ''; try { from = new URL(e.source?.url || '').origin; } catch { return; }
   if (from !== self.location.origin) return;
+  if (e.data?.type === 'signout') signedOutAt = Date.now();
   if (e.data?.type === 'signout') e.waitUntil(Promise.all([caches.delete(DATA), caches.delete(SHELL), caches.delete(SHARE)]));
   if (e.data?.type === 'shell') e.waitUntil(keepShell(e.source?.id).catch(() => {}));
 });

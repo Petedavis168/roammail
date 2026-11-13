@@ -2,6 +2,7 @@ import { clearOutbox } from './outbox.js';
 import { refreshPush } from './push.js';
 import { useEffect, useState } from 'react';
 import { api, setMailboxId } from './api.js';
+import { clearFast } from './fastcache.js';
 import { parseLocation, setHosts, loginHref } from './nav.js';
 import Login from './components/Login.jsx';
 import Mail from './components/Mail.jsx';
@@ -68,6 +69,7 @@ export default function App() {
     // Forget the offline copy of mail and anything waiting in the Outbox on this device
     navigator.serviceWorker?.controller?.postMessage({ type: 'signout' });
     await clearOutbox().catch(() => {});
+    clearFast();
     api.post('/api/logout', all ? { all: true } : {}).finally(() => location.assign(loginHref()));
   };
 

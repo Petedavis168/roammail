@@ -401,10 +401,11 @@ export async function loadThread(user, folder = 'INBOX', uid, { markSeen = true 
 }
 
 api.get('/thread', wrap(async (req, res) => {
-  const t = await loadThread(req.user, req.query.folder || 'INBOX', req.query.uid);
+  const t = await loadThread(req.user, req.query.folder || 'INBOX', req.query.uid, { markSeen: req.query.peek !== '1' });
   if (!t) return res.status(404).json({ error: 'Message not found' });
   for (const m of t.messages || []) m.privateDelivery = await privateDelivery(m).catch(() => false);
-  if (!req.delegatedMailbox) for (const m of t.messages || []) recordRead(req.user.email, m).catch(() => {});
+  // peek=1: the app is loading it ahead of time (not opened yet), so don't tell senders it was read
+  if (!req.delegatedMailbox && req.query.peek !== '1') for (const m of t.messages || []) recordRead(req.user.email, m).catch(() => {});
   res.json(t);
 }));
 

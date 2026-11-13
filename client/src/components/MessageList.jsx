@@ -8,8 +8,9 @@ import { attachGestures, SWIPE_ACTIONS } from '../swipe.js';
 import { t } from '../i18n.js';
 
 export default function MessageList({ list, title, search, onClearSearch, folderUse, filter, setFilter, selected, setSelected,
-  active, onOpen, act, categories, density, onLoadMore, onEmpty, onMarkAllRead, snoozeMap, allInboxes, isInbox, onBump, inboxTab, setInboxTab, onSwipe, swipe = {}, onRefresh, unreadInbox = 0, onCatchUp }) {
+  active, onOpen, act, categories, density, onLoadMore, onEmpty, onMarkAllRead, snoozeMap, allInboxes, isInbox, onBump, inboxTab, setInboxTab, onSwipe, swipe = {}, onRefresh, unreadInbox = 0, onCatchUp, onHover }) {
   const ref = useRef();
+  const hoverT = useRef();
   const { messages, loading, total } = list;
   const showTo = folderUse === '\\Sent' || folderUse === '\\Drafts';
   const catColor = (n) => categories.find((c) => c.name.replace(/[^A-Za-z0-9_-]/g, '') === n)?.color || '#888';
@@ -127,7 +128,9 @@ export default function MessageList({ list, title, search, onClearSearch, folder
             header,
             <div key={m.uid} data-uid={m.uid} role="listitem" aria-current={active === m.uid ? 'true' : undefined}
               className={`row ${m.seen ? '' : 'unread'} ${active === m.uid ? 'active' : ''} ${selected.has(m.uid) ? 'selected' : ''}`}
-              onClick={(e) => onRowClick(m, e)} draggable={!allInboxes} onDragStart={(e) => onDragStart(m, e)}
+              onClick={(e) => onRowClick(m, e)} draggable={!allInboxes}
+              onMouseEnter={onHover ? () => { clearTimeout(hoverT.current); hoverT.current = setTimeout(() => onHover(m), 120); } : undefined}
+              onMouseLeave={onHover ? () => clearTimeout(hoverT.current) : undefined} onDragStart={(e) => onDragStart(m, e)}
               onContextMenu={allInboxes ? undefined : (e) => { e.preventDefault(); window.dispatchEvent(new CustomEvent('roammail:rowmenu', { detail: { m, x: e.clientX, y: e.clientY } })); }}>
               <div className="row-left" onClick={(e) => toggle(m.uid, e)}>
                 {density === 'compact' ? null : (

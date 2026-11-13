@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { prefetched, openNow } from '../fastcache.js';
 import { api, mailUrl } from '../api.js';
 import { Icon } from '../icons.jsx';
 import { fmtDate, fmtSize, personName, avatarColor, initials } from '../util.js';
@@ -358,12 +359,20 @@ export default function ReadingPane({ folder, msg, me, prefs, setPrefs, conversa
   useEffect(() => {
     if (!msg) return;
     setThread(null); setError('');
-    const p = conversation ? api.thread(folder, msg.uid) : api.get('/api/message', { folder, uid: msg.uid }).then((m) => ({ subject: m.subject, messages: [m] }));
-    p.then((t) => {
+    let live = true; let shown = false; let real = false;
+    const show = (t, isReal) => {
+      if (!live || (real && !isReal)) return;
+      if (isReal) real = true;
       setThread(t); onThread?.(t.messages[t.messages.length - 1]);
+      if (shown) return; // keep what the person opened or closed
+      shown = true;
       const last = t.messages[t.messages.length - 1];
       setExpanded(new Set([`${last.folder}:${last.uid}`, ...t.messages.filter((m) => !m.seen).map((m) => `${m.folder}:${m.uid}`), `${folder}:${msg.uid}`]));
-    }).catch((e) => setError(e.message));
+    };
+    // loaded ahead of time? show it now; the real open below marks it read and refreshes it
+    prefetched(folder, msg.uid, conversation)?.then((t) => show(t, false)).catch(() => {});
+    openNow(folder, msg.uid, conversation).then((t) => show(t, true)).catch((e) => { if (live && !shown) setError(e.message); });
+    return () => { live = false; };
   }, [folder, msg?.uid, conversation]);
 
   // iMessage-style status of my emails in this conversation (to other Roammail users), updated live
