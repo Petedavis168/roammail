@@ -30,9 +30,10 @@ export function metricsMiddleware(req, res, next) {
     if (window.latencies.length < 20000) window.latencies.push(s * 1000);
     // Name slow calls so the "slow responses" alarm can be traced. Route shape only (":id"), never addresses or content.
     if (s >= 2) {
-      const route = req.route?.path ? `${req.baseUrl || ''}${typeof req.route.path === 'string' ? req.route.path : '(pattern)'}` : req.path.replace(/\/[^/]*[0-9@][^/]*/g, '/:x').slice(0, 80);
-      const safe = (x) => String(x).replace(/[^\w/:.()-]/g, '_').slice(0, 100);
-      console.log(`SLOW_REQUEST ${safe(req.method)} ${safe(route)} ${Math.round(s * 1000)}ms status=${Number(res.statusCode)}`);
+      // only our own route patterns (e.g. /api/messages/:id) and a fixed method name are logged, never the address used
+      const route = typeof req.route?.path === 'string' ? `${req.baseUrl || ''}${req.route.path}`.replace(/[^\w/:.-]/g, '_').slice(0, 100) : 'unmatched';
+      const method = ['GET', 'POST', 'PUT', 'PATCH', 'DELETE'].find((m) => m === req.method) || 'OTHER';
+      console.log('SLOW_REQUEST %s %s %dms status=%d', method, route, Math.round(s * 1000), Number(res.statusCode));
     }
   });
   next();
