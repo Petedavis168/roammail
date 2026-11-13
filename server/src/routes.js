@@ -545,7 +545,7 @@ api.post('/send', upload.array('attachments'), wrap(async (req, res) => {
   let mail = buildMail(req.user, req.body, files);
   if (!mail.to && !mail.cc && !mail.bcc) return res.status(400).json({ error: 'Add at least one recipient' });
   const rcptCount = [mail.to, mail.cc, mail.bcc].filter(Boolean).flatMap((v) => addressparser(v)).filter((a) => a.address).length;
-  await checkSendQuota(req.user.email, rcptCount);
+  await checkSendQuota(req.user.email, rcptCount, mail.messageId);
   mail = await applyEnforcedSignature(req.user, mail, !!(req.body.inReplyTo || req.body.forwardUid));
   await checkOutgoing(req.user.email, mail); // new free accounts: refuse clear scams / phishing
   mail = await applyCompanyFooter(req.user, mail, [mail.to, mail.cc, mail.bcc].filter(Boolean).flatMap((v) => addressparser(v)).map((a) => String(a.address || '').toLowerCase()).filter(Boolean)); // company disclaimer

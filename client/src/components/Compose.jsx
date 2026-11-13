@@ -523,7 +523,8 @@ export default function ComposeManager({ composers, setComposers, me, prefs, sig
         if (isOffline(e) && offlineAllowed() && !payload.protect) { // protected emails are never stored on the device (they hold the password) // no connection: keep it on this device and send it when we're back online
           try { await queue(form, payload.asMailbox, payload.subject || '(no subject)'); toast(tr("You’re offline. Saved to your Outbox; it will send when you reconnect.")); return; } catch { /* fall through */ }
         }
-        toast(`Couldn't send: ${e.message}`, { error: true, duration: 8000 });
+        if (e.code === 'monthly_cap') toast(e.message, { error: true, duration: 15000, action: tr('Verify now'), onAction: () => window.dispatchEvent(new CustomEvent('roammail:settings', { detail: 'security' })) });
+        else toast(`Couldn't send: ${e.message}`, { error: true, duration: 8000 });
         setComposers((cs) => [...cs, { id: Date.now(), initial: { ...c.initial, ...payload, html: payload.html, draftUid: payload.draftUid } }]);
       }
     };

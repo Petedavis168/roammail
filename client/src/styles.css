@@ -1706,3 +1706,14 @@ a { color: var(--accent); }
 [data-theme='dark'] .private-pill { color: #c4b5fd; background: rgba(196,181,253,.14); }
 :root:not([data-theme='dark']) .topbar .top-btn { color: var(--text); background: rgba(0,0,0,.06); }
 :root:not([data-theme='dark']) .topbar .top-btn:hover { background: rgba(0,0,0,.1); }
+
+/* ---------- ID verification ---------- */
+.idv { border: 1px solid var(--border); border-radius: 12px; padding: 14px 16px; margin-bottom: 18px; }
+.idv h3 { margin-top: 0; }
+.idv-ok { color: #107c10; font-weight: 600; } [data-theme='dark'] .idv-ok { color: #6ccb5f; }
+.idv-usage { margin: 6px 0 10px; display: flex; flex-direction: column; gap: 6px; }
+.idv-bar { height: 8px; border-radius: 4px; background: var(--hover, #eef1f5); overflow: hidden; }
+.idv-bar span { display: block; height: 100%; background: var(--accent); border-radius: 4px; }
+.idv-bar span.full { background: #c50f1f; }
+.idv-steps { margin: 6px 0 12px; padding-left: 20px; line-height: 1.6; }
+.idv-privacy { margin-top: 8px; }

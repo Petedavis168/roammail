@@ -1,6 +1,7 @@
 // Host routing and page URLs.
 //   roammail.net               landing page + sign-up; the app lives at roammail.net/{mailboxId}/inbox etc.
 //   login.roammail.net         sign-in, forgot password, recovery (then back to roammail.net/{id}/inbox)
+//   admin.roammail.net         the admin dashboard (business admins and super-admins); sign-in first if needed
 //   www. / app.roammail.net    301 to roammail.net, same path
 // With no ROOT_DOMAIN (development) everything is served from one host and sign-in lives at /login.
 import express from 'express';
@@ -37,8 +38,30 @@ hosts.use((req, res, next) => {
   if (h === `www.${root()}` || h === `app.${root()}`) return res.redirect(301, `https://${root()}${req.originalUrl}`);
   // The sign-in host only serves sign-in pages; mailbox URLs belong on the root
   if (h === config.loginHost && ID_PATH.test(req.path)) return res.redirect(302, `https://${root()}${req.originalUrl}`);
+  // The admin host only shows the admin dashboard; mail pages belong on the root
+  if (config.adminHost && h === config.adminHost) {
+    const m = ID_PATH.exec(req.path);
+    if (m && !/^\/admin(\/|$)/.test(m[2] || '')) return res.redirect(302, `https://${root()}${req.originalUrl}`);
+  }
   next();
 });
+// admin.roammail.net: straight to the dashboard of the first signed-in account, or sign in first and come back
+const ADMIN_NEXT = 'rm_next';
+hosts.get('/', async (req, res, next) => {
+  if (!config.adminHost || String(req.hostname || '').toLowerCase() !== config.adminHost) return next();
+  const emails = await browserMailboxes(req);
+  if (!emails.length) {
+    res.cookie(ADMIN_NEXT, 'admin', { httpOnly: true, secure: config.cookieSecure, sameSite: 'lax', path: '/', maxAge: 30 * 60e3, ...(config.cookieDomain ? { domain: config.cookieDomain } : {}) });
+    return res.redirect(302, loginUrl('/'));
+  }
+  return res.redirect(302, `/${await ensureMailboxId(emails[0])}/admin`);
+});
+/** After signing in: back to the admin dashboard if that's where they started. */
+export function afterLoginUrl(req, res, mailboxId, fallback) {
+  if (req.cookies?.[ADMIN_NEXT] !== 'admin' || !config.adminHost) return fallback;
+  res.clearCookie(ADMIN_NEXT, { path: '/', ...(config.cookieDomain ? { domain: config.cookieDomain } : {}) });
+  return `https://${config.adminHost}/${mailboxId}/admin`;
+}
 
 // Sign-in page while already signed in (and not adding another account): straight to the inbox.
 hosts.get(['/', '/login'], async (req, res, next) => {

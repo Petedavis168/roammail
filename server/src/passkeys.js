@@ -25,7 +25,7 @@ const MAX_PER_USER = 10;
 const rpID = (req) => config.rootDomain || req.hostname;
 const origins = (req) => {
   const o = new Set([`${req.protocol}://${req.get('host')}`]);
-  if (config.rootDomain) { o.add(`https://${config.rootDomain}`); if (config.loginHost) o.add(`https://${config.loginHost}`); }
+  if (config.rootDomain) { o.add(`https://${config.rootDomain}`); if (config.loginHost) o.add(`https://${config.loginHost}`); if (config.adminHost) o.add(`https://${config.adminHost}`); }
   return [...o];
 };
 const deviceName = (ua = '') => (/iPhone/.test(ua) ? 'iPhone' : /iPad/.test(ua) ? 'iPad' : /Android/.test(ua) ? 'Android phone'

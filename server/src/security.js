@@ -127,7 +127,8 @@ export async function finishLoginSession(req, res, { email, password, remember, 
   leakCheck(email, password).catch(() => {}); // data-leak alert (at most weekly, in the background)
   const mailboxId = await ensureMailboxId(email);
   await ensureSetupRow(email);
-  return { email, mailboxId, redirect: inboxUrl(mailboxId), setupRequired: (await setupState(email)).setupRequired };
+  const { afterLoginUrl } = await import('./hosts.js');
+  return { email, mailboxId, redirect: afterLoginUrl(req, res, mailboxId, inboxUrl(mailboxId)), setupRequired: (await setupState(email)).setupRequired };
 }
 export async function finishLogin(req, res, opts) {
   res.json(await finishLoginSession(req, res, opts));

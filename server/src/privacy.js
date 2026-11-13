@@ -102,7 +102,7 @@ privacy.post('/account/delete', wrap(async (req, res) => {
   await deleteAliasesFor(req.user.email).catch(() => {}); // hide-my-email aliases go with the mailbox
   await mailcow.deleteMailbox(req.user.email);
   const e = req.user.email;
-  for (const t of ['user_security', 'user_settings', 'user_signatures', 'profiles', 'jobs', 'password_resets', 'setup_tokens', 'tasks', 'notes', 'followups', 'nudge_dismissed', 'subscription_state', 'screener_list', 'contact_groups', 'privacy_stats', 'student_status', 'chat_hooks']) await q.run(`DELETE FROM ${t} WHERE email = ?`, e);
+  for (const t of ['user_security', 'user_settings', 'user_signatures', 'profiles', 'jobs', 'password_resets', 'setup_tokens', 'tasks', 'notes', 'followups', 'nudge_dismissed', 'subscription_state', 'screener_list', 'contact_groups', 'privacy_stats', 'student_status', 'chat_hooks', 'id_verifications', 'monthly_sends']) await q.run(`DELETE FROM ${t} WHERE email = ?`, e);
   await q.run('DELETE FROM members WHERE email = ?', e);
   await q.run('DELETE FROM voice_notes WHERE owner = ?', e);
   await q.run('DELETE FROM msg_status WHERE sender = ? OR recipient = ?', e, e);

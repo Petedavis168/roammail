@@ -2,7 +2,7 @@ import { createPortal } from 'react-dom';
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { api, mailUrl } from '../api.js';
 import { listKey, cachedList, saveList, warmList, prefetch } from '../fastcache.js';
-import { messageKey, parseMessageKey, sectionForFolder, folderForSection, loginHref } from '../nav.js';
+import { messageKey, parseMessageKey, sectionForFolder, folderForSection, loginHref, onAdminHost, appHref } from '../nav.js';
 import { Icon } from '../icons.jsx';
 import { usePrefs, catKeyword } from '../prefs.js';
 import { useToast } from './Toast.jsx';
@@ -169,6 +169,9 @@ export default function Mail({ me, route, refreshMe, theme, setTheme, themePref 
   const [importMsg] = useState(() => new URLSearchParams(location.search).get('import')); // back from Microsoft sign-in
   const [ssoMsg] = useState(() => new URLSearchParams(location.search).get('sso')); // back from linking a work account
   const [premiumMsg] = useState(() => new URLSearchParams(location.search).get('premium')); // back from Premium checkout
+  const [idvBack] = useState(() => new URLSearchParams(location.search).get('idv')); // back from the ID check
+  useEffect(() => { if (idvBack) setShowSettings('security'); }, []);
+  useEffect(() => { const on = (e) => setShowSettings(e.detail || true); window.addEventListener('roammail:settings', on); return () => window.removeEventListener('roammail:settings', on); }, []);
   // Item 9: tasks / notes / follow-ups panel
   const [panel, setPanel] = useState(() => { const p = new URLSearchParams(location.search).get('panel'); return ['tasks', 'notes', 'followups'].includes(p) ? p : null; });
   const [panelTab, setPanelTab] = useState(() => new URLSearchParams(location.search).get('panel') || 'tasks');
@@ -597,7 +600,7 @@ export default function Mail({ me, route, refreshMe, theme, setTheme, themePref 
           </form>
         ) : <div className="spacer" />}
         <div className="topbar-right">
-          {view === 'admin' && <button className="top-btn" aria-label={t("Back to mail")} onClick={() => setView('mail')}><Icon name="mail" /> <span>{t("Back to mail")}</span></button>}
+          {view === 'admin' && <button className="top-btn" aria-label={t("Back to mail")} onClick={() => (onAdminHost() ? location.assign(appHref(`/${mailbox}/inbox`)) : setView('mail'))}><Icon name="mail" /> <span>{t("Back to mail")}</span></button>}
           <button className={`icon-btn on-dark ${panel ? 'pressed' : ''}`} onClick={() => setPanel((p) => (p ? null : panelTab))} title={t("Tasks, notes and follow-ups (T)")} aria-label={t("Tasks, notes and follow-ups")} aria-pressed={!!panel}><Icon name="check" /></button>
           <button className={`icon-btn on-dark help-btn ${helpOpen ? 'pressed' : ''}`} onClick={() => setHelpOpen((h) => (h ? null : (newCount ? 'new' : 'help')))} title={t('Help and what’s new')} aria-label={newCount ? `${t('Help and what’s new')} (${newCount} ${t('new')})` : t('Help and what’s new')} aria-pressed={!!helpOpen}><span className="help-q" aria-hidden="true">?</span>{newCount > 0 && <span className="help-dot" aria-hidden="true" />}</button>
           <button className="icon-btn on-dark" onClick={() => setShowSettings(true)} title={t("Settings")} aria-label={t("Settings")}><Icon name="settings" /></button>
@@ -716,7 +719,7 @@ export default function Mail({ me, route, refreshMe, theme, setTheme, themePref 
         )}
       </nav>
       {view === 'admin' ? (
-        <Suspense fallback={<div className="spinner" />}><Admin me={me} refreshMe={refreshMe} onExit={() => setView('mail')} /></Suspense>
+        <Suspense fallback={<div className="spinner" />}><Admin me={me} refreshMe={refreshMe} onExit={() => (onAdminHost() ? location.assign(appHref(`/${mailbox}/inbox`)) : setView('mail'))} /></Suspense>
       ) : view === 'calendar' ? (
         <Suspense fallback={<div className="spinner" />}><Calendar me={me} /></Suspense>
       ) : view === 'contacts' ? (
@@ -795,7 +798,7 @@ export default function Mail({ me, route, refreshMe, theme, setTheme, themePref 
       <ComposeManager composers={composers} setComposers={setComposers} me={me} prefs={prefs} sigData={sigData}
         onSent={() => { loadFolders(); if (listFolder === special('\\Sent') || listFolder === special('\\Drafts')) load({ quiet: true }); }} />
       {helpOpen && <HelpPanel startTab={helpOpen} onClose={() => { setHelpOpen(null); setNewCount(unseenCount()); }} />}
-      {showSettings && <SettingsPanel prefs={prefs} setPrefs={setPrefs} me={me} folders={folders} sigData={sigData} reloadSigs={reloadSigs} onClose={() => setShowSettings(false)} initialTab={typeof showSettings === 'string' ? showSettings : importMsg ? 'import' : premiumMsg ? 'premium' : ssoMsg ? 'security' : undefined} importMsg={importMsg} premiumMsg={premiumMsg} ssoMsg={ssoMsg} />}
+      {showSettings && <SettingsPanel prefs={prefs} setPrefs={setPrefs} me={me} folders={folders} sigData={sigData} reloadSigs={reloadSigs} onClose={() => setShowSettings(false)} initialTab={typeof showSettings === 'string' ? showSettings : importMsg ? 'import' : premiumMsg ? 'premium' : idvBack ? 'security' : ssoMsg ? 'security' : undefined} importMsg={importMsg} premiumMsg={premiumMsg} ssoMsg={ssoMsg} />}
       {showHelp && <ShortcutsHelp onClose={() => setShowHelp(false)} />}
       {palette && <CommandBar onClose={() => setPalette(false)} settingsTabs={SETTINGS_TABS}
         folders={folders.map((f) => ({ ...f, label: folderLabel(f) }))}

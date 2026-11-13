@@ -39,6 +39,8 @@
     "test:speed": "node --disable-warning=ExperimentalWarning --test test/speed.test.js",
     "test:a11y": "node --disable-warning=ExperimentalWarning --test test/wcag.test.js",
     "test:batch5": "node --disable-warning=ExperimentalWarning --test test/batch5.test.js",
+    "test:sendcap": "node --disable-warning=ExperimentalWarning --test test/sendcap.test.js",
+    "test:adminhost": "node --disable-warning=ExperimentalWarning --test test/adminhost.test.js",
     "test:nativepush": "NODE_ENV=test node --disable-warning=ExperimentalWarning --test test/nativepush.test.js"
   },
   "keywords": [],

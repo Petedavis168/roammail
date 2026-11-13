@@ -84,6 +84,11 @@ test('standard business: pays at the end, seats follow users, webhooks are verif
   const other = await newAdmin(`other${run}`);
   assert.equal((await other.post('/api/billing/confirm', { sessionId: sid })).status, 403);
   assert.equal((await other.get(`/api/billing/${orgId}`)).status, 403);
+  // bills: paid ones link to a receipt, open ones to Pay now; other businesses can't see them
+  const inv = (await a.get(`/api/billing/${orgId}/invoices`)).data.invoices;
+  assert.ok(inv.some((i) => i.status === 'paid' && i.receiptUrl && !i.payUrl));
+  assert.ok(inv.some((i) => i.status === 'open' && i.payUrl));
+  assert.equal((await other.get(`/api/billing/${orgId}/invoices`)).status, 403);
 
   // checkout asked Stripe for tax and a trial; the admin got a receipt
   const params = await (await fetch(`${STRIPE}/v1/test/last-session`, { headers: { Authorization: 'Bearer sk_test_mock' } })).json();

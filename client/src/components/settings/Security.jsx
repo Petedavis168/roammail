@@ -1,3 +1,4 @@
+import IdVerify from './IdVerify.jsx';
 import { useEffect, useState } from 'react';
 import { api } from '../../api.js';
 import { Icon } from '../../icons.jsx';
@@ -103,6 +104,7 @@ export default function Security({ me, ssoMsg }) {
 
   return (
     <div className="settings-section">
+      <IdVerify />
       <div className={`sec-score s${score}`}>
         <Icon name={score === 2 ? 'check' : 'shield'} size={22} />
         <div><b>{score === 2 ? 'Your account is well protected' : score === 1 ? 'Almost there' : 'Protect your account'}</b>

@@ -15,6 +15,7 @@ import { importsApi, importsPublic, startImports, setImportNotifier } from './im
 import { phoneApi } from './phone.js';
 import { reputationApi, startReputationReport } from './reputation.js';
 import { deliverabilityApi } from './deliverability.js';
+import { idVerifyApi } from './idverify.js';
 import { sendSystemMail } from './recovery.js';
 import { help } from './help.js';
 import { hosts, siteRouter, ID_PATH, notFound } from './hosts.js';
@@ -162,6 +163,7 @@ app.use('/api', privacy);
 app.use('/api', tasksApi);
 app.use('/api', reputationApi);
 app.use('/api', deliverabilityApi);
+app.use('/api', idVerifyApi);
 app.use('/api', importsApi);
 app.use('/api', calendar);
 app.use('/api', contacts);
@@ -204,7 +206,8 @@ app.get('/favicon.ico', staticLimiter, (req, res) => {
 });
 app.get('/robots.txt', staticLimiter, (req, res) => {
   const host = String(req.hostname || '').toLowerCase();
-  const body = config.loginHost && host === config.loginHost
+  const body = config.adminHost && host === config.adminHost ? 'User-agent: *\nDisallow: /\n' // admin dashboard: never indexed
+    : config.loginHost && host === config.loginHost
     ? 'User-agent: *\nAllow: /$\nAllow: /signup\nDisallow: /\n' // sign-in host: only the sign-in and sign-up pages
     : 'User-agent: *\nDisallow: /api/\nDisallow: /app\nDisallow: /help/contact\n'; // the website; mailbox pages need a sign-in anyway
   res.type('text/plain').set('Cache-Control', 'public, max-age=86400').send(body);
