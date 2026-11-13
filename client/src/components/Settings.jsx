@@ -5,6 +5,7 @@ import Signatures from './settings/Signatures.jsx';
 import Templates from './settings/Templates.jsx';
 import Referrals from './settings/Referrals.jsx';
 import { NudgeSettings } from './Nudges.jsx';
+import ChatAlerts from './settings/ChatAlerts.jsx';
 import { SWIPE_ACTIONS } from '../swipe.js';
 import { sayNewMail, naturalVoices, isNatural, PHRASES, STYLES } from '../voice.js';
 import { pushState, enablePush, disablePush } from '../push.js';
@@ -122,6 +123,8 @@ function General({ prefs, setPrefs, me }) {
         </select></label>
       <h3>{t("Sounds")}</h3>
       <VoiceAlert prefs={prefs} setPrefs={setPrefs} />
+      <h3>{t("Slack & Teams alerts")}</h3>
+      <ChatAlerts />
       <h3>{t("Roammail to Roammail")}</h3>
       <ShareStatus />
       <h3>{t("Follow-ups")}</h3>

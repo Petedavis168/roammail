@@ -32,6 +32,16 @@ export default function Archive({ org }) {
           {cfg.scope === 'people' && people.map((p) => <label key={p.email} className="check small" style={{ marginLeft: 22 }}><input type="checkbox" checked={cfg.people.includes(p.email)} onChange={() => toggle('people', p.email)} /> {p.name || p.email} <span className="muted">{p.email}</span></label>)}
         </>
       )}
+      {cfg.enabled && (
+        <div className="card" style={{ margin: '12px 0', display: 'grid', gap: 8 }}>
+          <b>Retention</b>
+          <label className="row-field">Keep archived email for <select value={cfg.keepYears || 0} onChange={(e) => setCfg({ ...cfg, keepYears: Number(e.target.value) })}>
+            <option value={0}>Forever</option>{[1, 2, 3, 5, 7, 10].map((y) => <option key={y} value={y}>{y} {y === 1 ? 'year' : 'years'}</option>)}</select></label>
+          <p className="muted small">Older archived email is deleted automatically once a day. Many businesses keep 7 years for tax and legal records; check what applies to you.</p>
+          <label className="check"><input type="checkbox" checked={!!cfg.legalHold} onChange={(e) => setCfg({ ...cfg, legalHold: e.target.checked })} /> <b>Legal hold</b>: keep everything, delete nothing{cfg.legalHold && cfg.legalHoldSince ? <span className="muted small"> (since {fmtDate(new Date(cfg.legalHoldSince).toISOString())})</span> : ''}</label>
+          <p className="muted small">Turn this on when you expect a lawsuit, audit or investigation. It pauses the retention period until you turn it off.</p>
+        </div>
+      )}
       <p className="small"><b>Who can read the archive?</b> It shows up in their folder list, read-only.</p>
       {people.map((p) => <label key={p.email} className="check small"><input type="checkbox" checked={cfg.viewers.includes(p.email)} onChange={() => toggle('viewers', p.email)} /> {p.name || p.email} <span className="muted">{p.email}</span></label>)}
       <div className="actions"><button className="btn primary" onClick={save}>Save</button></div>

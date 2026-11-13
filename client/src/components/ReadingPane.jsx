@@ -221,6 +221,13 @@ function ThreadMessage({ m, expanded, onToggle, onReply, prefs, setPrefs, last, 
   const [allow, setAllow] = useState(trusted);
   const [blocked, setBlocked] = useState(0);
   const [trackers, setTrackers] = useState({ pixels: [], links: 0 });
+  // count blocked trackers for the monthly privacy report (once per email, numbers only)
+  useEffect(() => {
+    const k = `trk:${m.folder}:${m.uid}`;
+    if ((!trackers.pixels.length && !trackers.links) || sessionStorage.getItem(k)) return;
+    sessionStorage.setItem(k, '1');
+    api.post('/api/privacy-report/trackers', { pixels: trackers.pixels.length, links: trackers.links }).catch(() => {});
+  }, [trackers.pixels.length, trackers.links]);
   const [showTrackers, setShowTrackers] = useState(false);
   const [details, setDetails] = useState(false);
   const [menu, setMenu] = useState(false);
@@ -282,6 +289,7 @@ function ThreadMessage({ m, expanded, onToggle, onReply, prefs, setPrefs, last, 
                     <button key={d} onClick={() => { setMenu(false); onFollowUp(m, d); }}><Icon name="clock" /> {l}</button>
                   ))}
                 </>}
+                <button onClick={() => { setMenu(false); window.dispatchEvent(new CustomEvent('roammail:readlater', { detail: m })); }}><Icon name="archive" />{' '}{t("Read later")}</button>
                 <button onClick={() => { setMenu(false); window.dispatchEvent(new CustomEvent('roammail:makerule', { detail: m })); }}><Icon name="filter" />{' '}{t("Make a rule…")}</button>
                 <button onClick={() => { setMenu(false); window.dispatchEvent(new CustomEvent('roammail:reportscam', { detail: m })); }}><Icon name="shield" />{' '}{t("Report scam or phishing")}</button>
                 {sender.address && <button onClick={() => { setMenu(false); onBlock(sender.address); }}><Icon name="block" />{' '}{t("Block")}{' '}{sender.address}</button>}

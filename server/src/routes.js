@@ -21,10 +21,11 @@ import { learnRecipients } from './screener.js';
 import { recordDelivered, recordRead, isRoammail } from './status.js';
 import { setLiveSender } from './live.js';
 import { groupsFor } from './contactgroups.js';
+import { eventsIn } from './calendar.js';
 import { checkOutgoing } from './scamguard.js';
 import { protectEmail, noticeMail, checkSecurePassword } from './secure.js';
 import { rolesFor, q, twoFactorPolicy } from './db.js';
-import { applyEnforcedSignature, htmlToText } from './signatures.js';
+import { applyEnforcedSignature, applyCompanyFooter, htmlToText } from './signatures.js';
 import crypto from 'node:crypto';
 import { spamInfo } from './spam.js';
 import { parseInvite } from './calendar.js';
@@ -141,6 +142,7 @@ api.get('/me', async (req, res) => res.json({
   // set when the URL points at a shared mailbox this person can open
   viewing: req.delegatedMailbox ? { email: req.delegatedMailbox, mailboxId: await ensureMailboxId(req.delegatedMailbox) } : null,
   twoFactor: await twoFactorPolicy(req.user.email), adminRequires2fa: appConfig.requireAdmin2fa,
+  passwordLeaked: !!(await q.get('SELECT pw_leak_at FROM user_security WHERE email = ?', req.user.email).catch(() => null))?.pw_leak_at,
   orgDomains: (await q.all("SELECT d.domain FROM domains d WHERE d.status = 'active' AND d.org_id = (SELECT org_id FROM domains WHERE domain = ?)", req.user.email.split('@')[1])).map((d) => d.domain),
   clientSettings: { meetUrl: (process.env.MEETING_URL || 'https://meet.jit.si').replace(/\/$/, ''), imapHost: appConfig.imap.host, imapPort: appConfig.imap.port, smtpHost: appConfig.smtp.host, smtpPort: appConfig.smtp.port, smtpSecure: appConfig.smtp.secure, davEnabled: appConfig.davEnabled, davHost: appConfig.davHost },
 }));
@@ -543,6 +545,7 @@ api.post('/send', upload.array('attachments'), wrap(async (req, res) => {
   await checkSendQuota(req.user.email, rcptCount);
   mail = await applyEnforcedSignature(req.user, mail, !!(req.body.inReplyTo || req.body.forwardUid));
   await checkOutgoing(req.user.email, mail); // new free accounts: refuse clear scams / phishing
+  mail = await applyCompanyFooter(req.user, mail, [mail.to, mail.cc, mail.bcc].filter(Boolean).flatMap((v) => addressparser(v)).map((a) => String(a.address || '').toLowerCase()).filter(Boolean)); // company disclaimer
   // delivery / read receipts, if asked for
   const rr = requestReceipts(req.user, mail, { read: req.body.readReceipt === 'true', delivery: req.body.deliveryReceipt === 'true' });
   mail = rr.mail;
@@ -550,7 +553,15 @@ api.post('/send', upload.array('attachments'), wrap(async (req, res) => {
   if (!req.delegatedMailbox) learnRecipients(req.user.email, rcpts).catch(() => {}); // the Screener lets people you write to through
   // Password-protected: the recipients get a link; the real email is kept encrypted with the password
   let original = null; let secure = null;
-  if (req.body.protect === 'true') {
+  const selfDestruct = String(req.body.selfDestruct || ''); // '1h' | '24h' | '7d' | 'read'
+  if (selfDestruct && req.body.protect !== 'true') {
+    // Disappearing email: the recipients get a link (the key is in the link), it's gone after the time or after reading
+    const hours = { '1h': 1, '24h': 24, '7d': 168, read: 168 }[selfDestruct];
+    if (!hours) return res.status(400).json({ error: 'Pick when it should disappear' });
+    original = mail;
+    secure = await protectEmail(req, mail, { password: crypto.randomBytes(18).toString('base64url'), hours, burn: selfDestruct === 'read', linkKey: true, recipients: rcpts });
+    mail = noticeMail(mail, req.user, secure, '');
+  } else if (req.body.protect === 'true') {
     const password = checkSecurePassword(req.body.securePassword);
     original = mail;
     secure = await protectEmail(req, mail, { password, hint: req.body.secureHint, days: req.body.secureDays, recipients: rcpts });
@@ -600,7 +611,7 @@ api.post('/send', upload.array('attachments'), wrap(async (req, res) => {
   });
   void after;
 
-  res.json({ ok: true, messageId: info.messageId, accepted: info.accepted, rejected: info.rejected, secure: secure && { id: secure.id, url: secure.url } });
+  res.json({ ok: true, messageId: info.messageId, accepted: info.accepted, rejected: info.rejected, secure: secure && { id: secure.id, url: secure.url, selfDestruct: !!secure.selfDestruct } });
 }));
 
 api.post('/drafts', upload.array('attachments'), wrap(async (req, res) => {
@@ -652,6 +663,17 @@ api.get('/people/card', wrap(async (req, res) => {
   recent.sort((a, b) => new Date(b.date) - new Date(a.date));
   const name = contact?.name || coworker?.name || recent.find((m) => m.dir === 'in' && m.from?.[0]?.name)?.from?.[0]?.name || (recent.length ? (await q.get('SELECT name FROM profiles WHERE email = ?', email).catch(() => null))?.name : '') || ''; // their profile name only if you've emailed each other
   const notes = await q.all('SELECT id, body, updated_at FROM notes WHERE email = ? AND contact = ? ORDER BY updated_at DESC LIMIT 3', req.user.email, email).catch(() => []);
+  // Customer timeline: meetings with them (last 6 months and next 3), bookings they made, tasks about their emails
+  const meetings = await eventsIn(req.user, new Date(Date.now() - 180 * 864e5), new Date(Date.now() + 90 * 864e5))
+    .then((evs) => evs.filter((e) => (e.attendees || []).some((a) => String(a.email || '').toLowerCase() === email) || String(e.organizer?.email || '').toLowerCase() === email))
+    .catch(() => []);
+  const bookings = await q.all("SELECT start_at, status FROM bookings WHERE owner = ? AND lower(guest_email) = ? ORDER BY start_at DESC LIMIT 10", req.user.email, email).catch(() => []);
+  const timeline = [
+    ...recent.map((m) => ({ kind: m.dir === 'out' ? 'sent' : 'received', at: new Date(m.date).getTime(), title: m.subject || '(no subject)', folder: m.folder, uid: m.uid })),
+    ...meetings.map((e) => ({ kind: 'meeting', at: new Date(e.start).getTime(), title: e.title || 'Meeting' })),
+    ...bookings.map((b) => ({ kind: 'booking', at: Number(b.start_at), title: b.status === 'cancelled' ? 'Booking (cancelled)' : 'Booked a time with you' })),
+    ...notes.map((n) => ({ kind: 'note', at: typeof n.updated_at === 'number' ? n.updated_at : Date.parse(n.updated_at) || Date.now(), title: String(n.body).slice(0, 120) })),
+  ].filter((x) => Number.isFinite(x.at)).sort((a, b) => b.at - a.at).slice(0, 25);
   res.json({
     email, name,
     title: coworker?.title || contact?.title || '', company: contact?.company || (coworker ? 'Your company' : ''), department: coworker?.department || '',
@@ -661,6 +683,7 @@ api.get('/people/card', wrap(async (req, res) => {
     stats: { received, sent: sentCount, first: recent.length ? recent[recent.length - 1].date : null, last: recent[0]?.date || null },
     recent: recent.slice(0, 6).map((m) => ({ uid: m.uid, folder: m.folder, subject: m.subject, date: m.date, dir: m.dir, attachments: !!m.hasAttachments })),
     notes: notes.map((n) => ({ id: n.id, body: String(n.body).slice(0, 400), updatedAt: n.updated_at })),
+    timeline,
   });
 }));
 

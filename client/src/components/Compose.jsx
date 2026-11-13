@@ -11,6 +11,7 @@ import { queue, flushOutbox, isOffline } from '../outbox.js';
 import { offlineAllowed } from '../api.js';
 import { t as tr } from '../i18n.js';
 import VoiceRecorder from './VoiceRecorder.jsx';
+import { findPromise } from '../promises.js';
 import { GALLERY, customFields, builtinValues, fillTemplate, fieldLabel } from '../templategallery.js';
 
 const sigBlock = (html) => (html ? `<div class="signature" data-sig="1"><br>${safeHtml(html)}</div>` : '');
@@ -58,6 +59,8 @@ function Composer({ c, me, prefs, sigData, identities, onClose, onSend, focusInd
   const [dragging, setDragging] = useState(false);
   const [important, setImportant] = useState(init.priority === 'high');
   const [readR, setReadR] = useState(prefs.requestReceipts === 'always');
+  const [remindNoReply, setRemindNoReply] = useState(false); // snooze until reply: remind me if nobody answers
+  const [selfDestruct, setSelfDestruct] = useState(''); // '', '1h', '24h', '7d', 'read'
   const [delivR, setDelivR] = useState(prefs.requestReceipts === 'always');
   const [rcptMenu, setRcptMenu] = useState(false);
   const [moreMenu, setMoreMenu] = useState(false);
@@ -177,7 +180,7 @@ function Composer({ c, me, prefs, sigData, identities, onClose, onSend, focusInd
     to, cc, bcc, subject, files, html: editor.current?.innerHTML || '', text: editor.current?.innerText || '',
     inReplyTo: init.inReplyTo, references: init.references, replyFolder: init.replyFolder, replyUid: init.replyUid,
     forwardFolder: init.forwardFolder, forwardUid: init.forwardUid, draftUid: draft.uid, draftFolder: draft.folder,
-    priority: important ? 'high' : 'normal', readReceipt: readR, deliveryReceipt: delivR,
+    priority: important ? 'high' : 'normal', readReceipt: readR, deliveryReceipt: delivR, remindDays: remindNoReply ? 3 : 0, ...(selfDestruct && !protect ? { selfDestruct } : {}),
     ...(protect ? { protect: true, securePassword: sec.password, secureHint: sec.hint, secureDays: sec.days, pwFollow: sec.follow } : {}), fromAddress, asMailbox: fromChoices.find((i) => i.address === fromAddress)?.mailboxId,
     fromName: fromAddress !== me.email ? ((identities || []).find((i) => i.address === fromAddress)?.name || '') : (prefs.displayName || me.name || ''),
   });
@@ -371,6 +374,12 @@ function Composer({ c, me, prefs, sigData, identities, onClose, onSend, focusInd
                   {prefs.requestReceipts !== 'never' && <>
                     <button onClick={() => setDelivR((x) => !x)}><Icon name={delivR ? 'check' : 'send'} size={15} /> {tr("Delivery receipt")}</button>
                     <button onClick={() => setReadR((x) => !x)}><Icon name={readR ? 'check' : 'mail'} size={15} /> {tr("Read receipt")}</button>
+                    <button onClick={() => setRemindNoReply((x) => !x)}><Icon name={remindNoReply ? 'check' : 'clock'} size={15} /> {tr("Remind me if no reply (3 days)")}</button>
+                    <div className="menu-sep" />
+                    <div className="menu-note">{tr('Disappearing email')}</div>
+                    {[['', 'Off'], ['1h', 'Disappears after 1 hour'], ['24h', 'Disappears after 1 day'], ['7d', 'Disappears after 1 week'], ['read', 'Disappears after reading']].map(([k, l]) => (
+                      <button key={k || 'off'} onClick={() => { setSelfDestruct(k); if (k) setProtect(false); }}><Icon name={selfDestruct === k ? 'check' : k ? 'clock' : 'close'} size={15} /> {tr(l)}</button>
+                    ))}
                   </>}
                   <div className="menu-sep" />
                   <button onClick={() => { setMoreMenu(false); openTemplates(); }}><Icon name="copy" size={15} /> {tr("Template")}…</button>
@@ -427,7 +436,7 @@ function toForm(p) {
   fd.append('to', list(p.to)); fd.append('cc', list(p.cc)); fd.append('bcc', list(p.bcc));
   fd.append('subject', p.subject);
   fd.append('html', p.html); fd.append('text', p.text);
-  for (const k of ['inReplyTo', 'references', 'replyFolder', 'replyUid', 'forwardFolder', 'forwardUid', 'draftUid', 'priority', 'fromName', 'fromAddress', 'sendAt', 'readReceipt', 'deliveryReceipt', 'protect', 'securePassword', 'secureHint', 'secureDays']) {
+  for (const k of ['inReplyTo', 'references', 'replyFolder', 'replyUid', 'forwardFolder', 'forwardUid', 'draftUid', 'priority', 'fromName', 'fromAddress', 'sendAt', 'readReceipt', 'deliveryReceipt', 'protect', 'securePassword', 'secureHint', 'secureDays', 'selfDestruct']) {
     if (p[k]) fd.append(k, p[k]);
   }
   for (const f of p.files) fd.append('attachments', f, f.name);
@@ -474,6 +483,21 @@ export default function ComposeManager({ composers, setComposers, me, prefs, sig
     return () => window.removeEventListener('online', flush);
   }, []);
 
+  // After a send: "remind me if no reply", and smart reminders for promises made in the email
+  const afterSend = (payload, r) => {
+    const who = [...(payload.to || []), ...(payload.cc || [])].map((a) => a.name || a.address).join(', ');
+    if (payload.remindDays && r?.messageId) {
+      const at = new Date(); at.setDate(at.getDate() + payload.remindDays); at.setHours(9, 0, 0, 0);
+      api.post('/api/followups', { messageId: r.messageId, subject: payload.subject, recipients: who, remindAt: at.getTime() }).catch(() => {});
+    }
+    const promise = findPromise(payload.text);
+    if (promise) {
+      setTimeout(() => toast(`${tr('You promised:')} “${promise.text}”. ${tr('Remind you')} ${new Date(promise.due).toLocaleString([], { weekday: 'short', hour: 'numeric', minute: '2-digit' })}?`, {
+        duration: 12000, action: tr('Remind me'),
+        onAction: () => api.post('/api/tasks', { title: promise.text.slice(0, 280), details: `${tr('To')} ${who}: ${payload.subject || ''}`, dueAt: promise.due, remindAt: promise.due - 3600e3 }).then(() => toast(tr('Reminder set'))).catch((e) => toast(e.message, { error: true })),
+      }), 1200);
+    }
+  };
   const onSend = (c, payload) => {
     remove(c.id);
     // Sending from another signed-in account: references to this mailbox's folders don't apply there
@@ -485,6 +509,7 @@ export default function ComposeManager({ composers, setComposers, me, prefs, sig
       try {
         const r = await api.form('/api/send', form, payload.asMailbox);
         onSent();
+        if (r?.secure?.selfDestruct) { toast(tr('Disappearing email sent. They get a link; it’s gone when the time is up.')); afterSend(payload, r); return; }
         if (r?.secure) {
           if (payload.pwFollow === 'manual') { setShare({ ...r.secure, password: payload.securePassword }); return; }
           await api.post(`/api/secure/${r.secure.id}/send-password`, { password: payload.securePassword, delayMinutes: payload.pwFollow === 'now' ? 0 : 5 })
@@ -493,6 +518,7 @@ export default function ComposeManager({ composers, setComposers, me, prefs, sig
           return;
         }
         toast(tr("Message sent"));
+        afterSend(payload, r);
       } catch (e) {
         if (isOffline(e) && offlineAllowed() && !payload.protect) { // protected emails are never stored on the device (they hold the password) // no connection: keep it on this device and send it when we're back online
           try { await queue(form, payload.asMailbox, payload.subject || '(no subject)'); toast(tr("You’re offline. Saved to your Outbox; it will send when you reconnect.")); return; } catch { /* fall through */ }

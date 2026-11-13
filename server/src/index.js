@@ -8,7 +8,7 @@ import { fileURLToPath } from 'node:url';
 import { config } from './config.js';
 import { api } from './routes.js';
 import { sharedboxes } from './sharedboxes.js';
-import { archive } from './archive.js';
+import { applyRetention, archive } from './archive.js';
 import { push, startPush, pushStats, notify } from './push.js';
 import { tasksApi, startReminders, setReminderNotifier } from './tasks.js';
 import { importsApi, importsPublic, startImports, setImportNotifier } from './imports.js';
@@ -44,6 +44,9 @@ import { contactGroups } from './contactgroups.js';
 import { catchupApi } from './catchup.js';
 import { scamApi } from './scamguard.js';
 import { referralsApi, startReferralRewards } from './referrals.js';
+import { privacyReport } from './privacyreport.js';
+import { studentApi } from './student.js';
+import { chatAlertsApi } from './chatalerts.js';
 import { endExpiredGifts } from './premium.js';
 import { aliasesApi } from './aliases.js';
 import { receiptsApi } from './receipts.js';
@@ -141,6 +144,9 @@ app.use('/api', contactGroups);
 app.use('/api', catchupApi);
 app.use('/api', scamApi);
 app.use('/api', referralsApi);
+app.use('/api', privacyReport);
+app.use('/api', studentApi);
+app.use('/api', chatAlertsApi);
 app.use('/api', aliasesApi);
 app.use('/api', receiptsApi);
 app.use('/api', secureApi);
@@ -230,6 +236,7 @@ if (config.runsBackground) {
   await startRetention();
   startStatusRecorder(); // uptime history for the status page
   startReferralRewards(); // refer a friend: free months once the friend is a real, active user
+  setInterval(() => applyRetention().catch((e) => console.error('APP_ERROR retention policy', e.message)), 24 * 3600e3).unref();
   setInterval(() => endExpiredGifts().catch((e) => console.error('APP_ERROR gifts', e.message)), 6 * 3600e3).unref();
   setInterval(() => processTwoFactorResets().catch((e) => console.error('APP_ERROR 2fa resets', e)), 10 * 60 * 1000).unref();
 }

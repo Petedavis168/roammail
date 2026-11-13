@@ -15,6 +15,7 @@ export default function ContactCard({ person, anchor, onClose, onEmail, onMeetin
   const [err, setErr] = useState('');
   const [pos, setPos] = useState(null);
   const [note, setNote] = useState('');
+  const [tab, setTab] = useState('emails');
   const ref = useRef();
   const address = String(person.address || '').toLowerCase();
   const load = () => api.get('/api/people/card', { email: address }).then(setD).catch((e) => setErr(e.message));
@@ -86,6 +87,19 @@ export default function ContactCard({ person, anchor, onClose, onEmail, onMeetin
           )}
           {!isMe && (
             <div className="ccard-sec">
+              <div className="seg ccard-tabs"><button className={tab === 'emails' ? 'on' : ''} onClick={() => setTab('emails')}>{t('Emails')}</button><button className={tab === 'timeline' ? 'on' : ''} onClick={() => setTab('timeline')}>{t('Timeline')}</button></div>
+              {tab === 'timeline' ? (
+                <div className="ccard-timeline">
+                  {!d.timeline?.length && <div className="muted small">{t('Nothing yet.')}</div>}
+                  {(d.timeline || []).map((x, i) => (
+                    <button key={i} className={`tl-item tl-${x.kind}`} disabled={!x.uid} onClick={() => { if (x.uid) { onClose(); onOpenMessage(x); } }}>
+                      <span className="tl-dot">{{ sent: '↗', received: '↘', meeting: '📅', booking: '🗓', note: '📝' }[x.kind]}</span>
+                      <span className="tl-title">{x.title}</span>
+                      <small className="muted">{x.at > Date.now() ? `${t('upcoming')} · ` : ''}{fmtDate(new Date(x.at).toISOString())}</small>
+                    </button>
+                  ))}
+                </div>
+              ) : <>
               <div className="ccard-sub"><b>{t('Recent emails')}</b>
                 <span className="muted small">{d.stats.received} {t('from them')} · {d.stats.sent} {t('to them')}{since ? ` · ${t('since')} ${since}` : ''}</span></div>
               {!d.recent.length && <div className="muted small">{t('No emails with this person yet.')}</div>}
@@ -97,6 +111,7 @@ export default function ContactCard({ person, anchor, onClose, onEmail, onMeetin
                 </button>
               ))}
               {d.stats.received + d.stats.sent > d.recent.length && <button className="link small" onClick={() => { onClose(); onShowAll(address); }}>{t('Show all emails with')} {name.split(' ')[0]}</button>}
+              </>}
             </div>
           )}
           {!isMe && (

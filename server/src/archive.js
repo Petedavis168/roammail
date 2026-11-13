@@ -6,7 +6,8 @@ import express from 'express';
 import crypto from 'node:crypto';
 import { config } from './config.js';
 import { q, audit, rolesFor, twoFactorPolicy, setting, setSetting } from './db.js';
-import { requireAuth, seal } from './session.js';
+import { requireAuth, seal, unseal } from './session.js';
+import { makeClient } from './imap.js';
 import { mailcow } from './mailcow.js';
 
 const wrap = (fn) => (req, res, next) => Promise.resolve(fn(req, res, next)).catch(next);
@@ -69,9 +70,41 @@ archive.put('/admin/orgs/:id/archive', wrap(async (req, res) => {
   }
   await q.run('DELETE FROM shared_access WHERE mailbox = ?', mailbox);
   for (const v of viewers) await q.run('INSERT INTO shared_access(mailbox, member, can_send) VALUES(?, ?, 0)', mailbox, v);
-  const cfg = { enabled: !!req.body.enabled, scope, people: scope === 'people' ? people : [], mailbox, since: prev?.enabled ? prev.since : (req.body.enabled ? Date.now() : null) };
+  // Retention: keep archived email for N years (0 = forever); legal hold freezes everything, nothing is deleted
+  const keepYears = [0, 1, 2, 3, 5, 7, 10].includes(Number(req.body.keepYears)) ? Number(req.body.keepYears) : (prev?.keepYears || 0);
+  const legalHold = req.body.legalHold === undefined ? !!prev?.legalHold : !!req.body.legalHold;
+  const cfg = { enabled: !!req.body.enabled, scope, people: scope === 'people' ? people : [], mailbox, since: prev?.enabled ? prev.since : (req.body.enabled ? Date.now() : null),
+    keepYears, legalHold, legalHoldSince: legalHold ? (prev?.legalHold ? prev.legalHoldSince : Date.now()) : null };
   await setSetting(`archive:${orgId}`, cfg);
   const r = await syncArchive(orgId);
-  await audit(req.user.email, orgId, 'archive.settings', { enabled: cfg.enabled, scope, people: cfg.people, viewers });
+  await audit(req.user.email, orgId, 'archive.settings', { enabled: cfg.enabled, scope, people: cfg.people, viewers, keepYears, legalHold });
   res.json({ ok: true, ...cfg, viewers, maps: r.maps });
 }));
+
+// ---------------------------------------------------------------- retention (daily, from the worker)
+/** Delete archived email older than the company's keep period, unless a legal hold is on. */
+export async function applyRetention() {
+  const orgs = await q.all('SELECT id FROM orgs');
+  let removed = 0;
+  for (const o of orgs) {
+    const cfg = await setting(`archive:${o.id}`, null);
+    if (!cfg?.mailbox || !cfg.keepYears || cfg.legalHold) continue;
+    const row = await q.get('SELECT creds FROM shared_mailboxes WHERE email = ?', cfg.mailbox);
+    const creds = row && unseal(row.creds);
+    if (!creds?.password) continue;
+    const before = new Date(Date.now() - cfg.keepYears * 365.25 * 864e5);
+    const c = makeClient({ email: cfg.mailbox, password: creds.password });
+    try {
+      await c.connect();
+      for (const box of (await c.list()).map((b) => b.path)) {
+        const lock = await c.getMailboxLock(box);
+        try {
+          const uids = (await c.search({ before }, { uid: true })) || [];
+          if (uids.length) { await c.messageDelete(uids.join(','), { uid: true }); removed += uids.length; }
+        } finally { lock.release(); }
+      }
+      await audit('system', o.id, 'archive.retention', { keepYears: cfg.keepYears, before: before.toISOString().slice(0, 10) });
+    } catch (e) { console.warn('retention failed for org', o.id, e.message); } finally { await c.logout().catch(() => {}); }
+  }
+  return removed;
+}

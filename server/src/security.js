@@ -12,7 +12,8 @@ import { q, security, audit } from './db.js';
 import { seal, unseal, sealedWithOldKey, setSession, requireAuth, revokeSessions, updateSessionPassword, sessionPublicId } from './session.js';
 import { makeClient, closeClient, checkPassword as checkMailPassword } from './imap.js';
 import { mailcow } from './mailcow.js';
-import { loginBlocked, loginFailed, loginSucceeded, assertNotBreached } from './abuse.js';
+import { loginBlocked, loginFailed, loginSucceeded, assertNotBreached, passwordInBreach } from './abuse.js';
+import { sendSystemMail } from './recovery.js';
 
 const wrap = (fn) => (req, res, next) => Promise.resolve(fn(req, res, next)).catch(next);
 const fail = (status, message) => Object.assign(new Error(message), { status });
@@ -101,6 +102,21 @@ publicSecurity.post('/login', loginLimiter, wrap(async (req, res) => {
   await finishLogin(req, res, { email, password, remember: req.body.remember === true });
 }));
 
+/** Data-leak alert: if the password someone signs in with shows up in a public breach, tell them (once). */
+async function leakCheck(email, password) {
+  const row = await q.get('SELECT pw_checked_at, pw_leak_at FROM user_security WHERE email = ?', email);
+  if (row?.pw_leak_at || Number(row?.pw_checked_at || 0) > Date.now() - 7 * 864e5) return;
+  const leaked = await passwordInBreach(password);
+  if (leaked === null) return;
+  await q.run('INSERT INTO user_security(email) VALUES(?) ON CONFLICT(email) DO NOTHING', email);
+  await q.run('UPDATE user_security SET pw_checked_at = ?, pw_leak_at = ? WHERE email = ?', Date.now(), leaked ? Date.now() : null, email);
+  if (!leaked) return;
+  await audit(email, null, 'security.password_leaked');
+  const rec = (await q.get('SELECT recovery_email FROM user_security WHERE email = ? AND recovery_verified = 1', email))?.recovery_email;
+  await sendSystemMail([email, rec].filter(Boolean), 'Your password appeared in a data leak',
+    `<p>The password you use for <b>${email.replace(/[<>&"]/g, '')}</b> appears in a list of passwords leaked from another website. Criminals try these passwords everywhere.</p><p><b>Please change it now</b> in Settings → Security, and turn on 2-step verification. Nothing is wrong with your Roammail account itself.</p>`).catch(() => {});
+}
+
 /** Last steps of every sign-in (password, 2-step code, passkey): session, alerts, where to go next. */
 /** Start the session after a successful sign-in; returns where to go next. */
 export async function finishLoginSession(req, res, { email, password, remember, how }) {
@@ -108,6 +124,7 @@ export async function finishLoginSession(req, res, { email, password, remember, 
   await logEvent(req, email, true, how);
   await setSession(res, { email, password, name: '', remember }, req);
   await newDeviceCheck(req, email, password);
+  leakCheck(email, password).catch(() => {}); // data-leak alert (at most weekly, in the background)
   const mailboxId = await ensureMailboxId(email);
   await ensureSetupRow(email);
   return { email, mailboxId, redirect: inboxUrl(mailboxId), setupRequired: (await setupState(email)).setupRequired };
@@ -315,6 +332,7 @@ securityApi.post('/security/password', wrap(async (req, res) => {
   await closeClient(req.user.sid);
   await bumpEpoch(req.user.email, req.user.sid);  // signs out every other device
   await updateSessionPassword(req.user.sid, next);
+  await q.run('UPDATE user_security SET pw_leak_at = NULL, pw_checked_at = ? WHERE email = ?', Date.now(), req.user.email); // the leaked one is gone
   await audit(req.user.email, null, 'security.password_change', { ip: req.ip });
   res.json({ ok: true });
 }));

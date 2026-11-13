@@ -6,6 +6,8 @@ import { DomainStatus } from '../admin/DomainSetup.jsx';
 import { t } from '../../i18n.js';
 
 /** Personal Premium: 100 GB, your own domain, unlimited AI help. */
+import StudentNonprofit from './StudentNonprofit.jsx';
+
 export default function Premium({ premiumMsg }) {
   const toast = useToast();
   const [p, setP] = useState(null);
@@ -36,8 +38,9 @@ export default function Premium({ premiumMsg }) {
       {premiumMsg === 'canceled' && !p.active && <p className="muted small">{t("Checkout was cancelled. Nothing was charged.")}</p>}
       {p.active ? (
         <>
-          <p><span className="pill ok">{t("Premium")}</span> {p.interval === 'year' ? 'Yearly' : 'Monthly'}{p.status === 'past_due' ? ' · payment failed, please update your card' : ''}</p>
-          <button className="btn" onClick={manage}><Icon name="external" size={14} />{' '}{t("Manage subscription (card, invoices, cancel)")}</button>
+          {p.paid ? <p><span className="pill ok">{t("Premium")}</span> {p.interval === 'year' ? 'Yearly' : 'Monthly'}{p.status === 'past_due' ? ' · payment failed, please update your card' : ''}</p>
+            : <p><span className="pill ok">{t("Premium")}</span> {t('Free until')} {new Date(p.giftUntil || p.until).toLocaleDateString()} 🎁</p>}
+          {p.paid && <button className="btn" onClick={manage}><Icon name="external" size={14} />{' '}{t("Manage subscription (card, invoices, cancel)")}</button>}
           <h3>{t("Your own domain")}</h3>
           {p.domain ? <DomainStatus domain={p.domain.domain} /> : (
             <form className="pick-time" onSubmit={addDomain}>
@@ -54,6 +57,7 @@ export default function Premium({ premiumMsg }) {
           <p className="muted small">{t("Cancel any time. Your mail stays yours either way.")}</p>
         </div>
       )}
+      <StudentNonprofit />
     </div>
   );
 }

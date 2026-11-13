@@ -291,3 +291,34 @@ signatures.put('/admin/orgs/:id/templates', wrap(async (req, res) => {
   await audit(req.user.email, id, 'templates.company', { count: list.length });
   res.json({ ok: true, templates: list });
 }));
+
+// ---------------------------------------------------------------- company footer (disclaimer)
+// A short legal / confidentiality notice added under every email the team sends (optionally only to outside people).
+const cleanFooter = (b) => ({ enabled: !!b.enabled, text: String(b.text || '').replace(/\r/g, '').slice(0, 2000), externalOnly: b.externalOnly !== false });
+signatures.get('/admin/orgs/:id/footer', wrap(async (req, res) => {
+  const id = await requireOrgAdmin(req, req.params.id);
+  res.json(await setting(`orgFooter:${id}`, { enabled: false, text: '', externalOnly: true }));
+}));
+signatures.put('/admin/orgs/:id/footer', wrap(async (req, res) => {
+  const id = await requireOrgAdmin(req, req.params.id);
+  const f = cleanFooter(req.body);
+  if (f.enabled && !f.text.trim()) throw fail(400, 'Write the footer text');
+  await setSetting(`orgFooter:${id}`, f);
+  await audit(req.user.email, id, 'footer.company', { enabled: f.enabled, externalOnly: f.externalOnly });
+  res.json(f);
+}));
+/** Add the company footer to an outgoing email (plain text and HTML). recipients = every address it goes to. */
+export async function applyCompanyFooter(user, mail, recipients) {
+  const orgId = await orgIdForEmail(user.email);
+  if (!orgId) return mail;
+  const f = await setting(`orgFooter:${orgId}`, null);
+  if (!f?.enabled || !f.text?.trim()) return mail;
+  if (f.externalOnly) {
+    const own = new Set((await q.all("SELECT domain FROM domains WHERE org_id = ? AND status = 'active'", orgId)).map((d) => d.domain));
+    if (recipients.every((r) => own.has(String(r).split('@')[1]))) return mail;
+  }
+  if (mail.html && /data-org-footer/.test(mail.html)) return mail;
+  const block = `<div data-org-footer="1" style="margin-top:20px;padding-top:8px;border-top:1px solid #ddd;color:#777;font-size:11px;line-height:1.4;white-space:pre-wrap">${esc(f.text)}</div>`;
+  const html = mail.html || (mail.text ? `<div style="white-space:pre-wrap">${esc(mail.text)}</div>` : '');
+  return { ...mail, html: `${html}${block}`, text: `${mail.text || ''}\n\n--\n${f.text}` };
+}

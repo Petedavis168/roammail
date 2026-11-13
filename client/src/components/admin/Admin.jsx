@@ -16,6 +16,7 @@ import Abuse from './Abuse.jsx';
 import SharedMailboxes from './SharedMailboxes.jsx';
 import Archive from './Archive.jsx';
 import { TemplatesEditor } from '../settings/Templates.jsx';
+import CompanyFooter from './CompanyFooter.jsx';
 
 import { tempPassword as genPassword } from '../../temppass.js'; // two words + 4 digits, no look-alike characters (4a)
 
@@ -727,7 +728,7 @@ export default function Admin({ me, refreshMe, onExit }) {
       <section className="admin-main">
         <h1>{current === 'platform' ? 'Platform' : current === 'support' ? 'Support' : current === 'abuse' ? 'Abuse & sending' : current === 'new' ? 'Add a business' : org?.name} <small className="muted">{tabs.find((t) => t[0] === current)?.[1]}</small></h1>
         {current === 'users' && org && <Users key={org.id} org={org} domains={org.domains} />}
-        {current === 'signature' && org && <SignatureTab key={org.id} org={org} />}
+        {current === 'signature' && org && <><SignatureTab key={org.id} org={org} /><CompanyFooter key={`f${org.id}`} org={org} /></>}
         {current === 'orgsecurity' && org && <OrgSecurity key={org.id} org={org} reload={load} />}
         {current === 'billing' && org && <Billing key={org.id} org={org} />}
         {current === 'groups' && org && <Groups key={org.id} org={org} />}

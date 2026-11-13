@@ -78,6 +78,14 @@ export default function Mail({ me, route, refreshMe, theme, setTheme, themePref 
     setShowSettings('rules');
   };
   useEffect(() => { const on = (e) => makeRule(e.detail); window.addEventListener('roammail:makerule', on); return () => window.removeEventListener('roammail:makerule', on); }, []);
+  // Read later: a calm "Read later" folder for long emails and newsletters
+  const readLater = async (uid) => {
+    const name = 'Read later';
+    if (!folders.some((f) => f.path === name)) { await api.post('/api/folders', { path: name }).catch(() => {}); await loadFolders(); }
+    act.move(name, uid, 'saved to Read later');
+  };
+  const readLaterRef = useRef(readLater); readLaterRef.current = readLater;
+  useEffect(() => { const on = (e) => readLaterRef.current(e.detail?.uid); window.addEventListener('roammail:readlater', on); return () => window.removeEventListener('roammail:readlater', on); }, []);
   // Report scam / phishing: to Junk, and (if it came from a Roammail address) reported to us
   const reportScam = async (m) => {
     if (!m?.uid || !confirm(t('Report this email as a scam or phishing? It will move to Junk.'))) return;
@@ -478,6 +486,21 @@ export default function Mail({ me, route, refreshMe, theme, setTheme, themePref 
 
   // ---------- search ----------
   const runSearch = (q) => { setSearch(q.trim() || null); setSearchInput(q); };
+  // Instant search: results as you type (after a short pause), and matching people on top
+  const typeTimer = useRef(null);
+  const [people, setPeople] = useState([]);
+  const [peopleOpen, setPeopleOpen] = useState(false);
+  const onSearchType = (v) => {
+    setSearchInput(v); setPeopleOpen(true);
+    clearTimeout(typeTimer.current);
+    typeTimer.current = setTimeout(() => {
+      const q = v.trim();
+      if (!q) { setSearch(null); setPeople([]); return; }
+      if (q.length < 2) return;
+      setSearch(q);
+      if (!/[:]/.test(q)) api.contacts(q).then((r) => setPeople((r || []).filter((x) => !x.group).slice(0, 4))).catch(() => setPeople([])); else setPeople([]);
+    }, 300);
+  };
   const clearSearch = () => { setSearch(null); setSearchInput(''); };
 
   // ---------- keyboard shortcuts (Gmail + Outlook) ----------
@@ -533,7 +556,18 @@ export default function Mail({ me, route, refreshMe, theme, setTheme, themePref 
         {view === 'mail' ? (
           <form className="search" onSubmit={(e) => { e.preventDefault(); runSearch(searchInput); }}>
             <Icon name="search" />
-            <input ref={searchRef} value={searchInput} onChange={(e) => setSearchInput(e.target.value)} placeholder={t("Search mail")} aria-label={t("Search mail")} />
+            <input ref={searchRef} value={searchInput} onChange={(e) => onSearchType(e.target.value)} onFocus={() => setPeopleOpen(true)} onBlur={() => setTimeout(() => setPeopleOpen(false), 200)} placeholder={t("Search mail")} aria-label={t("Search mail")} />
+            {peopleOpen && people.length > 0 && searchInput.trim().length >= 2 && (
+              <div className="menu search-people" role="listbox" aria-label={t('People')}>
+                <div className="menu-note">{t('People')}</div>
+                {people.map((p) => (
+                  <button type="button" key={p.address} onMouseDown={(e) => { e.preventDefault(); setPeopleOpen(false); window.dispatchEvent(new CustomEvent('roammail:card', { detail: { person: p, anchor: searchRef.current } })); }}>
+                    <span className="avatar xs" style={{ background: avatarColor(p.address) }}>{initials(p)}</span><span><b>{p.name || p.address}</b>{p.name && <small className="muted"> {p.address}</small>}</span>
+                  </button>
+                ))}
+                <button type="button" onMouseDown={(e) => { e.preventDefault(); setPeopleOpen(false); runSearch(`from:${people[0].address}`); }}><Icon name="search" size={14} /> {t('All email from')} {people[0].name || people[0].address}</button>
+              </div>
+            )}
             {search && <button type="button" className="icon-btn" onClick={clearSearch} aria-label={t("Clear search")}><Icon name="close" /></button>}
             <div className="dd">
               <button type="button" className="icon-btn" onClick={() => setOpsHelp((o) => !o)} title={t("Search tips")} aria-label={t("Search tips")}><Icon name="filter" /></button>
@@ -578,6 +612,7 @@ export default function Mail({ me, route, refreshMe, theme, setTheme, themePref 
                 <a className="menu-link" href={loginHref('?add=1')}><Icon name="plus" />{' '}{t("Add another account")}</a>
                 <button onClick={() => onLogout(false)}><Icon name="logout" />{' '}{t("Sign out")}{(me.accounts || []).length > 1 ? ` of ${me.email}` : ''}</button>
                 {(me.accounts || []).length > 1 && <button onClick={() => onLogout(true)}><Icon name="logout" />{' '}{t("Sign out of all accounts")}</button>}
+                {!me.delegated && <button onClick={async () => { setUserMenu(false); if (!confirm(t('Sign out of Roammail on every other phone, computer and browser? You stay signed in here.'))) return; try { await api.post('/api/security/signout-all', {}); toast(t('Signed out everywhere else. If you think someone else knows your password, change it now in Settings → Security.')); } catch (e) { toast(e.message, { error: true }); } }}><Icon name="lock" />{' '}{t("Sign out everywhere else")}</button>}
               </div>
             )}
           </div>
@@ -594,6 +629,7 @@ export default function Mail({ me, route, refreshMe, theme, setTheme, themePref 
             ['mail', rowMenu.m.seen ? 'Mark as unread' : 'Mark as read', () => act.read(!rowMenu.m.seen, rowMenu.m.uid)],
             ['flag', rowMenu.m.flagged ? 'Remove flag' : 'Flag', () => act.flag(rowMenu.m.uid)],
             ['clock', 'Snooze…', () => act.snooze(rowMenu.m.uid)],
+            ['archive', 'Read later', () => readLater(rowMenu.m.uid)],
             null,
             ['filter', 'Make a rule…', () => makeRule(rowMenu.m)],
             ['shield', 'Report scam', () => reportScam({ ...rowMenu.m, folder: listFolder })],
@@ -628,6 +664,12 @@ export default function Mail({ me, route, refreshMe, theme, setTheme, themePref 
             </ol>
             <div className="actions"><button className="btn primary" onClick={() => setIosInstall(false)}>{t('Got it')}</button></div>
           </div>
+        </div>
+      )}
+      {me.passwordLeaked && (
+        <div className="leak-bar" role="alert"><Icon name="shield" size={16} />
+          <span><b>{t('Your password appeared in a data leak from another website.')}</b> {t('Change it now to keep your account safe.')}</span>
+          <button className="btn sm primary" onClick={() => setShowSettings('security')}>{t('Change password')}</button>
         </div>
       )}
       {ooo?.activeNow && (

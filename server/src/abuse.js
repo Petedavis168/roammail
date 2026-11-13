@@ -102,6 +102,19 @@ export async function assertNotBreached(password, email) {
   }
 }
 
+/** Has this password appeared in a public data leak? true / false / null (couldn't check). k-anonymity: only the
+ *  first 5 characters of its SHA-1 hash ever leave the server. */
+export async function passwordInBreach(password) {
+  if (!config.limits.checkBreachedPasswords) return null;
+  const hash = crypto.createHash('sha1').update(String(password)).digest('hex').toUpperCase();
+  try {
+    const res = await fetch(`https://api.pwnedpasswords.com/range/${hash.slice(0, 5)}`, { headers: { 'Add-Padding': 'true' }, signal: AbortSignal.timeout(3000) });
+    if (!res.ok) return null;
+    const hit = (await res.text()).split('\n').find((l) => l.startsWith(hash.slice(5)));
+    return !!hit && Number(hit.split(':')[1]) > 0;
+  } catch { return null; }
+}
+
 // ---------------------------------------------------------------- login throttling
 // Per (account + IP): 10 failures -> 15 min pause for that IP only, so attackers can't lock real users out.
 // Per account from many IPs: 50 failures in 15 min -> account paused (distributed attack).

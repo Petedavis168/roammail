@@ -14,6 +14,7 @@ import { mailcow } from './mailcow.js';
 import { setSession, requireAuth, revokeSessions, seal } from './session.js';
 import { verifyRecord, requiredRecords, checkVerification, checkRecords } from './dns.js';
 import { findZone, applyRecords } from './route53.js';
+import { applyCloudflare } from './cloudflaredns.js';
 import { saveProfile, getProfile, deleteUserData } from './signatures.js';
 import { setRecoveryEmail } from './security.js';
 import { deliverWelcome } from './welcome.js';
@@ -410,6 +411,15 @@ accounts.post('/domains/:domain/auto-dns', requireSuper, wrap(async (req, res) =
   await applyRecords(zone, d.domain, requiredRecords(d.domain, dkimOf(fresh)));
   await audit(req.user.email, d.org_id, 'domain.route53', { domain: d.domain, zone });
   res.json({ ok: true });
+}));
+
+// One click DNS for any domain admin whose domain is on Cloudflare (token used once, never kept)
+accounts.post('/domains/:domain/cloudflare', rateLimit({ windowMs: 3600e3, limit: 10 }), wrap(async (req, res) => {
+  const d = await requireDomainAdmin(req, req.params.domain);
+  const recs = [...(d.status === 'pending' ? [verifyRecord(d.domain, d.verify_token)] : []), ...requiredRecords(d.domain, dkimOf(await orgOf(d.domain)))];
+  const r = await applyCloudflare(req.body.token, d.domain, recs);
+  await audit(req.user.email, d.org_id, 'domain.cloudflare', { domain: d.domain, ...r });
+  res.json({ ok: true, ...r });
 }));
 
 accounts.delete('/domains/:domain', wrap(async (req, res) => {

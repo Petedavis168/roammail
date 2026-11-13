@@ -2,6 +2,7 @@
 // The background worker keeps one IMAP IDLE watch per person who turned notifications on and sends an encrypted
 // push through the browser's push service (Apple, Google, Mozilla). Only sender name and subject are included.
 import express from 'express';
+import { chatNotify, chatWatchers } from './chatalerts.js';
 import crypto from 'node:crypto';
 import https from 'node:https';
 import webpush from 'web-push';
@@ -105,7 +106,7 @@ push.post('/push/unsubscribe', wrap(async (req, res) => {
 }));
 
 // Signing out everywhere (or a password change) stops notifications on every device
-onRevoke((email) => { q.run('DELETE FROM push_subs WHERE email = ?', email).catch(() => {}); stopWatch(email); });
+onRevoke((email) => { q.run('DELETE FROM push_subs WHERE email = ?', email).catch(() => {}); q.run('DELETE FROM chat_hooks WHERE email = ?', email).catch(() => {}); stopWatch(email); });
 
 // ---------------------------------------------------------------- worker: one IDLE watch per person
 const watchers = new Map(); // email -> { client, closed }
@@ -146,8 +147,12 @@ async function watch(email, user) {
           if (m.flags?.has('\\Seen')) continue;
           const from = m.envelope.from?.[0];
           const tag = `mail-${email}-${m.uid || m.seq}`;
-          if (await previewOn(email)) await notify(email, { title: from?.name || from?.address || 'New mail', body: String(m.envelope.subject || '(no subject)').slice(0, 140), tag, url: '/app' });
-          else await notify(email, { title: 'New mail', body: email, tag, url: '/app' }); // sender and subject hidden
+          const preview = await previewOn(email);
+          // Slack / Teams first, so a failed phone push never stops it
+          await chatNotify(email, { from, subject: m.envelope.subject, preview, link: config.publicUrl ? `${config.publicUrl.replace(/\/$/, '')}/app` : '' }).catch(() => {});
+          await (preview
+            ? notify(email, { title: from?.name || from?.address || 'New mail', body: String(m.envelope.subject || '(no subject)').slice(0, 140), tag, url: '/app' })
+            : notify(email, { title: 'New mail', body: email, tag, url: '/app' })).catch(() => {}); // sender and subject hidden
         }
       } catch { /* next time */ }
     });
@@ -155,7 +160,7 @@ async function watch(email, user) {
     client.idle().catch(() => {});
   } catch (e) {
     watchers.delete(email);
-    if (isAuthError(e)) { await authFailed(user.email, user.password); await q.run('DELETE FROM push_subs WHERE email = ?', email); } // password changed: stop, never retry
+    if (isAuthError(e)) { await authFailed(user.email, user.password); await q.run('DELETE FROM push_subs WHERE email = ?', email); await q.run('DELETE FROM chat_hooks WHERE email = ?', email); } // password changed: stop, never retry
   }
 }
 
@@ -168,6 +173,7 @@ export async function refreshWatches() {
     if (!c || c.exp < Date.now()) { await q.run('DELETE FROM push_subs WHERE email = ? AND creds = ?', s.email, s.creds); continue; }
     if (!wanted.has(s.email)) wanted.set(s.email, { email: c.email, password: c.password, sid: `push:${s.email}` });
   }
+  for (const c of await chatWatchers().catch(() => [])) if (!wanted.has(c.email)) wanted.set(c.email, c.user); // Slack / Teams alerts need the watch too
   for (const email of watchers.keys()) if (!wanted.has(email)) stopWatch(email);
   for (const [email, user] of wanted) await watch(email, user);
   return { watching: watchers.size };
