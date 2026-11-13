@@ -40,7 +40,7 @@ test('scam scoring', () => {
   assert.ok(scamScore({ subject: 'Quick favor', text: 'Can you buy 5 Apple gift cards and send me the codes? I will pay you back.' }).score >= 6);
   assert.ok(scamScore({ subject: 'Invest', text: 'Send bitcoin to this wallet and we double your profit' }).score >= 3);
   const shown = scamScore({ subject: 'Docs', html: '<p>See <a href="https://evil.example/x">www.mybank.com</a></p>' });
-  assert.ok(shown.reasons.some((r) => /shows www\.mybank\.com but goes to evil\.example/.test(r)));
+  assert.ok(shown.reasons.some((r) => /shows mybank\.com but goes to evil\.example/.test(r)));
   assert.equal(scamScore({ subject: 'Lunch tomorrow?', text: 'Want to grab lunch at noon? I can book the place on Main St.' }).score, 0);
   assert.equal(scamScore({ subject: 'Invoice 1042', text: 'Hi Sam, attached is invoice 1042 for March. Thanks!' }).score, 0);
   assert.ok(isDisposable('x@mailinator.com')); assert.ok(!isDisposable('x@gmail.com'));
