@@ -28,6 +28,11 @@ export function metricsMiddleware(req, res, next) {
     let i = BUCKETS.findIndex((b) => s <= b); if (i < 0) i = BUCKETS.length; hist[i]++; latSum += s;
     window.requests++; if (res.statusCode >= 500) window.errors++;
     if (window.latencies.length < 20000) window.latencies.push(s * 1000);
+    // Name slow calls so the "slow responses" alarm can be traced. Route shape only (":id"), never addresses or content.
+    if (s >= 2) {
+      const route = req.route?.path ? `${req.baseUrl || ''}${typeof req.route.path === 'string' ? req.route.path : '(pattern)'}` : req.path.replace(/\/[^/]*[0-9@][^/]*/g, '/:x').slice(0, 80);
+      console.log(`SLOW_REQUEST ${req.method} ${route} ${Math.round(s * 1000)}ms status=${res.statusCode}`);
+    }
   });
   next();
 }
@@ -87,8 +92,19 @@ async function mailcowCheck() {
   } catch { return { ok: false, ms: Date.now() - t0 }; }
 }
 let statusCache = { at: 0, value: null };
-export async function systemStatus() {
-  if (Date.now() - statusCache.at < 30_000 && statusCache.value) return statusCache.value;
+let statusRun = null;
+/** Current status. Answers at once from the last check (refreshing it in the background when it's over 30s old),
+ *  so the status page and uptime monitors never wait on the mail servers. */
+export async function systemStatus({ fresh = false } = {}) {
+  const stale = Date.now() - statusCache.at >= 30_000;
+  if (statusCache.value && !fresh) { if (stale && !statusRun) checkStatus().catch(() => {}); return statusCache.value; }
+  return checkStatus();
+}
+function checkStatus() {
+  statusRun ||= runChecks().finally(() => { statusRun = null; });
+  return statusRun;
+}
+async function runChecks() {
   const [imap, smtp, admin] = await Promise.all([
     tcpCheck(config.imap.host, config.imap.port, config.imap.secure),
     tcpCheck(config.smtp.host, config.smtp.port, config.smtp.secure),
@@ -110,7 +126,7 @@ export async function systemStatus() {
 // ---------------------------------------------------------------- uptime history (90 days, for the status page)
 // The background worker checks every 5 minutes and counts, per day and per part, how many checks were OK.
 export async function recordStatus() {
-  const s = await systemStatus();
+  const s = await systemStatus({ fresh: true });
   const day = new Date().toISOString().slice(0, 10);
   for (const c of s.components) {
     await q.run(`INSERT INTO status_days(day, component, ok, total) VALUES(?, ?, ?, 1)

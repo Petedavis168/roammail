@@ -540,14 +540,30 @@ Resources:
     Type: AWS::CloudWatch::Alarm
     Condition: HasAlerts
     Properties:
-      AlarmDescription: Slow responses - 95% of requests took over 2 seconds for 10 minutes
-      Namespace: AWS/ApplicationELB
-      MetricName: TargetResponseTime
-      Dimensions: [{ Name: LoadBalancer, Value: !GetAtt LoadBalancer.LoadBalancerFullName }]
-      ExtendedStatistic: p95
-      Period: 300
-      EvaluationPeriods: 2
-      Threshold: 2
+      AlarmDescription: >-
+        Slow responses - 95% of requests took over 3 seconds for 15 minutes while people were using the app
+        (at least 200 requests per 5 minutes, so a few slow first sign-ins at night don't count).
+        Logs: search SLOW_REQUEST in /roammail/web to see which calls were slow.
+      Metrics:
+        - Id: p95
+          ReturnData: false
+          MetricStat:
+            Metric: { Namespace: AWS/ApplicationELB, MetricName: TargetResponseTime, Dimensions: [{ Name: LoadBalancer, Value: !GetAtt LoadBalancer.LoadBalancerFullName }] }
+            Period: 300
+            Stat: p95
+        - Id: reqs
+          ReturnData: false
+          MetricStat:
+            Metric: { Namespace: AWS/ApplicationELB, MetricName: RequestCount, Dimensions: [{ Name: LoadBalancer, Value: !GetAtt LoadBalancer.LoadBalancerFullName }] }
+            Period: 300
+            Stat: Sum
+        - Id: busyslow
+          Label: p95 response time when busy
+          Expression: IF(reqs >= 200, p95, 0)
+          ReturnData: true
+      EvaluationPeriods: 3
+      DatapointsToAlarm: 3
+      Threshold: 3
       ComparisonOperator: GreaterThanThreshold
       TreatMissingData: notBreaching
       AlarmActions: [!Ref AlertTopic]
