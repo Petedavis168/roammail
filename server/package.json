@@ -37,6 +37,8 @@
     "test:batch3": "node --disable-warning=ExperimentalWarning --test test/batch3.test.js",
     "test:batch4": "node --disable-warning=ExperimentalWarning --test test/batch4.test.js",
     "test:speed": "node --disable-warning=ExperimentalWarning --test test/speed.test.js",
+    "test:a11y": "node --disable-warning=ExperimentalWarning --test test/wcag.test.js",
+    "test:batch5": "node --disable-warning=ExperimentalWarning --test test/batch5.test.js",
     "test:nativepush": "NODE_ENV=test node --disable-warning=ExperimentalWarning --test test/nativepush.test.js"
   },
   "keywords": [],
@@ -64,5 +66,8 @@
     "web-push": "^3.6.7",
     "zod": "^4.6.7"
   },
-  "type": "module"
+  "type": "module",
+  "devDependencies": {
+    "axe-core": "^4.14.0"
+  }
 }

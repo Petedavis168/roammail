@@ -1,3 +1,4 @@
+import { cachedList } from './listcache.js';
 import express from 'express';
 import multer from 'multer';
 import nodemailer from 'nodemailer';
@@ -193,7 +194,8 @@ api.get('/messages', wrap(async (req, res) => {
   if (folder === 'INBOX' && !req.delegatedMailbox) collectReceipts(req.user, { minGap: 30e3 }).catch((e) => console.warn('receipts scan failed', e.message));
 
   const tab = folder === 'INBOX' && TABS.includes(req.query.tab) ? req.query.tab : null;
-  const result = await withMailbox(req.user, folder, async (client) => {
+  const cacheKey = `${String(req.user.email).toLowerCase()}|${folder}|${page}|${pageSize}|${filter || ''}|${tab || ''}`;
+  const result = await withMailbox(req.user, folder, (client) => cachedList(client, cacheKey, async () => {
     const total = client.mailbox.exists;
     if (tab) { // smart inbox tabs: Primary / Updates / Newsletters (optionally also filtered)
       const t = await inboxTabs(client);
@@ -220,7 +222,7 @@ api.get('/messages', wrap(async (req, res) => {
     if (end < 1) return { total, messages: [] };
     const start = Math.max(1, end - pageSize + 1);
     return { total, messages: await fetchSummaries(client, `${start}:${end}`) };
-  });
+  }));
   res.json({ folder, page, pageSize, ...result });
 }));
 

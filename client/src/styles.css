@@ -1644,3 +1644,65 @@ a { color: var(--accent); }
 .tl-title { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .tl-meeting .tl-dot, .tl-booking .tl-dot { background: color-mix(in srgb, #7c3aed 14%, var(--panel)); }
 .cf-setup { display: grid; gap: 8px; } .cf-setup ol { padding-left: 18px; display: grid; gap: 4px; }
+
+/* ---------- deliverability dashboard ---------- */
+.deliverability h3 { margin-top: 22px; }
+.dl-tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; margin: 12px 0; }
+.dl-tile { border: 1px solid var(--border); border-radius: 10px; padding: 10px 12px; display: flex; flex-direction: column; gap: 4px; background: var(--surface, transparent); }
+.dl-tile small { color: var(--text-2, var(--muted)); }
+.dl-tile b { font-size: 22px; font-variant-numeric: tabular-nums; }
+.dl-badge { display: inline-flex; align-items: center; gap: 4px; font-size: 12px; padding: 1px 8px; border-radius: 999px; width: fit-content; border: 1px solid currentColor; }
+.dl-good { color: #107c10; } .dl-warn { color: #8a5a00; } .dl-bad { color: #c50f1f; }
+[data-theme="dark"] .dl-good { color: #6ccb5f; } [data-theme="dark"] .dl-warn { color: #f2c661; } [data-theme="dark"] .dl-bad { color: #ff8a8a; }
+.dl-chart { margin: 14px 0; }
+.dl-bars { position: relative; display: flex; align-items: flex-end; gap: 2px; height: 120px; border-bottom: 1px solid var(--border); padding-top: 6px; }
+.dl-bar-hit { flex: 1; height: 100%; display: flex; align-items: flex-end; cursor: default; }
+.dl-bar { width: 100%; background: var(--accent); border-radius: 4px 4px 0 0; min-height: 1px; }
+.dl-bar-hit:hover .dl-bar { filter: brightness(1.15); }
+.dl-limit { position: absolute; left: 0; right: 0; border-top: 1px dashed var(--text-3, #999); pointer-events: none; }
+.dl-limit span { position: absolute; right: 0; top: -16px; font-size: 11px; color: var(--text-2, #666); }
+.dl-table { border-collapse: collapse; font-size: 13px; margin: 8px 0; }
+.dl-table th, .dl-table td { text-align: left; padding: 4px 12px 4px 0; border-bottom: 1px solid var(--border); font-variant-numeric: tabular-nums; }
+.dl-health { list-style: none; padding: 0; display: flex; flex-direction: column; gap: 10px; }
+.dl-health code { word-break: break-all; }
+
+/* ---------- help panel and what's new ---------- */
+.help-btn { position: relative; }
+.help-q { font-weight: 700; font-size: 17px; line-height: 1; width: 22px; height: 22px; display: inline-grid; place-items: center; border: 2px solid currentColor; border-radius: 50%; }
+.help-dot { position: absolute; top: 4px; right: 4px; width: 9px; height: 9px; border-radius: 50%; background: #e3008c; box-shadow: 0 0 0 2px var(--topbar-bg, #0a1e2e); }
+.help-panel { position: fixed; top: 56px; right: 12px; bottom: 12px; width: min(400px, calc(100vw - 24px)); z-index: 60; background: var(--bg, #fff); color: var(--text); border: 1px solid var(--border); border-radius: 12px; box-shadow: 0 12px 40px rgba(0,0,0,.22); display: flex; flex-direction: column; overflow: hidden; }
+.help-head { display: flex; align-items: center; justify-content: space-between; padding: 10px 12px; border-bottom: 1px solid var(--border); }
+.help-body { flex: 1; overflow: auto; padding: 14px; display: flex; flex-direction: column; gap: 10px; }
+.help-popular, .help-links { display: flex; flex-wrap: wrap; gap: 6px; }
+.help-matches { margin: 0; padding-left: 18px; }
+.help-article { white-space: pre-wrap; line-height: 1.55; }
+.help-chat { display: flex; flex-direction: column; gap: 10px; }
+.help-msg { display: flex; flex-direction: column; gap: 6px; max-width: 92%; }
+.help-msg.user { align-self: flex-end; align-items: flex-end; }
+.help-bubble { padding: 8px 12px; border-radius: 14px; line-height: 1.45; white-space: pre-wrap; background: var(--hover, #f0f2f5); }
+.help-msg.user .help-bubble { background: var(--accent); color: #fff; }
+.help-bubble.typing { display: flex; gap: 4px; padding: 12px; }
+.help-bubble.typing span { width: 6px; height: 6px; border-radius: 50%; background: currentColor; opacity: .4; animation: helpdot 1s infinite; }
+.help-bubble.typing span:nth-child(2) { animation-delay: .15s; } .help-bubble.typing span:nth-child(3) { animation-delay: .3s; }
+@keyframes helpdot { 50% { opacity: 1; } }
+@media (prefers-reduced-motion: reduce) { .help-bubble.typing span { animation: none; opacity: .7; } }
+.help-ask { display: flex; gap: 6px; position: sticky; bottom: 0; background: var(--bg, #fff); padding-top: 6px; margin-top: auto; }
+.help-ask input { flex: 1; }
+.help-contact { display: flex; flex-direction: column; gap: 6px; border: 1px solid var(--border); border-radius: 10px; padding: 10px; }
+.help-sent { background: var(--hover, #eef6ee); border-radius: 10px; padding: 10px; }
+.help-foot { font-size: 11px; }
+.whatsnew-item { border-bottom: 1px solid var(--border); padding-bottom: 10px; }
+.whatsnew-item h2, .help-title { margin: 2px 0 4px; font-size: 15px; }
+.whatsnew-item p { margin: 0 0 4px; line-height: 1.5; }
+@media (max-width: 700px) { .help-panel { top: 0; right: 0; bottom: 0; width: 100vw; border-radius: 0; } }
+
+/* ---------- accessibility ---------- */
+.sr-only { position: absolute !important; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; }
+.g-main { display: contents; }
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+/* contrast: selected items use a deeper blue on their light-blue highlight (4.5:1 or better) */
+:root:not([data-theme='dark']) .folder.on .fname, :root:not([data-theme='dark']) .settings-nav > .on, :root:not([data-theme='dark']) .rail button.on small, :root:not([data-theme='dark']) .rail .on small, :root:not([data-theme='dark']) .app-rail button.on small, :root:not([data-theme='dark']) .app-rail button.on { color: #1d4ed8; }
+[data-theme='dark'] .g-btn { color: #0b2233; }
+[data-theme='dark'] .private-pill { color: #c4b5fd; background: rgba(196,181,253,.14); }
+:root:not([data-theme='dark']) .topbar .top-btn { color: var(--text); background: rgba(0,0,0,.06); }
+:root:not([data-theme='dark']) .topbar .top-btn:hover { background: rgba(0,0,0,.1); }

@@ -21,13 +21,13 @@ const STRENGTH = ['Too weak', 'Weak', 'Fair', 'Good', 'Strong'];
 
 function Card({ title, subtitle, children, onSubmit, footer }) {
   return (
-    <form className="g-card" onSubmit={onSubmit} noValidate>
+    <main className="g-main"><form className="g-card" onSubmit={onSubmit} noValidate>
       <img className="g-mark" src="/assets/roammail-symbol.png" alt={t("Roammail")} />
       <h1>{title}</h1>
       {subtitle && <p className="g-sub">{subtitle}</p>}
       <div className="g-body">{children}</div>
       {footer && <div className="g-foot">{footer}</div>}
-    </form>
+    </form></main>
   );
 }
 function Field({ label, error, hint, ...props }) {
@@ -337,7 +337,7 @@ function Shell({ children }) {
   return (
     <div className="g-page">
       {children}
-      <div className="g-legal"><span>{t("Roammail · Your business. Delivered. · Powered by Friendly Web Services")}</span><span><a href="/legal/privacy">{t("Privacy")}</a><a href="/legal/terms">{t("Terms")}</a><a href="/legal/security">{t("Security")}</a></span></div>
+      <footer className="g-legal"><span>{t("Roammail · Your business. Delivered. · Powered by Friendly Web Services")}</span><span><a href="/legal/privacy">{t("Privacy")}</a><a href="/legal/terms">{t("Terms")}</a><a href="/legal/security">{t("Security")}</a></span></footer>
     </div>
   );
 }

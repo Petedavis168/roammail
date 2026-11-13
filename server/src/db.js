@@ -200,6 +200,7 @@ CREATE INDEX IF NOT EXISTS msg_status_sender ON msg_status(sender, message_id);
 CREATE TABLE IF NOT EXISTS contact_groups (id INTEGER PRIMARY KEY AUTOINCREMENT, email TEXT NOT NULL, name TEXT NOT NULL, members TEXT NOT NULL, updated_at INTEGER NOT NULL);
 CREATE INDEX IF NOT EXISTS contact_groups_email ON contact_groups(email);
 CREATE TABLE IF NOT EXISTS status_days (day TEXT NOT NULL, component TEXT NOT NULL, ok INTEGER NOT NULL, total INTEGER NOT NULL, PRIMARY KEY (day, component));
+CREATE TABLE IF NOT EXISTS deliverability_days (day TEXT PRIMARY KEY, sent INTEGER, bounced INTEGER, deferred INTEGER, complaints INTEGER, listed INTEGER, held INTEGER, by_provider TEXT, google TEXT, microsoft TEXT);
 CREATE TABLE IF NOT EXISTS referral_codes (email TEXT PRIMARY KEY, code TEXT NOT NULL UNIQUE, created_at INTEGER NOT NULL);
 CREATE TABLE IF NOT EXISTS referrals (referee TEXT PRIMARY KEY, referrer TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'pending', reason TEXT, created_at INTEGER NOT NULL, rewarded_at INTEGER);
 CREATE INDEX IF NOT EXISTS referrals_referrer ON referrals(referrer);

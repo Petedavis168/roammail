@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { useDialog } from '../../a11y.js';
 import { api } from '../../api.js';
 import { Icon } from '../../icons.jsx';
 import { useToast } from '../Toast.jsx';
@@ -38,9 +39,10 @@ export default function ContactEditor({ contact, onClose, onSaved }) {
       <button type="button" className="link left" onClick={() => setF({ ...f, [k]: [...f[k], blankRow(types[0])] })}>{t("+ Add")}{' '}{k === 'emails' ? 'email' : 'phone'}</button>
     </>
   );
+  const dlg = useDialog(onClose);
   return (
     <div className="modal-wrap" onClick={onClose}>
-      <form className="modal contact-editor" onClick={(e) => e.stopPropagation()} onSubmit={save}>
+      <form ref={dlg} data-dialog tabIndex={-1} role="dialog" aria-modal="true" className="modal contact-editor" onClick={(e) => e.stopPropagation()} onSubmit={save}>
         <div className="modal-head"><h2>{isNew ? 'New contact' : 'Edit contact'}</h2><button type="button" className="icon-btn" onClick={onClose}><Icon name="close" /></button></div>
         <div className="form">
           <div className="two-col">

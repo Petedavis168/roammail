@@ -7,6 +7,7 @@ const seen = [];
 const answer = (props, user) => {
   if (props.summary) return { summary: 'Daniel confirms the Elm Street site visit on Thursday at 9:30.', actionItems: ['Be at 412 Elm St on Thursday 9:30'], needsReply: true };
   if (props.replies) return { replies: [{ label: 'Confirm', text: 'Thursday at 9:30 works. See you there.\n\nMaya' }, { label: 'Ask to move', text: 'Could we do 10:30 instead?\n\nMaya' }, { label: 'Ask a question', text: 'Should I bring anything?\n\nMaya' }] };
+  if (props.contactSupport) return /refund|charged/i.test(user) ? { answer: 'Our team will look at billing questions for you.', articles: [], contactSupport: true } : { answer: 'Open Settings → Mail tools → Automatic replies, pick your dates and write your reply.', articles: ['out-of-office', 'not-a-real-slug'], contactSupport: false };
   if (props.needsReply) { const id = Number((/<email id="(\d+)"[^>]*subject="[^"]*(?:question|\?)/i.exec(user) || [])[1]); return { needsReply: id ? [{ id, reason: 'Asking when you are free' }] : [] }; }
   return {};
 };

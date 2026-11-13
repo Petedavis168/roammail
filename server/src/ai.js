@@ -63,13 +63,13 @@ const who = (list) => (list || []).map((a) => (a.name ? `${a.name} <${a.address}
 const attrv = (v) => String(v || '').replace(/"/g, "'").replace(/</g, '&lt;').replace(/>/g, '&gt;'); // keep the tag well-formed
 const asEmail = (m, n = 6000) => `<email from="${attrv(who(m.from))}" date="${m.date}" subject="${attrv(m.subject)}">\n${clean(m.text || m.snippet, n)}\n</email>`;
 
-async function ask(task, schema, maxTokens = 1500) {
+async function ask(task, schema, maxTokens = 1500, system = SYSTEM) {
   let r;
   try {
     r = await anthropic().beta.messages.parse({
       model: MODEL(),
       max_tokens: maxTokens,
-      system: [{ type: 'text', text: SYSTEM, cache_control: { type: 'ephemeral' } }],
+      system: [{ type: 'text', text: system, cache_control: { type: 'ephemeral' } }],
       messages: [{ role: 'user', content: task }],
       output_config: { effort: 'low', format: zodOutputFormat(schema) }, // short, simple tasks: low effort keeps them fast and cheap
       betas: ['server-side-fallback-2026-07-01'],
@@ -86,6 +86,9 @@ async function ask(task, schema, maxTokens = 1500) {
   if (r.stop_reason === 'max_tokens' || !r.parsed_output) throw fail(502, 'AI help gave an incomplete answer. Please try again.');
   return r.parsed_output;
 }
+
+/** For other features (the in-app help assistant): same model, errors and safety handling, its own fixed instructions. */
+export const askClaude = (system, task, schema, maxTokens) => ask(task, schema, maxTokens, system);
 
 const Summary = z.object({
   summary: z.string().describe('2 to 4 sentences: what this conversation is about and where it stands now'),

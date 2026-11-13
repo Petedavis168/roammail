@@ -250,7 +250,7 @@ function ThreadMessage({ m, expanded, onToggle, onReply, prefs, setPrefs, last, 
   return (
     <article className="tmsg">
       <header className="tmsg-head" onClick={last ? undefined : onToggle}>
-        <button type="button" className="avatar lg avatar-btn" style={{ background: avatarColor(sender.address) }} onClick={(e) => openCard(e, sender)} aria-label={`${personName(sender)}: ${t('contact card')}`}>{initials(sender)}</button>
+        <button type="button" className="avatar lg avatar-btn" style={{ background: avatarColor(sender.address) }} onClick={(e) => openCard(e, sender)} ><span aria-hidden="true">{initials(sender)}</span><span className="sr-only">{`${personName(sender)}: ${t('contact card')}`}</span></button>
         <div className="who">
           <div><button type="button" className="person-link strong" onClick={(e) => openCard(e, sender)}>{personName(sender)}</button> <span className="muted">&lt;{sender.address}&gt;</span>
             {external && <span className="ext-tag" title={t("This message came from outside your organization")}>{t("External")}</span>}

@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { useDialog } from '../a11y.js';
 import { Icon } from '../icons.jsx';
 import Booking from './settings/Booking.jsx';
 import Signatures from './settings/Signatures.jsx';
@@ -233,9 +234,10 @@ export default function SettingsPanel({ prefs, setPrefs, me, folders, sigData, r
   const [showPremium, setShowPremium] = useState(false);
   useEffect(() => { if (platform() !== 'ios') api.get('/api/premium').then((p) => setShowPremium(p.available || p.active)).catch(() => {}); }, []);
   const tabs = TABS.filter(([k]) => k !== 'premium' || showPremium);
+  const dlg = useDialog(onClose);
   return (
     <div className="modal-wrap" onClick={onClose}>
-      <div className="settings-modal" onClick={(e) => e.stopPropagation()} role="dialog" aria-label={t("Settings")}>
+      <div ref={dlg} data-dialog tabIndex={-1} aria-modal="true" className="settings-modal" onClick={(e) => e.stopPropagation()} role="dialog" aria-label={t("Settings")}>
         <nav className="settings-nav">
           <h2>{t("Settings")}</h2>
           {tabs.map(([k, l, i]) => <button key={k} className={tab === k ? 'on' : ''} onClick={() => setTab(k)}><Icon name={i} size={16} /> {l}</button>)}

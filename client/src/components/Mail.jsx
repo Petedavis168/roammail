@@ -8,6 +8,8 @@ import { usePrefs, catKeyword } from '../prefs.js';
 import { useToast } from './Toast.jsx';
 import Sidebar from './Sidebar.jsx';
 import MessageList from './MessageList.jsx';
+import HelpPanel from './HelpPanel.jsx';
+import { unseenCount } from '../whatsnew.js';
 import ReadingPane from './ReadingPane.jsx';
 import Ribbon from './Ribbon.jsx';
 import ComposeManager, { replyDraft } from './Compose.jsx';
@@ -133,6 +135,8 @@ export default function Mail({ me, route, refreshMe, theme, setTheme, themePref 
   const [selected, setSelected] = useState(new Set());
   const [active, setActive] = useState(null); // uid
   const [composers, setComposers] = useState([]);
+  const [helpOpen, setHelpOpen] = useState(null); // 'help' | 'new' | null
+  const [newCount, setNewCount] = useState(unseenCount);
   const [showSettings, setShowSettings] = useState(false); // true, or the name of a settings page to open
   const [palette, setPalette] = useState(false);
   useEffect(() => {
@@ -595,6 +599,7 @@ export default function Mail({ me, route, refreshMe, theme, setTheme, themePref 
         <div className="topbar-right">
           {view === 'admin' && <button className="top-btn" aria-label={t("Back to mail")} onClick={() => setView('mail')}><Icon name="mail" /> <span>{t("Back to mail")}</span></button>}
           <button className={`icon-btn on-dark ${panel ? 'pressed' : ''}`} onClick={() => setPanel((p) => (p ? null : panelTab))} title={t("Tasks, notes and follow-ups (T)")} aria-label={t("Tasks, notes and follow-ups")} aria-pressed={!!panel}><Icon name="check" /></button>
+          <button className={`icon-btn on-dark help-btn ${helpOpen ? 'pressed' : ''}`} onClick={() => setHelpOpen((h) => (h ? null : (newCount ? 'new' : 'help')))} title={t('Help and what’s new')} aria-label={newCount ? `${t('Help and what’s new')} (${newCount} ${t('new')})` : t('Help and what’s new')} aria-pressed={!!helpOpen}><span className="help-q" aria-hidden="true">?</span>{newCount > 0 && <span className="help-dot" aria-hidden="true" />}</button>
           <button className="icon-btn on-dark" onClick={() => setShowSettings(true)} title={t("Settings")} aria-label={t("Settings")}><Icon name="settings" /></button>
           <div className="user-menu-wrap">
             <button className="avatar sm" style={{ background: avatarColor(me.email) }} onClick={() => setUserMenu((u) => !u)} title={me.email}>
@@ -729,6 +734,7 @@ export default function Mail({ me, route, refreshMe, theme, setTheme, themePref 
               categories={prefs.categories} onCategory={(c) => runSearch(`label:${catKeyword(c.name).slice(4)}`)} />
           )}
           <main className={`main ${paneClass} ${active ? 'has-active' : ''}`}>
+            <h1 className="sr-only">{view === 'mail' ? (search ? t('Search results') : (currentFolderObj ? folderLabel(currentFolderObj) : t('Mail'))) : view === 'calendar' ? t('Calendar') : view === 'contacts' ? t('Contacts') : t('Admin')}</h1>
             {(folderUse === '\\Junk' || folder === '@quarantine') && !search && (
               <div className="tabs" role="tablist">
                 <button role="tab" aria-selected={folder !== '@quarantine'} className={folder !== '@quarantine' ? 'on' : ''} onClick={() => special('\\Junk') && setFolder(special('\\Junk'))}>{t("Junk")}</button>
@@ -788,6 +794,7 @@ export default function Mail({ me, route, refreshMe, theme, setTheme, themePref 
       {snoozeFor && <SnoozeMenu onPick={act.doSnooze} onClose={() => setSnoozeFor(null)} />}
       <ComposeManager composers={composers} setComposers={setComposers} me={me} prefs={prefs} sigData={sigData}
         onSent={() => { loadFolders(); if (listFolder === special('\\Sent') || listFolder === special('\\Drafts')) load({ quiet: true }); }} />
+      {helpOpen && <HelpPanel startTab={helpOpen} onClose={() => { setHelpOpen(null); setNewCount(unseenCount()); }} />}
       {showSettings && <SettingsPanel prefs={prefs} setPrefs={setPrefs} me={me} folders={folders} sigData={sigData} reloadSigs={reloadSigs} onClose={() => setShowSettings(false)} initialTab={typeof showSettings === 'string' ? showSettings : importMsg ? 'import' : premiumMsg ? 'premium' : ssoMsg ? 'security' : undefined} importMsg={importMsg} premiumMsg={premiumMsg} ssoMsg={ssoMsg} />}
       {showHelp && <ShortcutsHelp onClose={() => setShowHelp(false)} />}
       {palette && <CommandBar onClose={() => setPalette(false)} settingsTabs={SETTINGS_TABS}

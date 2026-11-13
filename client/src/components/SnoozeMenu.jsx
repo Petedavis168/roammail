@@ -1,13 +1,15 @@
 import { useState } from 'react';
+import { useDialog } from '../a11y.js';
 import { presets, fmtWhen, localInputValue } from '../snooze.js';
 import { Icon } from '../icons.jsx';
 import { t } from '../i18n.js';
 
 export default function SnoozeMenu({ onPick, onClose }) {
   const [custom, setCustom] = useState(() => localInputValue(new Date(Date.now() + 3 * 3600e3)));
+  const dlg = useDialog(onClose);
   return (
     <div className="modal-wrap" onClick={onClose}>
-      <div className="modal small-modal" onClick={(e) => e.stopPropagation()}>
+      <div ref={dlg} data-dialog tabIndex={-1} role="dialog" aria-modal="true" className="modal small-modal" onClick={(e) => e.stopPropagation()}>
         <div className="modal-head"><h2><Icon name="clock" />{' '}{t("Snooze until…")}</h2><button className="icon-btn" onClick={onClose}><Icon name="close" /></button></div>
         <div className="snooze-list">
           {presets('snooze').map(([l, d]) => (
