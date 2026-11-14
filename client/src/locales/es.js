@@ -1139,4 +1139,5 @@ export default {
   "Delete note": "Eliminar nota",
   "Add a note for your team…": "Añade una nota para tu equipo…",
   "Add a note for your team": "Añadir una nota para tu equipo",
+  "By tapping Send code you agree to get a one-time verification text from Roammail at this number. Message and data rates may apply. Reply STOP to opt out, HELP for help.": "Al tocar Enviar código aceptas recibir un mensaje de texto de verificación de un solo uso de Roammail en este número. Pueden aplicarse tarifas de mensajes y datos. Responde STOP para darte de baja o HELP para obtener ayuda.",
 };

@@ -208,6 +208,7 @@ CREATE TABLE IF NOT EXISTS team_assign (mailbox TEXT NOT NULL, msgid TEXT NOT NU
 CREATE TABLE IF NOT EXISTS team_notes (id INTEGER PRIMARY KEY AUTOINCREMENT, mailbox TEXT NOT NULL, msgid TEXT NOT NULL, author TEXT NOT NULL, body TEXT NOT NULL, at INTEGER NOT NULL);
 CREATE INDEX IF NOT EXISTS team_notes_msg ON team_notes(mailbox, msgid);
 CREATE TABLE IF NOT EXISTS team_presence (mailbox TEXT NOT NULL, msgid TEXT NOT NULL, email TEXT NOT NULL, state TEXT NOT NULL, at INTEGER NOT NULL, PRIMARY KEY (mailbox, msgid, email));
+CREATE TABLE IF NOT EXISTS phone_codes (phone_hash TEXT PRIMARY KEY, code_hash TEXT NOT NULL, exp INTEGER NOT NULL, tries INTEGER NOT NULL DEFAULT 0, sent_at INTEGER NOT NULL);
 CREATE TABLE IF NOT EXISTS funnel_days (day TEXT NOT NULL, step TEXT NOT NULL, count INTEGER NOT NULL DEFAULT 0, PRIMARY KEY (day, step));
 CREATE TABLE IF NOT EXISTS deliverability_days (day TEXT PRIMARY KEY, sent INTEGER, bounced INTEGER, deferred INTEGER, complaints INTEGER, listed INTEGER, held INTEGER, by_provider TEXT, google TEXT, microsoft TEXT);
 CREATE TABLE IF NOT EXISTS referral_codes (email TEXT PRIMARY KEY, code TEXT NOT NULL UNIQUE, created_at INTEGER NOT NULL);

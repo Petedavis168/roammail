@@ -42,6 +42,7 @@
     "test:sendcap": "node --disable-warning=ExperimentalWarning --test test/sendcap.test.js",
     "test:adminhost": "node --disable-warning=ExperimentalWarning --test test/adminhost.test.js",
     "test:batch6": "node --disable-warning=ExperimentalWarning --test test/batch6.test.js",
+    "test:sms": "node --disable-warning=ExperimentalWarning --test test/sms.test.js",
     "test:nativepush": "NODE_ENV=test node --disable-warning=ExperimentalWarning --test test/nativepush.test.js"
   },
   "keywords": [],
@@ -49,6 +50,7 @@
   "license": "ISC",
   "dependencies": {
     "@anthropic-ai/sdk": "^1.6.0",
+    "@aws-sdk/client-pinpoint-sms-voice-v2": "^3.1169.0",
     "@aws-sdk/client-route-53": "^3.1163.0",
     "@simplewebauthn/server": "^14.1.0",
     "cookie-parser": "^1.4.7",

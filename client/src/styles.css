@@ -1732,3 +1732,4 @@ a { color: var(--accent); }
 .team-note-add { display: flex; gap: 6px; } .team-note-add input { flex: 1; }
 .team-chip { font-size: 11px; padding: 0 6px; border-radius: 999px; background: var(--hover, #eef1f5); color: var(--text-2, #444); white-space: nowrap; }
 .team-chip.mine { background: #dbe7fd; color: #1d4ed8; } [data-theme='dark'] .team-chip.mine { background: #1e3a6b; color: #cfe0ff; }
+.sms-consent { font-size: 12px; line-height: 1.45; margin-top: 8px; }

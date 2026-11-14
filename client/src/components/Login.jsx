@@ -303,9 +303,10 @@ export default function Login({ onLogin, mode = 'signin' }) {
           const r = await api.post('/api/signup/phone/check', { phone: f.phone, code: f.code });
           setF((x) => ({ ...x, phoneToken: r.token })); go('review');
         }); }}
-        footer={<>{f.codeSent && <button type="button" className="g-link" onClick={() => setF({ ...f, codeSent: false, code: '' })}>{t("Change number")}</button>}<button className="g-btn" disabled={busy}>{f.codeSent ? 'Verify' : 'Send code'}</button></>}>
+        footer={<>{f.codeSent && <button type="button" className="g-link" onClick={() => setF({ ...f, codeSent: false, code: '' })}>{t("Change number")}</button>}<button className="g-btn" disabled={busy}>{f.codeSent ? t('Verify') : t('Send code')}</button></>}>
         {!f.codeSent
-          ? <Field label={t("Mobile number")} type="tel" inputMode="tel" autoComplete="tel" autoFocus value={f.phone} onChange={set('phone')} error={error} hint={t("Include your country code, e.g. +1 555 123 4567")} />
+          ? <><Field label={t("Mobile number")} type="tel" inputMode="tel" autoComplete="tel" autoFocus value={f.phone} onChange={set('phone')} error={error} hint={t("Include your country code, e.g. +1 555 123 4567")} />
+            <p className="g-hint sms-consent">{t("By tapping Send code you agree to get a one-time verification text from Roammail at this number. Message and data rates may apply. Reply STOP to opt out, HELP for help.")} <a href="/terms" target="_blank" rel="noreferrer">{t("Terms")}</a> · <a href="/privacy" target="_blank" rel="noreferrer">{t("Privacy")}</a></p></>
           : <Field label={t("6-digit code")} inputMode="numeric" autoComplete="one-time-code" autoFocus value={f.code} onChange={set('code')} error={error} hint={`Sent to ${f.phone}`} />}
       </Card>
     </Shell>
