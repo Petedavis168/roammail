@@ -1,10 +1,58 @@
 import { useEffect, useState } from 'react';
+import { useDialog } from '../a11y.js';
 import { Icon } from '../icons.jsx';
 import Booking from './settings/Booking.jsx';
 import Signatures from './settings/Signatures.jsx';
 import Templates from './settings/Templates.jsx';
+import Referrals from './settings/Referrals.jsx';
+import { NudgeSettings } from './Nudges.jsx';
+import ChatAlerts from './settings/ChatAlerts.jsx';
+import { SWIPE_ACTIONS } from '../swipe.js';
+import { sayNewMail, naturalVoices, isNatural, PHRASES, STYLES } from '../voice.js';
 import { pushState, enablePush, disablePush } from '../push.js';
 
+function VoiceAlert({ prefs, setPrefs }) {
+  const [list, setList] = useState(() => naturalVoices());
+  useEffect(() => { if (!window.speechSynthesis) return undefined; const on = () => setList(naturalVoices()); speechSynthesis.addEventListener('voiceschanged', on); return () => speechSynthesis.removeEventListener('voiceschanged', on); }, []);
+  const custom = prefs.voicePhrase && !PHRASES.includes(prefs.voicePhrase);
+  const play = (over = {}) => sayNewMail({ phrase: prefs.voicePhrase, voice: prefs.voiceName, style: prefs.voiceStyle || 'voice', force: true, ...over });
+  const good = list.filter(isNatural);
+  const apple = /Mac|iPhone|iPad/.test(navigator.userAgent);
+  return (
+    <div className="field-group voice-alert">
+      <label className="check"><input type="checkbox" checked={!!prefs.voiceAlert} onChange={(e) => { setPrefs({ voiceAlert: e.target.checked }); if (e.target.checked) play(); }} />{' '}{t("Play a sound when new mail arrives (“You’ve got mail!”)")}</label>
+      {prefs.voiceAlert && (
+        <div className="voice-opts">
+          <label className="row-field">{t("Sound")}{' '}<select value={prefs.voiceStyle || 'voice'} onChange={(e) => { setPrefs({ voiceStyle: e.target.value }); play({ style: e.target.value }); }}>{STYLES.map(([k, l]) => <option key={k} value={k}>{t(l)}</option>)}</select></label>
+          {(prefs.voiceStyle || 'voice') !== 'chime' && <>
+            <label className="row-field">{t("What to say")}{' '}<select value={custom ? '__custom' : (prefs.voicePhrase || PHRASES[0])} onChange={(e) => setPrefs({ voicePhrase: e.target.value === '__custom' ? 'Hey, new email!' : e.target.value })}>
+              {PHRASES.map((p) => <option key={p} value={p}>{p}</option>)}<option value="__custom">{t("Something else…")}</option></select></label>
+            {custom && <input value={prefs.voicePhrase} maxLength={80} onChange={(e) => setPrefs({ voicePhrase: e.target.value })} aria-label={t("Words to say")} />}
+            {list.length > 1 && (
+              <label className="row-field">{t("Voice")}{' '}<select value={prefs.voiceName || ''} onChange={(e) => { setPrefs({ voiceName: e.target.value }); play({ voice: e.target.value }); }}>
+                <option value="">{t("Most natural available")}{good[0] ? ` (${good[0].name.replace(/^Microsoft |\s*\(.*\)$/g, '')})` : ''}</option>
+                {list.map((v) => <option key={v.name} value={v.name}>{isNatural(v) ? '★ ' : ''}{v.name}</option>)}
+              </select></label>
+            )}
+          </>}
+          <button className="btn sm" onClick={() => play()}>🔊 {t("Play it")}</button>
+          {!good.length && (prefs.voiceStyle || 'voice') !== 'chime' && (
+            <p className="muted small">{apple
+              ? t("For a much more natural voice: Settings → Accessibility → Spoken Content (iPhone) or Live Speech / Spoken Content (Mac) → Voices → English → download an “Enhanced” or “Premium” voice. Then pick it here.")
+              : t("For a much more natural voice, open Roammail in Microsoft Edge (it has free “Natural” voices) or Chrome, or choose “Chime only”.")}</p>
+          )}
+          <p className="muted small">{t("★ = natural-sounding voice. Plays while Roammail is open; when it’s closed, your device plays its normal notification sound.")}</p>
+        </div>
+      )}
+    </div>
+  );
+}
+function ShareStatus() {
+  const [on, setOn] = useState(null);
+  useEffect(() => { api.get('/api/msg-status/settings').then((r) => setOn(r.share)).catch(() => {}); }, []);
+  if (on === null) return null;
+  return <label className="check"><input type="checkbox" checked={on} onChange={async (e) => { const v = e.target.checked; setOn(v); await api.put('/api/msg-status/settings', { share: v }).catch(() => setOn(!v)); }} />{' '}{t("Let other Roammail users see when I've read their email and when I'm typing a reply (like iMessage)")}</label>;
+}
 function PushToggle() {
   const [state, setState] = useState('…');
   const [err, setErr] = useState('');
@@ -66,11 +114,22 @@ function General({ prefs, setPrefs, me }) {
       <label className="row-field">{t("Language")}{' '}<select value={lang} onChange={(e) => setLang(e.target.value)}>{LANGS.map(([v, n]) => <option key={v} value={v}>{n}</option>)}</select></label>
       <label className="row-field">{t("Density")}{' '}<select value={prefs.density} onChange={set('density')}><option value="comfortable">{t("Comfortable")}</option><option value="compact">{t("Compact")}</option></select></label>
       <label className="check"><input type="checkbox" checked={prefs.conversation} onChange={set('conversation')} />{' '}{t("Conversation view (group replies together)")}</label>
+      <label className="check"><input type="checkbox" checked={prefs.inboxTabs !== false} onChange={set('inboxTabs')} />{' '}{t("Inbox tabs: Primary, Updates and Newsletters")}</label>
+      <label className="row-field">{t("Swipe left on a message (phones)")}{' '}<select value={prefs.swipeLeft || 'archive'} onChange={set('swipeLeft')}>{SWIPE_ACTIONS.map(([k, l]) => <option key={k} value={k}>{t(l)}</option>)}</select></label>
+      <label className="row-field">{t("Swipe right on a message (phones)")}{' '}<select value={prefs.swipeRight || 'read'} onChange={set('swipeRight')}>{SWIPE_ACTIONS.map(([k, l]) => <option key={k} value={k}>{t(l)}</option>)}</select></label>
       <h3>{t("Writing")}</h3>
       <label className="row-field">{t("Your name (shown to recipients)")}<input value={prefs.displayName} placeholder={me.name || me.email} onChange={set('displayName')} /></label>
       <label className="row-field">{t("Undo send")}{' '}<select value={prefs.undoSeconds} onChange={set('undoSeconds')}>
           {[0, 5, 10, 20, 30].map((s) => <option key={s} value={s}>{s ? `${s} seconds` : 'Off'}</option>)}
         </select></label>
+      <h3>{t("Sounds")}</h3>
+      <VoiceAlert prefs={prefs} setPrefs={setPrefs} />
+      <h3>{t("Slack & Teams alerts")}</h3>
+      <ChatAlerts />
+      <h3>{t("Roammail to Roammail")}</h3>
+      <ShareStatus />
+      <h3>{t("Follow-ups")}</h3>
+      <NudgeSettings />
       <h3>{t("Privacy")}</h3>
       <label className="row-field">{t("Ask for receipts on emails I send")}{' '}<select value={prefs.requestReceipts} onChange={set('requestReceipts')}><option value="ask">{t("Choose for each email")}</option><option value="always">{t("Always (delivery and read)")}</option><option value="never">{t("Never")}</option></select></label>
       <label className="row-field">{t("When someone asks me for a read receipt")}{' '}<select value={prefs.sendReceipts} onChange={set('sendReceipts')}><option value="ask">{t("Ask me")}</option><option value="always">{t("Always send one")}</option><option value="never">{t("Never send one")}</option></select></label>
@@ -164,9 +223,9 @@ function Apps({ me, sigData }) {
   );
 }
 
-const TABS = [
+export const TABS = [
   ['general', 'General', 'settings'], ['signatures', 'Signatures', 'pen'], ['booking', 'Booking page', 'calendar'], ['templates', 'Templates', 'mail'], ['security', 'Security', 'lock'],
-  ['autoreply', 'Automatic replies', 'reply'], ['junk', 'Junk & spam', 'junk'], ['rules', 'Rules', 'filter'], ['import', 'Import mail', 'import'], ['apps', 'Phone & apps', 'phone'], ['privacy', 'Privacy', 'shield'], ['premium', 'Premium', 'spark'],
+  ['autoreply', 'Out of office', 'reply'], ['junk', 'Junk & spam', 'junk'], ['rules', 'Rules', 'filter'], ['import', 'Import mail', 'import'], ['apps', 'Phone & apps', 'phone'], ['privacy', 'Privacy', 'shield'], ['premium', 'Premium', 'spark'], ['refer', 'Refer a friend', 'users'],
 ];
 
 export default function SettingsPanel({ prefs, setPrefs, me, folders, sigData, reloadSigs, onClose, initialTab = 'general', importMsg, premiumMsg, ssoMsg }) {
@@ -175,9 +234,10 @@ export default function SettingsPanel({ prefs, setPrefs, me, folders, sigData, r
   const [showPremium, setShowPremium] = useState(false);
   useEffect(() => { if (platform() !== 'ios') api.get('/api/premium').then((p) => setShowPremium(p.available || p.active)).catch(() => {}); }, []);
   const tabs = TABS.filter(([k]) => k !== 'premium' || showPremium);
+  const dlg = useDialog(onClose);
   return (
     <div className="modal-wrap" onClick={onClose}>
-      <div className="settings-modal" onClick={(e) => e.stopPropagation()} role="dialog" aria-label={t("Settings")}>
+      <div ref={dlg} data-dialog tabIndex={-1} aria-modal="true" className="settings-modal" onClick={(e) => e.stopPropagation()} role="dialog" aria-label={t("Settings")}>
         <nav className="settings-nav">
           <h2>{t("Settings")}</h2>
           {tabs.map(([k, l, i]) => <button key={k} className={tab === k ? 'on' : ''} onClick={() => setTab(k)}><Icon name={i} size={16} /> {l}</button>)}
@@ -189,6 +249,7 @@ export default function SettingsPanel({ prefs, setPrefs, me, folders, sigData, r
             {tab === 'booking' && <Booking />}
             {tab === 'signatures' && <Signatures sigData={sigData} reloadSigs={reloadSigs} prefs={prefs} setPrefs={setPrefs} me={me} />}
             {tab === 'templates' && <Templates />}
+            {tab === 'refer' && <Referrals />}
             {tab === 'security' && <Security me={me} ssoMsg={ssoMsg} />}
             {tab === 'autoreply' && <AutoReply me={me} />}
             {tab === 'junk' && <SpamSettings />}

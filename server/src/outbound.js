@@ -5,6 +5,7 @@
 //  - Abuse desk: a public report form (/abuse) and a super-admin queue.
 //  - Blocklist monitor: checks the mail server IPs against the big DNS blocklists every hour.
 //  - Sending routes: free and business domains can leave through different relays (separate reputations).
+import { monthlyCap, monthlySent, countMonthly } from './abuse.js';
 import express from 'express';
 import dns from 'node:dns/promises';
 import { config } from './config.js';
@@ -48,18 +49,38 @@ export async function applyRate(email, rate, { force = false } = {}) {
   await q.run('INSERT INTO send_tiers(email, tier, applied_at) VALUES(?, ?, ?) ON CONFLICT(email) DO UPDATE SET tier = excluded.tier, applied_at = excluded.applied_at', e, key, Date.now());
   return true;
 }
-/** The rate an account should have right now (paused accounts stay at 1/day until a super-admin lifts the pause). */
+/** The rate an account should have right now (paused accounts stay at 1/day until a super-admin lifts the pause;
+ *  free accounts over their monthly cap send 1/day from mail apps until the 1st or until they verify their ID). */
 export async function rateFor(email) {
   const e = email.toLowerCase();
   if ((await sendingHold(e))?.status === 'held') return PAUSED_RATE;
   if (!isFree(e)) return BUSINESS_RATE;
+  const cap = await monthlyCap(e);
+  if (cap !== null && (await monthlySent(e)) >= cap) return PAUSED_RATE;
   const su = await q.get('SELECT created_at FROM signups WHERE email = ?', e);
   const created = su ? new Date(String(su.created_at).replace(' ', 'T') + (String(su.created_at).includes('Z') ? '' : 'Z')).getTime() : Date.now();
   return rampFor(Number.isFinite(created) ? created : Date.now());
 }
-/** Daily job: move every free account to the step its age has earned. */
+/** Mail sent from phone and desktop mail apps (seen in the Postfix log) counts toward the free monthly cap.
+ *  Each queue id counts once; mail the web app already counted (same Message-ID) is skipped. */
+async function countAppSends(sender, msgids) {
+  const touched = new Set();
+  for (const [qid, u] of sender) {
+    if (!isFree(u)) continue;
+    const fresh = await q.run('INSERT INTO counted_qids(qid, at) VALUES(?, ?) ON CONFLICT(qid) DO NOTHING', qid, Date.now());
+    if (fresh.changes !== 1) continue;
+    const mid = msgids.get(qid);
+    if (mid && await q.get('SELECT 1 FROM webmail_msgids WHERE msgid = ?', mid)) continue;
+    await countMonthly(u); touched.add(u);
+  }
+  for (const u of touched) await applyRate(u, await rateFor(u)).catch(() => {});
+  const old = Date.now() - 3 * 864e5;
+  await q.run('DELETE FROM counted_qids WHERE at < ?', old); await q.run('DELETE FROM webmail_msgids WHERE at < ?', old);
+}
+
+/** Daily job: move every free account to the step its age has earned (and lift last month's caps on the 1st). */
 export async function runSendRamp() {
-  const rows = await q.all("SELECT email FROM signups WHERE created_at > datetime('now', '-40 days')");
+  const rows = await q.all("SELECT email FROM signups WHERE created_at > datetime('now', '-40 days') UNION SELECT email FROM send_tiers WHERE tier = ?", tierKey(PAUSED_RATE));
   let changed = 0;
   for (const r of rows) {
     if (!isFree(r.email)) continue;
@@ -144,7 +165,12 @@ export async function scanOutbound(now = Date.now()) {
     const m = /^([0-9A-F]{6,}|[0-9A-Za-z]{10,}): (.*)$/.exec(String(x.message || ''));
     if (m) lines.push(m);
   }
-  for (const [, qid, rest] of lines) { const sasl = /sasl_username=([^,\s]+)/.exec(rest); if (sasl) sender.set(qid, sasl[1].toLowerCase()); }
+  const msgids = new Map();
+  for (const [, qid, rest] of lines) {
+    const sasl = /sasl_username=([^,\s]+)/.exec(rest); if (sasl) sender.set(qid, sasl[1].toLowerCase());
+    const mid = /message-id=<([^>]{1,300})>/.exec(rest); if (mid) msgids.set(qid, mid[1].toLowerCase());
+  }
+  await countAppSends(sender, msgids).catch((e) => console.warn('monthly count', e.message));
   for (const [, qid, rest] of lines) {
     const to = /to=<([^>]*)>.*status=(sent|bounced|deferred)/.exec(rest);
     const u = sender.get(qid);

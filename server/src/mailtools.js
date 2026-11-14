@@ -5,6 +5,7 @@ import { q, userSetting, setUserSetting, audit } from './db.js';
 import { requireAuth } from './session.js';
 import { mailcow } from './mailcow.js';
 import { assertPublicHost, accountKind } from './abuse.js';
+import { withMailbox, specialFolder } from './imap.js';
 
 const wrap = (fn) => (req, res, next) => Promise.resolve(fn(req, res, next)).catch(next);
 const fail = (status, message) => Object.assign(new Error(message), { status });
@@ -21,21 +22,38 @@ function cond(c) {
   if (c.field === 'from') return `address :contains "from" ${str(v)}`;
   if (c.field === 'to') return `address :contains ["to", "cc"] ${str(v)}`;
   if (c.field === 'subject') return `header :contains "subject" ${str(v)}`;
+  if (c.field === 'domain') return `address :domain :is "from" ${str(v.replace(/^@/, '').toLowerCase())}`;
+  if (c.field === 'fromIs') return `address :is "from" ${str(v.toLowerCase())}`;
   if (c.field === 'body') return null; // body extension isn't guaranteed; skipped
   return null;
 }
 
-export function buildSieve({ vacation, rules }, me, orgDomains) {
+export function buildSieve({ vacation, rules, screener }, me, orgDomains) {
   const req = new Set(['fileinto', 'imap4flags', 'copy']);
   const lines = [];
-  if (vacation?.enabled && vacation.message) {
-    req.add('vacation');
-    const tests = [];
-    if (vacation.start) { req.add('date'); req.add('relational'); tests.push(`currentdate :value "ge" "date" ${str(vacation.start)}`); }
-    if (vacation.end) { req.add('date'); req.add('relational'); tests.push(`currentdate :value "le" "date" ${str(vacation.end)}`); }
-    if (vacation.onlyOrg && orgDomains.length) tests.push(`address :domain :is "from" [${orgDomains.map(str).join(', ')}]`);
-    tests.push('not header :contains "precedence" ["bulk", "list", "junk"]', 'not exists "list-id"');
-    lines.push(`if allof(${tests.join(', ')}) {\n  vacation :days 1 :subject ${str(vacation.subject || 'Out of office')} :addresses [${str(me)}] ${multiline(vacation.message)};\n}`);
+  if (vacation?.enabled && (vacation.message || vacation.internalMessage)) {
+    const when = [];
+    if (vacation.start) { req.add('date'); req.add('relational'); when.push(`currentdate :value "ge" "date" ${str(vacation.start)}`); }
+    if (vacation.end) { req.add('date'); req.add('relational'); when.push(`currentdate :value "le" "date" ${str(vacation.end)}`); }
+    const notBulk = ['not header :contains "precedence" ["bulk", "list", "junk"]', 'not exists "list-id"', 'not exists "auto-submitted"'];
+    const inOrg = orgDomains.length ? `address :domain :is "from" [${orgDomains.map(str).join(', ')}]` : null;
+    // While away, a teammate gets a copy of everything personal (not mailing lists)
+    if (vacation.forwardToCover && vacation.cover) {
+      lines.push(`# Out of office: copy to ${vacation.cover.replace(/[\r\n]/g, '')}\nif allof(${[...when, ...notBulk].join(', ')}) {\n  redirect :copy ${str(vacation.cover)};\n}`);
+    }
+    const reply = (msg, subject, handle) => `vacation :days 1 :handle ${str(handle)} :subject ${str(subject || 'Out of office')} :addresses [${str(me)}] ${multiline(msg)};`;
+    const internal = vacation.internalMessage && inOrg ? vacation.internalMessage : null;
+    const external = vacation.onlyOrg ? null : vacation.message;
+    if (internal || external) {
+      req.add('vacation');
+      const branches = [];
+      if (internal) branches.push(`if allof(${[...when, ...notBulk, inOrg].join(', ')}) {\n  ${reply(internal, vacation.subject, 'ooo-in')}\n}`);
+      const extTests = [...when, ...notBulk];
+      if (vacation.onlyOrg && inOrg && !internal) extTests.push(inOrg);
+      const extMsg = vacation.onlyOrg ? (internal ? null : vacation.message) : external;
+      if (extMsg) branches.push(`${internal ? 'elsif' : 'if'} allof(${extTests.join(', ')}) {\n  ${reply(extMsg, vacation.subject, 'ooo-out')}\n}`);
+      if (branches.length) lines.push(branches.join(' '));
+    }
   }
   for (const r of (rules || []).filter((x) => x.enabled !== false)) {
     const tests = (r.conditions || []).map(cond).filter(Boolean);
@@ -49,12 +67,29 @@ export function buildSieve({ vacation, rules }, me, orgDomains) {
       if (a.type === 'forward' && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(a.value || '')) acts.push(`redirect :copy ${str(a.value)};`);
       if (a.type === 'junk') acts.push('fileinto "Junk";');
       if (a.type === 'trash') acts.push('fileinto "Trash";');
+      // Automatic reply just for the people this rule matches (never to mailing lists or other robots; once a day each)
+      if (a.type === 'reply' && String(a.value || '').trim()) {
+        req.add('vacation');
+        acts.push(`if not anyof(exists "list-id", exists "auto-submitted", header :contains "precedence" ["bulk", "list", "junk"]) {\n    vacation :days ${[1, 3, 7].includes(Number(a.days)) ? Number(a.days) : 1} :handle ${str(`rule-${r.id}`)} :subject ${str(a.subject || 'Re: your email')} :addresses [${str(me)}] ${multiline(a.value)};\n  }`);
+      }
     }
     if (!acts.length) continue;
     // flags must be set before fileinto to land on the filed copy
     acts.sort((x, y) => (x.startsWith('addflag') ? -1 : 0) - (y.startsWith('addflag') ? -1 : 0));
     if (r.stop !== false) acts.push('stop;');
     lines.push(`# ${String(r.name || 'Rule').replace(/[\r\n]/g, ' ')}\nif ${r.match === 'all' ? 'allof' : 'anyof'}(${tests.join(', ')}) {\n  ${acts.join('\n  ')}\n}`);
+  }
+  // Screener: mail from people you've never dealt with waits in "Screener" until you allow them
+  if (screener?.enabled) {
+    req.add('mailbox');
+    if (screener.block?.length) lines.push(`# Screener: blocked senders\nif address :is "from" [${screener.block.map(str).join(', ')}] {\n  fileinto :create "Junk";\n  stop;\n}`);
+    const known = [
+      `address :is "from" [${[me, ...(screener.allow || [])].map(str).join(', ')}]`,
+      'address :localpart :is "from" ["mailer-daemon", "postmaster"]',
+      'header :contains "content-type" "multipart/report"',
+    ];
+    if (orgDomains.length || screener.allowDomains?.length) known.push(`address :domain :is "from" [${[...orgDomains, ...(screener.allowDomains || [])].map(str).join(', ')}]`);
+    lines.push(`# Screener: first-time senders wait until you allow them\nif not anyof(${known.join(', ')}) {\n  fileinto :create "Screener";\n  stop;\n}`);
   }
   if (!lines.length) return null;
   // mailcow files spam into Junk in global_sieve_after, which runs after this script. File it here first so
@@ -63,8 +98,11 @@ export function buildSieve({ vacation, rules }, me, orgDomains) {
   return `require [${[...req].map(str).join(', ')}];\n\n${[spamFirst, ...lines].join('\n\n')}\n`;
 }
 
+let screenerData = async () => null; // set by screener.js (avoids an import cycle)
+export const setScreenerSource = (fn) => { screenerData = fn; };
+export async function syncSieve(user) { return sync(user); }
 async function sync(user) {
-  const data = { vacation: await userSetting(user.email, 'vacation', null), rules: await userSetting(user.email, 'rules', []) };
+  const data = { vacation: await userSetting(user.email, 'vacation', null), rules: await userSetting(user.email, 'rules', []), screener: await screenerData(user.email) };
   const orgDomains = (await q.all("SELECT domain FROM domains WHERE status = 'active' AND org_id = (SELECT org_id FROM domains WHERE domain = ?)", user.email.split('@')[1])).map((d) => d.domain);
   const script = buildSieve(data, user.email, orgDomains.length ? orgDomains : [user.email.split('@')[1]]);
   const existing = (await mailcow.listFilters(user.email)).find((f) => f.script_desc === SCRIPT_DESC);
@@ -77,17 +115,45 @@ async function sync(user) {
 export const mailtools = express.Router();
 mailtools.use(requireAuth);
 
-mailtools.get('/vacation', async (req, res) => res.json(await userSetting(req.user.email, 'vacation', { enabled: false, subject: 'Out of office', message: '', start: '', end: '', onlyOrg: false })));
+const VAC_DEFAULT = { enabled: false, subject: 'Out of office', message: '', internalMessage: '', start: '', end: '', onlyOrg: false, cover: '', coverName: '', forwardToCover: false, showColleagues: true };
+const today = () => new Date().toISOString().slice(0, 10);
+export const vacationActive = (v) => !!(v?.enabled && (!v.start || today() >= v.start) && (!v.end || today() <= v.end));
+const vacOut = (v) => ({ ...VAC_DEFAULT, ...v, activeNow: vacationActive(v) });
+
+mailtools.get('/vacation', async (req, res) => res.json(vacOut(await userSetting(req.user.email, 'vacation', VAC_DEFAULT))));
 mailtools.put('/vacation', wrap(async (req, res) => {
   const b = req.body;
   const date = (d) => (/^\d{4}-\d{2}-\d{2}$/.test(d || '') ? d : '');
+  const cover = String(b.cover || '').trim().toLowerCase().slice(0, 254);
+  if (cover && !/^[^\s@<>"]{1,64}@[^\s@<>".]{1,63}(?:\.[^\s@<>".]{1,63}){1,8}$/.test(cover)) throw fail(400, 'Check the email address of the person covering for you');
+  if (cover === req.user.email.toLowerCase()) throw fail(400, 'Pick someone else to cover for you');
   const v = { enabled: !!b.enabled, subject: String(b.subject || 'Out of office').slice(0, 200), message: String(b.message || '').slice(0, 5000),
-    start: date(b.start), end: date(b.end), onlyOrg: !!b.onlyOrg };
-  if (v.enabled && !v.message.trim()) throw fail(400, 'Write the message people will receive');
+    internalMessage: String(b.internalMessage || '').slice(0, 5000), start: date(b.start), end: date(b.end), onlyOrg: !!b.onlyOrg,
+    cover, coverName: String(b.coverName || '').slice(0, 120), forwardToCover: !!(b.forwardToCover && cover), showColleagues: b.showColleagues !== false };
+  if (v.start && v.end && v.end < v.start) throw fail(400, 'The end date is before the start date');
+  if (v.enabled && !v.message.trim() && !v.internalMessage.trim()) throw fail(400, 'Write the message people will receive');
+  if (v.forwardToCover) await assertForwardAllowed(req.user.email, [cover]);
   await setUserSetting(req.user.email, 'vacation', v);
   await sync(req.user);
-  await audit(req.user.email, null, v.enabled ? 'vacation.on' : 'vacation.off');
-  res.json(v);
+  await audit(req.user.email, null, v.enabled ? 'vacation.on' : 'vacation.off', v.forwardToCover ? { cover } : undefined);
+  res.json(vacOut(v));
+}));
+
+// Colleagues who are away: shown under the To line while writing. Only people in your own company, only when they
+// chose to show it, and only the return date and who to contact (never their message).
+mailtools.get('/ooo', wrap(async (req, res) => {
+  const emails = [...new Set(String(req.query.emails || '').toLowerCase().split(',').map((x) => x.trim()).filter(Boolean))].slice(0, 30);
+  const k = await accountKind(req.user.email);
+  if (!k.business || !emails.length) return res.json({ away: [] });
+  const domains = new Set((await q.all("SELECT domain FROM domains WHERE org_id = ? AND status = 'active'", k.orgId)).map((d) => d.domain));
+  const away = [];
+  for (const e of emails) {
+    if (!domains.has(e.split('@')[1]) || e === req.user.email.toLowerCase()) continue;
+    const v = await userSetting(e, 'vacation', null);
+    if (!vacationActive(v) || v.showColleagues === false) continue;
+    away.push({ email: e, until: v.end || null, cover: v.cover || null, coverName: v.coverName || null });
+  }
+  res.json({ away });
 }));
 
 /** Free accounts can't auto-forward; business users only inside the company unless an admin allows external. */
@@ -121,8 +187,12 @@ async function assertSafeSieve(email, script) {
 const cleanRule = (r, i) => ({
   id: String(r.id || `r${Date.now()}${i}`).slice(0, 40), name: String(r.name || 'Rule').slice(0, 80), enabled: r.enabled !== false,
   match: r.match === 'all' ? 'all' : 'any', stop: r.stop !== false,
-  conditions: (r.conditions || []).slice(0, 10).map((c) => ({ field: ['from', 'to', 'subject'].includes(c.field) ? c.field : 'from', value: String(c.value || '').slice(0, 200) })),
-  actions: (r.actions || []).slice(0, 5).map((a) => ({ type: ['move', 'read', 'flag', 'category', 'forward', 'junk', 'trash'].includes(a.type) ? a.type : 'move', folder: String(a.folder || '').slice(0, 200), value: String(a.value || '').slice(0, 200) })),
+  conditions: (r.conditions || []).slice(0, 10).map((c) => ({ field: ['from', 'fromIs', 'domain', 'to', 'subject'].includes(c.field) ? c.field : 'from', value: String(c.value || '').slice(0, 200) })),
+  actions: (r.actions || []).slice(0, 5).map((a) => ({
+    type: ['move', 'read', 'flag', 'category', 'forward', 'junk', 'trash', 'reply'].includes(a.type) ? a.type : 'move', folder: String(a.folder || '').slice(0, 200),
+    value: String(a.value || '').slice(0, a.type === 'reply' ? 3000 : 200), ...(a.type === 'reply' ? { subject: String(a.subject || '').slice(0, 200), days: [1, 3, 7].includes(Number(a.days)) ? Number(a.days) : 1 } : {}),
+  })),
+  ...(r.template ? { template: String(r.template).slice(0, 40) } : {}),
 });
 
 mailtools.get('/rules', async (req, res) => res.json(await userSetting(req.user.email, 'rules', [])));
@@ -134,6 +204,51 @@ mailtools.put('/rules', wrap(async (req, res) => {
   await sync(req.user);
   await audit(req.user.email, null, 'rules.update', { count: rules.length, forwards: rules.filter((r) => r.actions.some((a) => a.type === 'forward')).length });
   res.json(rules);
+}));
+
+// Run a rule on what's already in the inbox (rules on the server only see new mail)
+const searchFor = (c) => {
+  const v = String(c.value || '').trim();
+  if (!v) return null;
+  if (c.field === 'from' || c.field === 'fromIs') return { header: { from: v } };
+  if (c.field === 'domain') return { header: { from: `@${v.replace(/^@/, '')}` } };
+  if (c.field === 'to') return { or: [{ to: v }, { cc: v }] };
+  if (c.field === 'subject') return { subject: v };
+  return null;
+};
+mailtools.post('/rules/run', wrap(async (req, res) => {
+  const rule = (await userSetting(req.user.email, 'rules', [])).find((r) => r.id === req.body.id);
+  if (!rule) throw fail(404, 'Rule not found');
+  const crits = rule.conditions.map((c) => ({ c, crit: searchFor(c) })).filter((x) => x.crit);
+  if (!crits.length) throw fail(400, 'This rule has nothing to match');
+  const matched = await withMailbox(req.user, 'INBOX', async (c) => {
+    let set = null;
+    for (const { c: cond, crit } of crits) {
+      let uids = new Set((await c.search(crit, { uid: true })) || []);
+      if (cond.field === 'fromIs') { // exact sender
+        const exact = new Set();
+        if (uids.size) for await (const m of c.fetch([...uids].join(','), { uid: true, envelope: true }, { uid: true })) if (String(m.envelope?.from?.[0]?.address || '').toLowerCase() === String(cond.value).trim().toLowerCase()) exact.add(m.uid);
+        uids = exact;
+      }
+      set = set === null ? uids : rule.match === 'all' ? new Set([...set].filter((u) => uids.has(u))) : new Set([...set, ...uids]);
+    }
+    const list = [...(set || [])].slice(0, 5000);
+    if (!list.length) return 0;
+    const range = list.join(',');
+    let moveTo = null;
+    for (const a of rule.actions) {
+      if (a.type === 'read') await c.messageFlagsAdd(range, ['\\Seen'], { uid: true });
+      if (a.type === 'flag') await c.messageFlagsAdd(range, ['\\Flagged'], { uid: true });
+      if (a.type === 'category' && a.value) await c.messageFlagsAdd(range, [`cat_${a.value.replace(/[^A-Za-z0-9_-]/g, '')}`], { uid: true });
+      if (a.type === 'move' && a.folder && a.folder !== 'INBOX') moveTo = a.folder;
+      if (a.type === 'junk') moveTo = await specialFolder(req.user, '\\Junk', { create: true });
+      if (a.type === 'trash') moveTo = await specialFolder(req.user, '\\Trash', { create: true });
+    }
+    if (moveTo) { await c.mailboxCreate(moveTo).catch(() => {}); if (!(await c.messageMove(range, moveTo, { uid: true }))) throw fail(400, `Couldn't move to ${moveTo}`); }
+    return list.length;
+  });
+  await audit(req.user.email, null, 'rules.run', { rule: rule.id, matched });
+  res.json({ ok: true, matched });
 }));
 
 // ---------------------------------------------------------------- advanced: all of the user's mailcow Sieve filters

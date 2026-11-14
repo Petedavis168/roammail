@@ -10,7 +10,7 @@ Each alarm emails again when it recovers ("OK").
 | RoamMail - unhealthy app servers | At least one app server is failing health checks | Same |
 | RoamMail - errors spiking in the app | More than 20 `APP_ERROR` lines in 5 minutes from the server, the worker, people's browsers or the phone apps | CloudWatch Logs `/roammail/web` and `/roammail/worker`, search `APP_ERROR` |
 | RoamMail - app errors (5xx) | The load balancer is returning server errors | Same |
-| RoamMail - slow responses (p95 over 2s) | Pages and API calls are slow | Database and CPU alarms, recent deploys |
+| RoamMail - slow responses (p95 over 2s) | Pages and API calls were slow (over 3s) for 15 minutes while busy (200+ requests per 5 minutes) | Search `SLOW_REQUEST` in `/roammail/web` to see which calls; then database and CPU alarms, recent deploys |
 | RoamMail - background worker stopped | No worker task has run for 10 minutes: notifications, reminders, reports and imports stop | ECS service roammail-worker |
 | RoamMail - app CPU high even after scaling | Busy even at the scaling limit | Raise the service's max tasks |
 | RoamMail - database CPU / connections / storage | The Postgres database (RDS) is under pressure | RDS console |

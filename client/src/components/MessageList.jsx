@@ -3,14 +3,31 @@ import { Icon } from '../icons.jsx';
 import { fmtDate, dateGroup, personName, avatarColor, initials } from '../util.js';
 import { fmtWhen } from '../snooze.js';
 import NeedsReply from './NeedsReply.jsx';
+import Nudges from './Nudges.jsx';
+import { attachGestures, SWIPE_ACTIONS } from '../swipe.js';
 import { t } from '../i18n.js';
 
 export default function MessageList({ list, title, search, onClearSearch, folderUse, filter, setFilter, selected, setSelected,
-  active, onOpen, act, categories, density, onLoadMore, onEmpty, onMarkAllRead, snoozeMap, allInboxes, isInbox }) {
+  active, onOpen, act, categories, density, onLoadMore, onEmpty, onMarkAllRead, snoozeMap, allInboxes, isInbox, onBump, inboxTab, setInboxTab, onSwipe, swipe = {}, onRefresh, unreadInbox = 0, onCatchUp, onHover, team, meEmail }) {
   const ref = useRef();
+  const hoverT = useRef();
   const { messages, loading, total } = list;
   const showTo = folderUse === '\\Sent' || folderUse === '\\Drafts';
   const catColor = (n) => categories.find((c) => c.name.replace(/[^A-Za-z0-9_-]/g, '') === n)?.color || '#888';
+
+  // Phone gestures: swipe a row, pull down to refresh
+  const live = useRef({});
+  live.current = { messages, onSwipe, onRefresh };
+  const label = (k) => { const a = SWIPE_ACTIONS.find((x) => x[0] === k); return a && a[0] !== 'none' ? t(a[1]) : null; };
+  useEffect(() => {
+    if (!ref.current || !onSwipe) return undefined;
+    return attachGestures(ref.current, {
+      getRow: (el) => live.current.messages.find((m) => String(m.uid) === el.dataset.uid),
+      onSwipe: (m, side) => live.current.onSwipe(m, side),
+      onRefresh: () => live.current.onRefresh?.(),
+      labels: { left: label(swipe.left || 'archive'), right: label(swipe.right || 'read') },
+    });
+  }, [!!onSwipe, swipe.left, swipe.right]);
 
   useEffect(() => {
     const el = ref.current?.querySelector('.row.active');
@@ -72,7 +89,20 @@ export default function MessageList({ list, title, search, onClearSearch, folder
           </div>
         )}
       </div>
-      {isInbox && <NeedsReply messages={messages} onOpen={onOpen} />}
+      {inboxTab && (
+        <div className="inbox-tabs" role="tablist" aria-label={t('Inbox tabs')}>
+          {[['primary', 'inbox', 'Primary'], ['updates', 'bell', 'Updates'], ['newsletters', 'list', 'Newsletters']].map(([k, ic, l]) => (
+            <button key={k} role="tab" aria-selected={inboxTab === k} className={inboxTab === k ? 'on' : ''} onClick={() => setInboxTab(k)}>
+              <Icon name={ic} size={16} /> <span>{t(l)}</span>{list.tabs?.[k] > 0 && <b className="tab-count">{list.tabs[k] > 99 ? '99+' : list.tabs[k]}</b>}
+            </button>
+          ))}
+        </div>
+      )}
+      {isInbox && onCatchUp && unreadInbox >= 15 && (
+        <button className="catchup-banner" onClick={onCatchUp}><Icon name="spark" size={16} /><span><b>{unreadInbox} {t('unread')}</b> · {t('Catch up in a couple of minutes')}</span><Icon name="chevron" size={16} /></button>
+      )}
+      {isInbox && onBump && (!inboxTab || inboxTab === 'primary') && <Nudges onBump={onBump} />}
+      {isInbox && (!inboxTab || inboxTab === 'primary') && <NeedsReply messages={messages} onOpen={onOpen} />}
       {selected.size > 0 && !allInboxes && (
         <div className="selbar">
           <b>{selected.size} selected</b>
@@ -96,9 +126,12 @@ export default function MessageList({ list, title, search, onClearSearch, folder
           const person = who?.[0] || { name: '', address: '' };
           return [
             header,
-            <div key={m.uid} role="listitem" aria-current={active === m.uid ? 'true' : undefined}
+            <div key={m.uid} data-uid={m.uid} role="listitem" aria-current={active === m.uid ? 'true' : undefined}
               className={`row ${m.seen ? '' : 'unread'} ${active === m.uid ? 'active' : ''} ${selected.has(m.uid) ? 'selected' : ''}`}
-              onClick={(e) => onRowClick(m, e)} draggable={!allInboxes} onDragStart={(e) => onDragStart(m, e)}>
+              onClick={(e) => onRowClick(m, e)} draggable={!allInboxes}
+              onMouseEnter={onHover ? () => { clearTimeout(hoverT.current); hoverT.current = setTimeout(() => onHover(m), 120); } : undefined}
+              onMouseLeave={onHover ? () => clearTimeout(hoverT.current) : undefined} onDragStart={(e) => onDragStart(m, e)}
+              onContextMenu={allInboxes ? undefined : (e) => { e.preventDefault(); window.dispatchEvent(new CustomEvent('roammail:rowmenu', { detail: { m, x: e.clientX, y: e.clientY } })); }}>
               <div className="row-left" onClick={(e) => toggle(m.uid, e)}>
                 {density === 'compact' ? null : (
                   <span className="avatar" style={{ background: avatarColor(person.address) }}>{initials(person)}</span>
@@ -109,6 +142,10 @@ export default function MessageList({ list, title, search, onClearSearch, folder
                 <div className="row-top">
                   <span className="from">{showTo ? 'To: ' : ''}{who?.length ? who.map(personName).join(', ') : '(unknown)'}</span>
                   <span className="row-icons">
+                    {(() => { const k = String(m.messageId || '').replace(/^<|>$/g, '').toLowerCase(); const a = team?.assign?.[k]; const n = team?.notes?.[k]; return <>
+                      {a && <span className={`team-chip ${a.email === String(meEmail || '').toLowerCase() ? 'mine' : ''}`} title={`${t('Assigned to')} ${a.name}`}>→ {a.email === String(meEmail || '').toLowerCase() ? t('Me') : a.name}</span>}
+                      {n > 0 && <span className="team-chip notes" title={t('Team notes')}>✎ {n}</span>}
+                    </>; })()}
                     {m.hasAttachments && <Icon name="clip" size={14} />}
                     {m.answered && <Icon name="reply" size={14} />}
                   </span>
@@ -137,7 +174,12 @@ export default function MessageList({ list, title, search, onClearSearch, folder
           ];
         })}
         </div>
-        {loading && <div className="list-msg"><div className="spinner" /></div>}
+        {loading && messages.length === 0 && (
+          <div aria-label="Loading" role="status">{[0, 1, 2, 3, 4, 5].map((i) => (
+            <div key={i} className="skel-row"><span className="skel circle" /><div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 8 }}><span className="skel line" style={{ width: `${40 + (i * 13) % 30}%` }} /><span className="skel line" style={{ width: `${70 + (i * 7) % 25}%` }} /></div></div>
+          ))}</div>
+        )}
+        {loading && messages.length > 0 && <div className="list-msg"><div className="spinner" /></div>}
         {!loading && messages.length === 0 && (
           <div className="empty">
             <Icon name={search ? 'search' : filter ? 'filter' : folderUse === '\\Junk' ? 'shield' : 'inbox'} size={40} />

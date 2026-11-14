@@ -28,6 +28,13 @@ export function metricsMiddleware(req, res, next) {
     let i = BUCKETS.findIndex((b) => s <= b); if (i < 0) i = BUCKETS.length; hist[i]++; latSum += s;
     window.requests++; if (res.statusCode >= 500) window.errors++;
     if (window.latencies.length < 20000) window.latencies.push(s * 1000);
+    // Name slow calls so the "slow responses" alarm can be traced. Route shape only (":id"), never addresses or content.
+    if (s >= 2) {
+      // only our own route patterns (e.g. /api/messages/:id) and a fixed method name are logged, never the address used
+      const route = typeof req.route?.path === 'string' ? `${req.baseUrl || ''}${req.route.path}`.replace(/[^\w/:.-]/g, '_').slice(0, 100) : 'unmatched';
+      const method = ['GET', 'POST', 'PUT', 'PATCH', 'DELETE'].find((m) => m === req.method) || 'OTHER';
+      console.log('SLOW_REQUEST %s %s %dms status=%d', method, route, Math.round(s * 1000), Number(res.statusCode));
+    }
   });
   next();
 }
@@ -87,14 +94,30 @@ async function mailcowCheck() {
   } catch { return { ok: false, ms: Date.now() - t0 }; }
 }
 let statusCache = { at: 0, value: null };
-export async function systemStatus() {
-  if (Date.now() - statusCache.at < 30_000 && statusCache.value) return statusCache.value;
+let mailMs = { imap: null, smtp: null };
+export const mailLatency = () => mailMs;
+gauge('LatencyMailImap', () => mailMs.imap ?? 0);
+gauge('LatencyMailSmtp', () => mailMs.smtp ?? 0);
+let statusRun = null;
+/** Current status. Answers at once from the last check (refreshing it in the background when it's over 30s old),
+ *  so the status page and uptime monitors never wait on the mail servers. */
+export async function systemStatus({ fresh = false } = {}) {
+  const stale = Date.now() - statusCache.at >= 30_000;
+  if (statusCache.value && !fresh) { if (stale && !statusRun) checkStatus().catch(() => {}); return statusCache.value; }
+  return checkStatus();
+}
+function checkStatus() {
+  statusRun ||= runChecks().finally(() => { statusRun = null; });
+  return statusRun;
+}
+async function runChecks() {
   const [imap, smtp, admin] = await Promise.all([
     tcpCheck(config.imap.host, config.imap.port, config.imap.secure),
     tcpCheck(config.smtp.host, config.smtp.port, config.smtp.secure),
     mailcowCheck(),
   ]);
   let db = true; try { await q.get('SELECT 1'); } catch { db = false; }
+  mailMs = { imap: imap.ok ? imap.ms : null, smtp: smtp.ok ? smtp.ms : null }; // how far away the mail server is (connect + greeting)
   const components = [
     { name: 'Web app', ok: db },
     { name: 'Receiving and reading mail', ok: imap.ok },
@@ -105,6 +128,33 @@ export async function systemStatus() {
   const value = { ok: components.every((c) => c.ok), components, notice, checked: new Date().toISOString() };
   statusCache = { at: Date.now(), value };
   return value;
+}
+
+// ---------------------------------------------------------------- uptime history (90 days, for the status page)
+// The background worker checks every 5 minutes and counts, per day and per part, how many checks were OK.
+export async function recordStatus() {
+  const s = await systemStatus({ fresh: true });
+  const day = new Date().toISOString().slice(0, 10);
+  for (const c of s.components) {
+    await q.run(`INSERT INTO status_days(day, component, ok, total) VALUES(?, ?, ?, 1)
+      ON CONFLICT(day, component) DO UPDATE SET ok = status_days.ok + excluded.ok, total = status_days.total + 1`, day, c.name, c.ok ? 1 : 0);
+  }
+  await q.run("DELETE FROM status_days WHERE day < ?", new Date(Date.now() - 120 * 864e5).toISOString().slice(0, 10));
+}
+export function startStatusRecorder() {
+  const run = () => recordStatus().catch((e) => console.warn('status record failed', e.message));
+  setTimeout(run, 20_000).unref();
+  setInterval(run, 5 * 60e3).unref();
+}
+async function history(days = 90) {
+  const from = new Date(Date.now() - (days - 1) * 864e5).toISOString().slice(0, 10);
+  const rows = await q.all('SELECT day, component, ok, total FROM status_days WHERE day >= ? ORDER BY day', from);
+  const byDay = new Map();
+  for (const r of rows) { const d = byDay.get(r.day) || { ok: 0, total: 0, worst: 1 }; d.ok += Number(r.ok); d.total += Number(r.total); d.worst = Math.min(d.worst, Number(r.ok) / Math.max(1, Number(r.total))); byDay.set(r.day, d); }
+  const list = [];
+  for (let i = days - 1; i >= 0; i--) { const day = new Date(Date.now() - i * 864e5).toISOString().slice(0, 10); list.push({ day, ...(byDay.get(day) || { ok: 0, total: 0, worst: null }) }); }
+  const ok = rows.reduce((n, r) => n + Number(r.ok), 0); const total = rows.reduce((n, r) => n + Number(r.total), 0);
+  return { days: list, uptime: total ? (ok / total) * 100 : null };
 }
 
 // ---------------------------------------------------------------- routes
@@ -124,12 +174,15 @@ ops.get('/api/status', async (req, res) => { const s = await systemStatus(); res
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 ops.get('/status', async (req, res) => {
   const s = await systemStatus();
+  const h = await history(90).catch(() => ({ days: [], uptime: null }));
+  const bar = (d) => `<i class="${d.worst === null ? 'nd' : d.worst >= 0.999 ? 'up' : d.worst >= 0.95 ? 'part' : 'down'}" title="${esc(d.day)}: ${d.worst === null ? 'no data' : `${((d.ok / Math.max(1, d.total)) * 100).toFixed(2)}% up`}"></i>`;
   res.set('Cache-Control', 'public, max-age=30').type('html').send(`<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta http-equiv="refresh" content="60"><title>${esc(config.appName)} status</title><link rel="icon" href="/favicon.png">
-<style>body{font-family:Segoe UI,Arial,sans-serif;max-width:640px;margin:6vh auto;padding:0 20px;color:#242424}h1{color:#244960;display:flex;align-items:center;gap:10px}.b{padding:14px 18px;border-radius:10px;color:#fff;font-weight:600;margin:18px 0}.ok{background:#1e7d4f}.bad{background:#b3261e}.n{background:#fff4ce;border:1px solid #e8d48a;padding:12px 16px;border-radius:8px;margin:12px 0}ul{list-style:none;padding:0}li{display:flex;justify-content:space-between;padding:12px 4px;border-bottom:1px solid #eee}.g{color:#1e7d4f}.r{color:#b3261e}small{color:#888}</style></head>
+<style>body{font-family:Segoe UI,Arial,sans-serif;max-width:640px;margin:6vh auto;padding:0 20px;color:#242424}h1{color:#244960;display:flex;align-items:center;gap:10px}.b{padding:14px 18px;border-radius:10px;color:#fff;font-weight:600;margin:18px 0}.ok{background:#1e7d4f}.bad{background:#b3261e}.n{background:#fff4ce;border:1px solid #e8d48a;padding:12px 16px;border-radius:8px;margin:12px 0}.bars{display:flex;gap:2px;height:34px;margin:6px 0 2px}.bars i{flex:1;border-radius:2px;background:#d6d6d6}.bars i.up{background:#2fa36b}.bars i.part{background:#e8b339}.bars i.down{background:#d0473e}.lg{display:flex;justify-content:space-between;font-size:12px;color:#888}ul{list-style:none;padding:0}li{display:flex;justify-content:space-between;padding:12px 4px;border-bottom:1px solid #eee}.g{color:#1e7d4f}.r{color:#b3261e}small{color:#888}</style></head>
 <body><h1><img src="/roammail-mark.png" alt="" height="36"> ${esc(config.appName)} status</h1>
 <div class="b ${s.ok ? 'ok' : 'bad'}">${s.ok ? 'All systems are working normally' : 'Some services are having problems. We\'re on it.'}</div>
 ${s.notice ? `<div class="n"><b>${esc(s.notice.title)}</b><br>${esc(s.notice.body)}<br><small>Updated ${esc(new Date(s.notice.at).toUTCString())}</small></div>` : ''}
 <ul>${s.components.map((c) => `<li>${esc(c.name)}<span class="${c.ok ? 'g' : 'r'}">${c.ok ? 'Working' : 'Problem'}</span></li>`).join('')}</ul>
+${h.days.some((d) => d.total) ? `<h3 style="margin:22px 0 4px">Last 90 days${h.uptime !== null ? ` <small>· ${h.uptime.toFixed(2)}% uptime</small>` : ''}</h3><div class="bars">${h.days.map(bar).join('')}</div><div class="lg"><span>90 days ago</span><span>Today</span></div>` : ''}
 <small>Checked ${esc(new Date(s.checked).toUTCString())}. This page refreshes every minute.</small></body></html>`);
 });
 

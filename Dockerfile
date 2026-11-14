@@ -8,7 +8,9 @@ RUN npm run build
 
 # ---- runtime ----
 FROM public.ecr.aws/docker/library/node:22-alpine
-RUN apk add --no-cache openssl
+# Latest security fixes for the base system, then remove the package manager (and zlib, which only it needs; Node has
+# its own): nothing can be installed into a running container, and there's less to patch
+RUN apk add --no-cache openssl && apk upgrade --no-cache && apk del --no-network apk-tools libapk zlib
 # Trust Amazon RDS's certificate authority so the database connection is verified TLS
 ADD --chmod=644 https://truststore.pki.rds.amazonaws.com/global/global-bundle.pem /etc/ssl/rds-global-bundle.pem
 ENV NODE_ENV=production DATA_DIR=/data PORT=3000 NODE_EXTRA_CA_CERTS=/etc/ssl/rds-global-bundle.pem

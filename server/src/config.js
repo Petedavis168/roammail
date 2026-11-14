@@ -42,6 +42,7 @@ config.redisUrl = env.REDIS_URL || '';
 const appUrlHost = (() => { try { return new URL(env.APP_URL || '').hostname; } catch { return ''; } })();
 config.rootDomain = (env.ROOT_DOMAIN || appUrlHost.replace(/^(app|www)\./, '')).toLowerCase();
 config.loginHost = (env.LOGIN_HOST || (config.rootDomain ? `login.${config.rootDomain}` : '')).toLowerCase();
+config.adminHost = (env.ADMIN_HOST || (config.rootDomain ? `admin.${config.rootDomain}` : '')).toLowerCase(); // admin dashboard
 config.cookieDomain = env.COOKIE_DOMAIN || (config.rootDomain ? `.${config.rootDomain}` : '');
 // web = serve people only, worker = background work only (scheduled sends, billing, clean-up), all = both (one server)
 config.role = ['web', 'worker', 'all'].includes(env.ROLE) ? env.ROLE : 'all';
@@ -109,6 +110,7 @@ config.requireAdmin2fa = (env.REQUIRE_ADMIN_2FA ?? 'true') === 'true';
 // ---------- abuse limits (webmail; SMTP from other apps is limited by mailcow's rate limit) ----------
 config.limits = {
   freePerDay: Number(env.FREE_SENDS_PER_DAY || 150),
+  freePerMonth: Number(env.FREE_SENDS_PER_MONTH || 100), // free accounts that haven't verified their ID (idverify.js); 0 = no monthly cap
   newAccountPerDay: Number(env.NEW_ACCOUNT_SENDS_PER_DAY || 150),  // free accounts in their first 7 days (send ramp 5a: 25/h, 150/day)
   businessPerDay: Number(env.BUSINESS_SENDS_PER_DAY || 2000),
   freeRecipientsPerMessage: Number(env.FREE_MAX_RECIPIENTS || 20),

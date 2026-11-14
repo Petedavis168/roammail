@@ -118,7 +118,7 @@ test('subscriptions, aliases, look-alike senders and tracker blocking', async ()
     const href = await page.frameLocator('iframe.msg-frame').locator('#lnk').getAttribute('href');
     assert.equal(href, 'https://shop.example/offer?id=7');
     // Subscriptions and Aliases are in the sidebar
-    await page.click('.folder >> text=Subscriptions');
+    await page.click('.app-rail >> button[aria-label="Subscriptions"]');
     await page.waitForSelector('.sub-row >> text=Club Updates');
     await page.click('.chip >> text=Kept');
     assert.equal(await page.locator('.sub-row').count(), 1);

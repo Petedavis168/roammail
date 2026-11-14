@@ -19,8 +19,28 @@ export async function accountKind(email) {
   return { business: false, newAccount: ageH < 7 * 24, ageDays: ageH / 24 }; // first week: the send ramp's daily cap (5a)
 }
 
-/** Check and count a webmail send. Throws 429 when over the daily quota or recipient limit. */
-export async function checkSendQuota(email, recipientCount) {
+const thisMonth = () => new Date().toISOString().slice(0, 7);
+/** Emails sent this month (web app and phone/desktop mail apps). */
+export async function monthlySent(email) {
+  return Number((await q.get('SELECT count FROM monthly_sends WHERE email = ? AND month = ?', email.toLowerCase(), thisMonth()))?.count || 0);
+}
+export async function countMonthly(email, n = 1) {
+  await q.run('INSERT INTO monthly_sends(email, month, count) VALUES(?, ?, ?) ON CONFLICT(email, month) DO UPDATE SET count = monthly_sends.count + excluded.count', email.toLowerCase(), thisMonth(), n);
+}
+/** The monthly cap that applies to this account, or null (business, Premium, ID-verified, or no cap set). */
+export async function monthlyCap(email) {
+  const cap = config.limits.freePerMonth;
+  if (!cap) return null;
+  const e = email.toLowerCase();
+  if (!config.signup.domain || !e.endsWith(`@${config.signup.domain}`)) return null; // business domains pay per mailbox
+  if ((await q.get("SELECT 1 FROM id_verifications WHERE email = ? AND status = 'verified'", e))) return null;
+  const { premiumState } = await import('./premium.js');
+  if ((await premiumState(e).catch(() => ({ active: false }))).active) return null; // Premium (paid or gifted)
+  return cap;
+}
+
+/** Check and count a webmail send. Throws 429 when over the daily quota, the monthly cap or recipient limit. */
+export async function checkSendQuota(email, recipientCount, messageId) {
   await assertCanSend(email);
   const k = await accountKind(email);
   const maxRcpt = k.business ? config.limits.businessRecipientsPerMessage : config.limits.freeRecipientsPerMessage;
@@ -32,8 +52,19 @@ export async function checkSendQuota(email, recipientCount) {
     throw fail(429, k.newAccount ? `New accounts can send ${perDay} messages a day in their first week. This protects everyone from spammers.`
       : `You've reached today's limit of ${perDay} messages. It resets at midnight UTC.`);
   }
+  const cap = k.business ? null : await monthlyCap(email);
+  if (cap !== null && (await monthlySent(email)) + 1 > cap) {
+    throw Object.assign(fail(429, `Free accounts can send ${cap} emails a month. Verify your identity with a US driver’s license to send more (Settings → Account). Your limit resets on the 1st.`), { code: 'monthly_cap' });
+  }
+  const firstEver = !k.business && !(await q.get('SELECT 1 FROM monthly_sends WHERE email = ? LIMIT 1', email.toLowerCase()));
   await q.run('INSERT INTO send_counts(email, day, count) VALUES(?, ?, 1) ON CONFLICT(email, day) DO UPDATE SET count = send_counts.count + 1', email, day);
-  await q.run("DELETE FROM send_counts WHERE day < date('now', '-30 days')");
+  await q.run("DELETE FROM send_counts WHERE day < date('now', '-40 days')");
+  if (firstEver) (await import('./insights.js')).recordStep('first_send').catch(() => {});
+  if (!k.business) {
+    await countMonthly(email);
+    // the outbound log scan counts mail sent from phone/desktop apps; it skips the ones the web app already counted
+    if (messageId) await q.run('INSERT INTO webmail_msgids(msgid, at) VALUES(?, ?) ON CONFLICT(msgid) DO NOTHING', String(messageId).replace(/[<>]/g, '').toLowerCase().slice(0, 300), Date.now());
+  }
 }
 
 export async function topSenders() {
@@ -100,6 +131,19 @@ export async function assertNotBreached(password, email) {
   } catch (e) {
     if (e.status) throw e; // our own error
   }
+}
+
+/** Has this password appeared in a public data leak? true / false / null (couldn't check). k-anonymity: only the
+ *  first 5 characters of its SHA-1 hash ever leave the server. */
+export async function passwordInBreach(password) {
+  if (!config.limits.checkBreachedPasswords) return null;
+  const hash = crypto.createHash('sha1').update(String(password)).digest('hex').toUpperCase();
+  try {
+    const res = await fetch(`https://api.pwnedpasswords.com/range/${hash.slice(0, 5)}`, { headers: { 'Add-Padding': 'true' }, signal: AbortSignal.timeout(3000) });
+    if (!res.ok) return null;
+    const hit = (await res.text()).split('\n').find((l) => l.startsWith(hash.slice(5)));
+    return !!hit && Number(hit.split(':')[1]) > 0;
+  } catch { return null; }
 }
 
 // ---------------------------------------------------------------- login throttling

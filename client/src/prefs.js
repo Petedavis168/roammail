@@ -4,6 +4,7 @@ const DEFAULTS = {
   readingPane: 'right',      // right | bottom | off
   density: 'comfortable',    // comfortable | compact
   conversation: true,
+  inboxTabs: true,
   undoSeconds: 5,
   signature: '',
   displayName: '',

@@ -8,6 +8,7 @@ import { requireAuth } from './session.js';
 import { mailcow } from './mailcow.js';
 import { sendSystemMail } from './recovery.js';
 import { checkBlocklists } from './outbound.js';
+import { recordDay } from './deliverability.js';
 
 const wrap = (fn) => (req, res, next) => Promise.resolve(fn(req, res, next)).catch(next);
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -111,7 +112,9 @@ export function startReputationReport() {
     const day = now.toISOString().slice(0, 10);
     if (now.getUTCHours() < hour || (await setting('reputation_report_day', '')) === day) return;
     await setSetting('reputation_report_day', day); // one report per day even with several workers restarting
-    await sendReport(await buildReport());
+    const r = await buildReport();
+    await recordDay(r).catch((e) => console.error('APP_ERROR deliverability history', e.message));
+    await sendReport(r);
   };
   setInterval(() => tick().catch((e) => console.error('APP_ERROR reputation report', e.message)), 15 * 60e3).unref();
 }

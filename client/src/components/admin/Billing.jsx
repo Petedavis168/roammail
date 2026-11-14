@@ -53,6 +53,30 @@ export function FriendlyCode({ orgId, onApplied }) {
   );
 }
 
+/** Bills: every invoice, newest first, with Pay now for any that are open (Stripe's secure page). */
+function Invoices({ orgId }) {
+  const [list, setList] = useState(null);
+  useEffect(() => { api.get(`/api/billing/${orgId}/invoices`).then((r) => setList(r.invoices)).catch(() => setList([])); }, [orgId]);
+  if (!list || !list.length) return null;
+  const money = (n, c) => new Intl.NumberFormat([], { style: 'currency', currency: c || 'usd' }).format(n / 100);
+  const open = list.filter((i) => i.status === 'open');
+  return (
+    <div className="card">
+      <h3>Bills {open.length > 0 && <span className="pill warn">{open.length} to pay</span>}</h3>
+      <table className="dl-table invoices">
+        <thead><tr><th>Date</th><th>Invoice</th><th>Amount</th><th>Status</th><th><span className="sr-only">Actions</span></th></tr></thead>
+        <tbody>{list.map((i) => (
+          <tr key={i.id}>
+            <td>{new Date(i.date).toLocaleDateString()}</td><td>{i.number || '—'}</td><td>{money(i.amount, i.currency)}</td>
+            <td>{i.status === 'paid' ? <span className="pill ok">Paid</span> : i.status === 'open' ? <span className="pill warn">Due{i.dueDate ? ` ${new Date(i.dueDate).toLocaleDateString()}` : ''}</span> : <span className="pill">{i.status}</span>}</td>
+            <td>{i.payUrl ? <a className="btn primary sm" href={i.payUrl} target="_blank" rel="noreferrer">Pay now</a> : i.receiptUrl ? <a className="link small" href={i.receiptUrl} target="_blank" rel="noreferrer">Receipt</a> : null}{i.pdf && <> <a className="link small" href={i.pdf} target="_blank" rel="noreferrer">PDF</a></>}</td>
+          </tr>
+        ))}</tbody>
+      </table>
+    </div>
+  );
+}
+
 export default function Billing({ org }) {
   const toast = useToast();
   const [b, setB] = useState(null);
@@ -88,6 +112,7 @@ export default function Billing({ org }) {
         </div>
         {choose && <PlanPicker orgId={org.id} seats={Math.max(1, b.billable)} onCancel={() => setChoose(false)} />}
       </div>
+      <Invoices orgId={org.id} />
       {!b.friendly && (
         <div className="card">
           <h3>Friendly Web Services customer?</h3>

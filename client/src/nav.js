@@ -1,8 +1,10 @@
 // URLs: roammail.net/{mailboxId}/{section}, sign-in on login.roammail.net (or /login in development).
 export const ID_PATH = /^\/(\d{8}|\d{6}-\d{3}-[A-Z]{2})(?:\/(.*))?$/;
 
-let hosts = { rootDomain: null, loginHost: null };
-export const setHosts = (h) => { hosts = { rootDomain: h?.rootDomain || null, loginHost: h?.loginHost || null }; };
+let hosts = { rootDomain: null, loginHost: null, adminHost: null };
+export const setHosts = (h) => { hosts = { rootDomain: h?.rootDomain || null, loginHost: h?.loginHost || null, adminHost: h?.adminHost || null }; };
+export const onAdminHost = () => !!hosts.adminHost && location.hostname === hosts.adminHost;
+export const adminHref = (id) => (hosts.adminHost ? `https://${hosts.adminHost}/${id}/admin` : `/${id}/admin`);
 export const onLoginHost = () => !!hosts.loginHost && location.hostname === hosts.loginHost;
 export const loginHref = (qs = '') => (hosts.loginHost ? `https://${hosts.loginHost}/${qs}` : `/login${qs}`);
 export const signupHref = (qs = '') => (hosts.loginHost ? `https://${hosts.loginHost}/signup${qs}` : `/signup${qs}`);

@@ -29,6 +29,20 @@
     "test:privacy": "node --disable-warning=ExperimentalWarning --test test/privacy.test.js",
     "test:receipts": "node --disable-warning=ExperimentalWarning --test test/receipts.test.js",
     "test:secure": "node --disable-warning=ExperimentalWarning --test test/secure.test.js",
+    "test:batch1": "node --disable-warning=ExperimentalWarning --test test/batch1.test.js",
+    "test:batch2": "node --disable-warning=ExperimentalWarning --test test/batch2.test.js",
+    "test:batch25": "node --disable-warning=ExperimentalWarning --test test/batch25.test.js",
+    "test:live": "node --disable-warning=ExperimentalWarning --test test/live.test.js",
+    "test:rules": "node --disable-warning=ExperimentalWarning --test test/rules.test.js",
+    "test:batch3": "node --disable-warning=ExperimentalWarning --test test/batch3.test.js",
+    "test:batch4": "node --disable-warning=ExperimentalWarning --test test/batch4.test.js",
+    "test:speed": "node --disable-warning=ExperimentalWarning --test test/speed.test.js",
+    "test:a11y": "node --disable-warning=ExperimentalWarning --test test/wcag.test.js",
+    "test:batch5": "node --disable-warning=ExperimentalWarning --test test/batch5.test.js",
+    "test:sendcap": "node --disable-warning=ExperimentalWarning --test test/sendcap.test.js",
+    "test:adminhost": "node --disable-warning=ExperimentalWarning --test test/adminhost.test.js",
+    "test:batch6": "node --disable-warning=ExperimentalWarning --test test/batch6.test.js",
+    "test:sms": "node --disable-warning=ExperimentalWarning --test test/sms.test.js",
     "test:nativepush": "NODE_ENV=test node --disable-warning=ExperimentalWarning --test test/nativepush.test.js"
   },
   "keywords": [],
@@ -36,6 +50,7 @@
   "license": "ISC",
   "dependencies": {
     "@anthropic-ai/sdk": "^1.6.0",
+    "@aws-sdk/client-pinpoint-sms-voice-v2": "^3.1169.0",
     "@aws-sdk/client-route-53": "^3.1163.0",
     "@simplewebauthn/server": "^14.1.0",
     "cookie-parser": "^1.4.7",
@@ -56,5 +71,8 @@
     "web-push": "^3.6.7",
     "zod": "^4.6.7"
   },
-  "type": "module"
+  "type": "module",
+  "devDependencies": {
+    "axe-core": "^4.14.0"
+  }
 }

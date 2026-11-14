@@ -40,7 +40,7 @@ export function checkSecurePassword(pw) {
 }
 
 /** Encrypt an outgoing email; returns the id. mail = nodemailer message (subject/html/text/attachments). */
-export async function protectEmail(req, mail, { password, hint, days, recipients }) {
+export async function protectEmail(req, mail, { password, hint, days, hours, burn, linkKey, recipients }) {
   const content = JSON.stringify({
     subject: mail.subject || '', html: mail.html || '', text: mail.text || '',
     from: { name: req.user.name || '', address: req.user.email }, sentAt: Date.now(),
@@ -52,18 +52,30 @@ export async function protectEmail(req, mail, { password, hint, days, recipients
   const c = crypto.createCipheriv('aes-256-gcm', key, iv);
   const enc = Buffer.concat([c.update(content, 'utf8'), c.final()]);
   const id = crypto.randomBytes(16).toString('base64url');
-  const expires = Date.now() + Math.min(30, Math.max(1, Number(days) || 7)) * 864e5;
+  // self-destructing emails can last as little as an hour
+  const expires = hours ? Date.now() + Math.min(24 * 30, Math.max(1, Number(hours))) * 3600e3 : Date.now() + Math.min(30, Math.max(1, Number(days) || 7)) * 864e5;
   await q.run(`INSERT INTO secure_messages(id, owner, sender_name, data, salt, iv, tag, hint, recipients, expires_at, created_at, attempts, revoked)
     VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 0)`, id, req.user.email, req.user.name || '', enc.toString('base64'), salt.toString('base64'), iv.toString('base64'),
   c.getAuthTag().toString('base64'), String(hint || '').slice(0, 200), JSON.stringify(recipients.slice(0, 100)), expires, Date.now());
   await q.run('UPDATE secure_messages SET data = NULL WHERE expires_at < ? AND data IS NOT NULL', Date.now()); // tidy up expired ones
-  await audit(req.user.email, null, 'secure.created', { id, recipients: recipients.length });
-  return { id, url: `${base(req)}/secure/${id}`, expires };
+  if (burn) await q.run('UPDATE secure_messages SET burn = 1 WHERE id = ?', id);
+  await audit(req.user.email, null, 'secure.created', { id, recipients: recipients.length, selfDestruct: !!linkKey });
+  // Self-destructing: the key travels in the link itself, after the # (browsers never send that part to the server)
+  return { id, url: `${base(req)}/secure/${id}${linkKey ? `#k=${encodeURIComponent(password)}` : ''}`, expires, selfDestruct: !!linkKey, burn: !!burn };
 }
 
 /** The email the recipient actually receives: who, a link, the hint. Never the password or the content. */
 export function noticeMail(mail, user, sec, hint) {
   const who = user.name ? `${user.name} (${user.email})` : user.email;
+  if (sec.selfDestruct) {
+    const when = sec.burn ? 'after you read it' : `on ${new Date(sec.expires).toUTCString().replace(/:\d\d GMT$/, ' UTC')}`;
+    const text = `${who} sent you a private message that disappears ${when}.\n\nRead it here: ${sec.url}\n`;
+    const html = `<div style="font-family:Arial,sans-serif;font-size:15px;color:#1f2937;max-width:520px">
+<p><b>${esc(who)}</b> sent you a private message that disappears ${esc(when)}.</p>
+<p style="margin:22px 0"><a href="${esc(sec.url)}" style="background:#7c3aed;color:#fff;text-decoration:none;padding:12px 20px;border-radius:8px;font-weight:bold;display:inline-block">&#9203; Read the message</a></p>
+<p style="color:#6b7280;font-size:13px">Sent with Roammail. After that, it's gone for good.</p></div>`;
+    return { ...mail, subject: `⏳ ${user.name || user.email} sent you a disappearing message`, html, text, attachments: [], headers: { ...(mail.headers || {}), 'X-Roammail-Secure-Id': sec.id } };
+  }
   const until = new Date(sec.expires).toUTCString().replace(/ \d\d:\d\d:\d\d GMT$/, '');
   const text = `${who} sent you a password-protected email.\n\nOpen it here: ${sec.url}\n\nYou'll need the password, which ${user.name || 'they'} will send you separately.${hint ? `\nPassword hint: ${hint}` : ''}\n\nThis link works until ${until}.\n`;
   const html = `<div style="font-family:Arial,sans-serif;font-size:15px;color:#1f2937;max-width:520px">
@@ -159,6 +171,8 @@ async function openWith(id, { password, token }) {
   try {
     const { content, key } = await decrypt(r, password);
     await q.run('UPDATE secure_messages SET opened_at = COALESCE(opened_at, ?), opens = COALESCE(opens, 0) + 1 WHERE id = ?', Date.now(), r.id);
+    // burn after reading: 10 minutes to read it and download attachments, then it's gone
+    if (Number(r.burn) === 1 && !r.opened_at) await q.run('UPDATE secure_messages SET expires_at = ? WHERE id = ? AND expires_at > ?', Date.now() + 10 * 60e3, r.id, Date.now() + 10 * 60e3);
     if (!r.opened_at) {
       await sendSystemMail(r.owner, 'Your protected email was opened', `<p>Your protected email "${esc(content.subject)}" was opened just now.</p><p>You can withdraw it any time from the email in your Sent folder.</p>`).catch(() => {});
     }

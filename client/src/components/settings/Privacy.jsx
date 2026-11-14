@@ -4,12 +4,15 @@ import { Icon } from '../../icons.jsx';
 import { useToast } from '../Toast.jsx';
 import { t } from '../../i18n.js';
 
+import PrivacyReport from './PrivacyReport.jsx';
+
 export default function Privacy({ me }) {
   const toast = useToast();
   const [del, setDel] = useState({ open: false, password: '', confirm: '' });
   const business = (me.orgDomains || []).length > 0;
   return (
     <div className="settings-section">
+      <PrivacyReport />
       <h3>{t("Download your mail")}</h3>
       <p className="muted small">{t("Get a copy of every message in every folder as a single")}{' '}<b>{t(".mbox")}</b>{' '}{t("file. Gmail, Apple Mail and Thunderbird can import it. Large mailboxes can take a few minutes.")}</p>
       <div><a className="btn" href="/api/export" download><Icon name="import" size={16} />{' '}{t("Download all my mail")}</a></div>

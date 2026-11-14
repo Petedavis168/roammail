@@ -21,8 +21,10 @@ const isPersonal = (email) => email.split('@')[1] === config.signup.domain; // P
 
 export async function premiumState(email) {
   const p = await q.get('SELECT * FROM premium WHERE email = ?', email);
-  const active = !!p && (p.status === 'active' || p.status === 'trialing' || p.status === 'past_due') && Number(p.until || 0) + GRACE_MS > Date.now();
-  return { active, status: p?.status || 'none', interval: p?.billing_interval || null, until: p?.until || null, domainOrg: p?.domain_org || null, row: p };
+  const paid = !!p && (p.status === 'active' || p.status === 'trialing' || p.status === 'past_due') && Number(p.until || 0) + GRACE_MS > Date.now();
+  const gift = !!p && Number(p.gift_until || 0) > Date.now(); // free months (refer a friend)
+  const until = Math.max(paid ? Number(p.until || 0) : 0, gift ? Number(p.gift_until) : 0) || p?.until || null;
+  return { active: paid || gift, paid, gift, giftUntil: gift ? Number(p.gift_until) : null, status: p?.status || 'none', interval: p?.billing_interval || null, until, domainOrg: p?.domain_org || null, row: p };
 }
 
 /** Turn Premium on or off for a person (from Stripe events). */
@@ -44,6 +46,32 @@ async function apply(email, { status, subscription, customer, interval, until })
     await mailcow.editMailbox(email, { quota: config.signup.quotaMb }).catch((e) => console.error('APP_ERROR premium quota', e.message));
     if (now.domainOrg) await q.run('UPDATE orgs SET comp_until = ? WHERE id = ?', Date.now() + 30 * 864e5, now.domainOrg); // 30 days to move or subscribe
     await audit(email, null, 'premium.ended');
+  }
+}
+
+/** Free Premium days (refer a friend). Adds to any free time already there; switches Premium on if it wasn't. */
+export async function grantPremiumDays(email, days, why = 'gift') {
+  const prev = await premiumState(email);
+  const from = Math.max(Date.now(), Number(prev.row?.gift_until || 0));
+  await q.run(`INSERT INTO premium(email, status, gift_until, gift_done, updated_at) VALUES(?, 'none', ?, 0, ?)
+    ON CONFLICT(email) DO UPDATE SET gift_until = excluded.gift_until, gift_done = 0, updated_at = excluded.updated_at`, email, from + days * 864e5, Date.now());
+  const now = await premiumState(email);
+  await q.run('INSERT INTO user_security(email) VALUES(?) ON CONFLICT(email) DO NOTHING', email);
+  await q.run('UPDATE user_security SET premium_until = ? WHERE email = ?', Number(now.until) + GRACE_MS, email);
+  if (now.active && !prev.active) await mailcow.editMailbox(email, { quota: B.premiumQuotaMb }).catch((e) => console.error('APP_ERROR premium quota', e.message));
+  await audit(email, null, 'premium.gift', { days, why, until: now.until });
+  return now;
+}
+/** Free time that ran out (and no paid subscription): back to the free plan. Daily, from the worker. */
+export async function endExpiredGifts() {
+  const rows = await q.all('SELECT email FROM premium WHERE gift_until IS NOT NULL AND gift_until < ? AND gift_done = 0', Date.now());
+  for (const r of rows) {
+    await q.run('UPDATE premium SET gift_done = 1 WHERE email = ?', r.email);
+    const s = await premiumState(r.email);
+    if (s.active) continue; // they subscribed meanwhile
+    await q.run('UPDATE user_security SET premium_until = NULL WHERE email = ?', r.email);
+    await mailcow.editMailbox(r.email, { quota: config.signup.quotaMb }).catch((e) => console.error('APP_ERROR premium quota', e.message));
+    await audit(r.email, null, 'premium.gift_ended');
   }
 }
 
@@ -84,7 +112,7 @@ premiumApi.use('/premium', requireAuth);
 premiumApi.get('/premium', wrap(async (req, res) => {
   const s = await premiumState(req.user.email);
   const domain = s.domainOrg ? (await q.get('SELECT domain, status FROM domains WHERE org_id = ?', s.domainOrg)) : null;
-  res.json({ available: premiumEnabled() && isPersonal(req.user.email), active: s.active, status: s.status, interval: s.interval, until: s.until,
+  res.json({ available: premiumEnabled() && isPersonal(req.user.email), active: s.active, paid: s.paid, gift: s.gift, giftUntil: s.giftUntil, status: s.status, interval: s.interval, until: s.until,
     perMonth: B.premiumPerMonth, perYear: B.premiumPerYear, currency: B.currency, quotaGb: Math.round(B.premiumQuotaMb / 1024), domain });
 }));
 

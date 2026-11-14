@@ -5,7 +5,7 @@ import crypto from 'node:crypto';
 
 const APP = process.env.APP_URL || 'http://127.0.0.1:3000';
 const WHSEC = process.env.STRIPE_WEBHOOK_SECRET || 'whsec_mock';
-const db = { customers: new Map(), sessions: new Map(), subs: new Map(), items: new Map() };
+const db = { customers: new Map(), sessions: new Map(), subs: new Map(), items: new Map(), idv: new Map() };
 const id = (p) => `${p}_${crypto.randomBytes(8).toString('hex')}`;
 const parseForm = (body) => {
   const out = {};
@@ -27,6 +27,21 @@ http.createServer(async (req, res) => {
   let body = ''; for await (const c of req) body += c;
   const send = (code, data, type = 'application/json') => { res.writeHead(code, { 'Content-Type': type }); res.end(type === 'application/json' ? JSON.stringify(data) : data); };
 
+  // Fake Stripe Identity page: pick an outcome (the real one scans the license and a selfie)
+  if (url.pathname === '/identity') {
+    const v = db.idv.get(url.searchParams.get('s'));
+    if (!v) return send(404, 'no session', 'text/html');
+    if (req.method === 'POST') {
+      const outcome = new URLSearchParams(body).get('outcome') || 'us';
+      const person = { first_name: 'Jamie', last_name: new URLSearchParams(body).get('last') || 'Rivera', dob: { year: 1990, month: 1, day: 15 } };
+      if (outcome === 'mismatch') Object.assign(v, { status: 'requires_input', last_error: { code: 'selfie_face_mismatch' } });
+      else Object.assign(v, { status: 'verified', last_error: null, verified_outputs: person,
+        last_verification_report: { document: { type: outcome === 'passport' ? 'passport' : 'driving_license', issuing_country: outcome === 'foreign' ? 'CA' : 'US', ...person } } });
+      await webhook(v.status === 'verified' ? 'identity.verification_session.verified' : 'identity.verification_session.requires_input', { id: v.id, object: 'identity.verification_session', status: v.status, metadata: v.metadata });
+      res.writeHead(303, { Location: v.return_url }); return res.end();
+    }
+    return send(200, `<!doctype html><title>Mock Stripe Identity</title><body style="font-family:sans-serif;padding:40px"><h2>Verify your identity</h2><form method="post"><select name="outcome"><option value="us">US driver's license</option><option value="foreign">Canadian license</option><option value="passport">Passport</option><option value="mismatch">Selfie doesn't match</option></select><input name="last" value="Rivera"><button id="verify">Submit</button></form></body>`, 'text/html');
+  }
   // Fake hosted checkout page
   if (url.pathname === '/pay') {
     const s = db.sessions.get(url.searchParams.get('s'));
@@ -55,7 +70,21 @@ http.createServer(async (req, res) => {
     s.url = `http://127.0.0.1:12111/pay?s=${s.id}`;
     db.sessions.set(s.id, s); return send(200, s);
   }
+  if (req.method === 'POST' && p === 'identity/verification_sessions') {
+    const v = { id: id('vs_test'), object: 'identity.verification_session', status: 'requires_input', type: b.type, options: b.options, metadata: b.metadata, return_url: b.return_url, last_error: null };
+    v.url = `http://127.0.0.1:12111/identity?s=${v.id}`; db.idv.set(v.id, v); return send(200, v);
+  }
+  if (req.method === 'GET' && p === 'invoices') {
+    const cust = url.searchParams.get('customer');
+    const subs = [...db.subs.values()].filter((x) => x.customer === cust);
+    const data = subs.flatMap((x, n) => [
+      { id: `in_paid_${x.id}`, number: `MOCK-${n + 1}-1`, created: Math.floor(Date.now() / 1000) - 86400 * 30, amount_due: 400 * x.items.data[0].quantity, amount_paid: 400 * x.items.data[0].quantity, currency: 'usd', status: 'paid', hosted_invoice_url: 'http://127.0.0.1:12111/invoice', invoice_pdf: 'http://127.0.0.1:12111/invoice.pdf' },
+      { id: `in_open_${x.id}`, number: `MOCK-${n + 1}-2`, created: Math.floor(Date.now() / 1000), due_date: Math.floor(Date.now() / 1000) + 86400 * 7, amount_due: 400 * x.items.data[0].quantity, amount_paid: 0, currency: 'usd', status: 'open', hosted_invoice_url: 'http://127.0.0.1:12111/invoice?open=1', invoice_pdf: null },
+    ]);
+    return send(200, { object: 'list', data });
+  }
   let m;
+  if (req.method === 'GET' && (m = /^identity\/verification_sessions\/([^?]+)$/.exec(p))) return db.idv.has(m[1]) ? send(200, db.idv.get(m[1])) : send(404, { error: { message: 'No such verification session' } });
   if (req.method === 'GET' && (m = /^checkout\/sessions\/(.+)$/.exec(p))) return db.sessions.has(m[1]) ? send(200, db.sessions.get(m[1])) : send(404, { error: { message: 'No such session' } });
   if (req.method === 'GET' && (m = /^subscriptions\/(.+)$/.exec(p))) return db.subs.has(m[1]) ? send(200, db.subs.get(m[1])) : send(404, { error: { message: 'No such subscription' } });
   if (req.method === 'POST' && (m = /^subscription_items\/(.+)$/.exec(p))) {

@@ -84,6 +84,11 @@ test('standard business: pays at the end, seats follow users, webhooks are verif
   const other = await newAdmin(`other${run}`);
   assert.equal((await other.post('/api/billing/confirm', { sessionId: sid })).status, 403);
   assert.equal((await other.get(`/api/billing/${orgId}`)).status, 403);
+  // bills: paid ones link to a receipt, open ones to Pay now; other businesses can't see them
+  const inv = (await a.get(`/api/billing/${orgId}/invoices`)).data.invoices;
+  assert.ok(inv.some((i) => i.status === 'paid' && i.receiptUrl && !i.payUrl));
+  assert.ok(inv.some((i) => i.status === 'open' && i.payUrl));
+  assert.equal((await other.get(`/api/billing/${orgId}/invoices`)).status, 403);
 
   // checkout asked Stripe for tax and a trial; the admin got a receipt
   const params = await (await fetch(`${STRIPE}/v1/test/last-session`, { headers: { Authorization: 'Bearer sk_test_mock' } })).json();
@@ -292,6 +297,25 @@ test('shared mailboxes: free, members only, read-only members cannot send', asyn
   const reply = () => { const f = new FormData(); f.append('to', `ann@${domain}`); f.append('subject', `Re: Help ${run}`); f.append('text', 'on it'); return f; };
   assert.equal((await as(ann, 'POST', '/api/send', reply())).status, 200);
   assert.equal((await as(ben, 'POST', '/api/send', reply())).status, 403);
+  // teamwork: assign, team notes, "X is replying"; members only
+  const tm = (c, method, path, body) => fetch(BASE + path, { method, headers: { Cookie: c.cookie, 'X-Forwarded-For': c.ip, 'X-Requested-With': 'mailcow-client', 'X-Mailbox-Id': sharedList[0].mailboxId, ...(body ? { 'Content-Type': 'application/json' } : {}) }, body: body ? JSON.stringify(body) : undefined })
+    .then(async (r) => ({ status: r.status, data: await r.json().catch(() => null) }));
+  const helpMsg = (await (await as(ann, 'GET', '/api/messages?folder=INBOX')).json()).messages.find((m) => m.subject === `Help ${run}`);
+  const mid = helpMsg.messageId.replace(/^<|>$/g, '');
+  assert.equal((await tm(ann, 'POST', '/api/team/assign', { id: mid, to: `ben@${domain}` })).status, 200);
+  assert.equal((await tm(ann, 'POST', '/api/team/assign', { id: mid, to: 'stranger@elsewhere.test' })).status, 400, 'only members');
+  const listInfo = (await tm(ben, 'GET', `/api/team?ids=${encodeURIComponent(mid)}`)).data;
+  assert.equal(listInfo.assign[mid.toLowerCase()].email, `ben@${domain}`);
+  assert.equal((await tm(ann, 'POST', '/api/team/notes', { id: mid, body: 'VIP customer, refund approved' })).status, 200);
+  assert.equal((await tm(ann, 'POST', '/api/team/presence', { id: mid, state: 'replying' })).status, 200);
+  const one = (await tm(ben, 'GET', `/api/team/message?id=${encodeURIComponent(mid)}`)).data;
+  assert.equal(one.assignee.email, `ben@${domain}`);
+  assert.equal(one.notes.length, 1); assert.equal(one.notes[0].mine, false); assert.match(one.notes[0].body, /refund approved/);
+  assert.deepEqual(one.others.map((o) => [o.email, o.state]), [[`ann@${domain}`, 'replying']]);
+  assert.equal((await tm(ben, 'DELETE', `/api/team/notes/${one.notes[0].id}`)).status, 404, 'only the author deletes a note');
+  assert.equal((await tm(a, 'GET', `/api/team/message?id=${encodeURIComponent(mid)}`)).status, 404, 'non-members never see team notes');
+  assert.equal((await tm(ann, 'POST', '/api/team/presence', { id: mid, state: 'done' })).status, 200);
+  assert.equal((await tm(ben, 'GET', `/api/team/message?id=${encodeURIComponent(mid)}`)).data.others.length, 0);
   // outsiders and the admin (not a member) can't open it
   assert.equal((await as(a, 'GET', '/api/messages?folder=INBOX')).status, 403);
   // their own mailbox still works normally

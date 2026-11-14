@@ -1,5 +1,6 @@
 import express from 'express';
 import helmet from 'helmet';
+import { systemStatus } from './ops.js';
 import { rateLimit } from './shared.js';
 import cookieParser from 'cookie-parser';
 import path from 'node:path';
@@ -8,19 +9,24 @@ import { fileURLToPath } from 'node:url';
 import { config } from './config.js';
 import { api } from './routes.js';
 import { sharedboxes } from './sharedboxes.js';
-import { archive } from './archive.js';
+import { applyRetention, archive } from './archive.js';
 import { push, startPush, pushStats, notify } from './push.js';
 import { tasksApi, startReminders, setReminderNotifier } from './tasks.js';
 import { importsApi, importsPublic, startImports, setImportNotifier } from './imports.js';
 import { phoneApi } from './phone.js';
 import { reputationApi, startReputationReport } from './reputation.js';
+import { deliverabilityApi } from './deliverability.js';
+import { idVerifyApi } from './idverify.js';
+import { insightsApi, funnelApi, startWeeklyInsights } from './insights.js';
+import { teamApi } from './team.js';
+import { startPgBus } from './pgbus.js';
 import { sendSystemMail } from './recovery.js';
 import { help } from './help.js';
 import { hosts, siteRouter, ID_PATH, notFound } from './hosts.js';
 import { requireAuth } from './session.js';
 import { setupApi, requireSetupApi } from './setup.js';
 import { abuseDesk, outboundAdmin, startOutboundChecks } from './outbound.js';
-import { ops, metricsMiddleware, startMetricsLog, gauge, startDbBackups } from './ops.js';
+import { startStatusRecorder, ops, metricsMiddleware, startMetricsLog, gauge, startDbBackups } from './ops.js';
 import { q } from './db.js';
 import { publicAccounts, accounts } from './accounts.js';
 import { publicSecurity, securityApi } from './security.js';
@@ -36,10 +42,23 @@ import { passkeysApi, passkeyLogin } from './passkeys.js';
 import { ssoApi, ssoPublic } from './sso.js';
 import { bookingApi, bookingPublic, bookingPages } from './booking.js';
 import { subscriptionsApi } from './subscriptions.js';
+import { nudgesApi } from './nudges.js';
+import { screenerApi } from './screener.js';
+import { voiceApi, voicePages } from './voice.js';
+import { statusApi } from './status.js';
+import { contactGroups } from './contactgroups.js';
+import { catchupApi } from './catchup.js';
+import { scamApi } from './scamguard.js';
+import { referralsApi, startReferralRewards } from './referrals.js';
+import { privacyReport } from './privacyreport.js';
+import { studentApi } from './student.js';
+import { chatAlertsApi } from './chatalerts.js';
+import { endExpiredGifts } from './premium.js';
 import { aliasesApi } from './aliases.js';
 import { receiptsApi } from './receipts.js';
 import { secureApi, securePublic, securePages } from './secure.js';
 import { aiApi } from './ai.js';
+import { appAssets, compressJson } from './fastserve.js';
 import { premiumApi } from './premium.js';
 import { calendar } from './calendar.js';
 import { contacts } from './contacts.js';
@@ -60,16 +79,18 @@ app.use(helmet({
       frameSrc: ["'self'", 'blob:', ...(config.turnstile.siteKey ? ['https://challenges.cloudflare.com'] : [])],
       scriptSrc: ["'self'", ...(config.turnstile.siteKey ? ['https://challenges.cloudflare.com'] : [])],
       connectSrc: ["'self'"],
+      mediaSrc: ["'self'", 'blob:'], // voice notes (recording preview + playback)
     },
   },
   crossOriginEmbedderPolicy: false,
 }));
 app.use(metricsMiddleware);
+app.use('/api', compressJson); // smaller mail lists and messages
 app.use(billingWebhook); // Stripe → raw body, verified by signature
 app.use(cookieParser());
 app.use(express.json({ limit: '2mb', verify: (req, res, buf) => { req.rawBody = buf; } }));
 app.use((req, res, next) => {
-  res.setHeader('Permissions-Policy', 'camera=(), microphone=(), geolocation=(), payment=(), usb=(), interest-cohort=()');
+  res.setHeader('Permissions-Policy', 'camera=(), microphone=(self), geolocation=(), payment=(), usb=(), interest-cohort=()');
   res.setHeader('Cross-Origin-Opener-Policy', 'same-origin');
   next();
 });
@@ -85,9 +106,20 @@ app.use('/api', (req, res, next) => {
   next();
 });
 app.get('/healthz', (req, res) => res.json({ ok: true }));
+// Deep check for the outside uptime monitor: the database must answer (the mail server is reported, not required,
+// so a mail-server problem shows on the status page without taking the website down)
+app.get('/healthz/deep', async (req, res) => {
+  const t0 = Date.now();
+  let db = false;
+  try { await Promise.race([q.get('SELECT 1 AS x'), new Promise((_, rej) => setTimeout(() => rej(new Error('timeout')), 4000))]); db = true; } catch { /* down */ }
+  const s = await systemStatus().catch(() => null);
+  const part = (name) => s?.components?.find((c) => c.name === name)?.ok ?? null;
+  res.set('Cache-Control', 'no-store').status(db ? 200 : 503).json({ ok: db, db, dbMs: Date.now() - t0, mail: { receiving: part('Receiving and reading mail'), sending: part('Sending mail') } });
+});
 app.use(appLinks); // before host routing: these must be served on every host, never redirected
 app.use(bookingPages); // public booking pages, same on every host
 app.use(securePages); // password-protected email page, same on every host
+app.use(voicePages); // voice-note player page, same on every host
 app.use(hosts);
 app.use(ops);
 app.use(abuseDesk);
@@ -114,6 +146,7 @@ app.use('/api/setup', requireAuth);
 app.use('/api', setupApi);
 app.use('/api', phoneApi);
 app.use('/api', publicAccounts);
+app.use('/api', funnelApi);
 app.use('/api', api);
 app.use('/api', accounts);
 app.use('/api', signatures);
@@ -122,6 +155,17 @@ app.use('/api', passkeysApi);
 app.use('/api', ssoApi);
 app.use('/api', bookingApi);
 app.use('/api', subscriptionsApi);
+app.use('/api', nudgesApi);
+app.use('/api', screenerApi);
+app.use('/api', voiceApi);
+app.use('/api', statusApi);
+app.use('/api', contactGroups);
+app.use('/api', catchupApi);
+app.use('/api', scamApi);
+app.use('/api', referralsApi);
+app.use('/api', privacyReport);
+app.use('/api', studentApi);
+app.use('/api', chatAlertsApi);
 app.use('/api', aliasesApi);
 app.use('/api', receiptsApi);
 app.use('/api', secureApi);
@@ -133,6 +177,10 @@ app.use('/api', deviceSetupApi);
 app.use('/api', privacy);
 app.use('/api', tasksApi);
 app.use('/api', reputationApi);
+app.use('/api', deliverabilityApi);
+app.use('/api', idVerifyApi);
+app.use('/api', insightsApi);
+app.use('/api', teamApi);
 app.use('/api', importsApi);
 app.use('/api', calendar);
 app.use('/api', contacts);
@@ -175,12 +223,14 @@ app.get('/favicon.ico', staticLimiter, (req, res) => {
 });
 app.get('/robots.txt', staticLimiter, (req, res) => {
   const host = String(req.hostname || '').toLowerCase();
-  const body = config.loginHost && host === config.loginHost
+  const body = config.adminHost && host === config.adminHost ? 'User-agent: *\nDisallow: /\n' // admin dashboard: never indexed
+    : config.loginHost && host === config.loginHost
     ? 'User-agent: *\nAllow: /$\nAllow: /signup\nDisallow: /\n' // sign-in host: only the sign-in and sign-up pages
-    : 'User-agent: *\nDisallow: /api/\nDisallow: /app\nDisallow: /help/contact\n'; // the website; mailbox pages need a sign-in anyway
+    : 'User-agent: *\nDisallow: /api/\nDisallow: /app\nDisallow: /help/contact\nSitemap: https://roammail.net/sitemap.xml\n'; // the website; mailbox pages need a sign-in anyway
   res.type('text/plain').set('Cache-Control', 'public, max-age=86400').send(body);
 });
 if (fs.existsSync(dist)) {
+  app.use(appAssets(dist)); // compressed, kept by browsers for a year (names change each release)
   app.use(express.static(dist, { index: false, maxAge: '1h' }));
   // Only real app pages get the app; anything else is a real 404 (no soft-404s for scanners and search engines)
   app.get(/^\/(?!api\/).*/, staticLimiter, (req, res) => {
@@ -205,10 +255,16 @@ setImportNotifier(async (email, n) => {
 });
 startImports();
 startReputationReport();
+startWeeklyInsights();
+startPgBus().then((on) => on && console.log('servers share live updates through the database')).catch((e) => console.warn('pg bus', e.message));
 gauge('push_watchers', () => pushStats().watching);
 if (config.runsBackground) {
   await startJobs();
   await startRetention();
+  startStatusRecorder(); // uptime history for the status page
+  startReferralRewards(); // refer a friend: free months once the friend is a real, active user
+  setInterval(() => applyRetention().catch((e) => console.error('APP_ERROR retention policy', e.message)), 24 * 3600e3).unref();
+  setInterval(() => endExpiredGifts().catch((e) => console.error('APP_ERROR gifts', e.message)), 6 * 3600e3).unref();
   setInterval(() => processTwoFactorResets().catch((e) => console.error('APP_ERROR 2fa resets', e)), 10 * 60 * 1000).unref();
 }
 app.listen(config.port, () => {

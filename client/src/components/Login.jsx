@@ -21,13 +21,13 @@ const STRENGTH = ['Too weak', 'Weak', 'Fair', 'Good', 'Strong'];
 
 function Card({ title, subtitle, children, onSubmit, footer }) {
   return (
-    <form className="g-card" onSubmit={onSubmit} noValidate>
+    <main className="g-main"><form className="g-card" onSubmit={onSubmit} noValidate>
       <img className="g-mark" src="/assets/roammail-symbol.png" alt={t("Roammail")} />
       <h1>{title}</h1>
       {subtitle && <p className="g-sub">{subtitle}</p>}
       <div className="g-body">{children}</div>
       {footer && <div className="g-foot">{footer}</div>}
-    </form>
+    </form></main>
   );
 }
 function Field({ label, error, hint, ...props }) {
@@ -48,6 +48,10 @@ export default function Login({ onLogin, mode = 'signin' }) {
   const signupType = params.get('type') === 'domain' ? 'domain' : 'free';
   const billing = ['monthly', 'yearly'].includes(params.get('billing')) ? params.get('billing') : '';
   const [step, setStep] = useState(resetToken ? 'reset' : mode === 'signup' || params.get('signup') ? 'name' : 'email');
+  // Refer a friend: ?ref=CODE on the sign-up link (kept for this visit)
+  const [refCode] = useState(() => { const r = new URLSearchParams(location.search).get('ref'); if (r && /^[A-Za-z2-9]{8}$/.test(r)) sessionStorage.setItem('ref', r.toUpperCase()); return sessionStorage.getItem('ref') || ''; });
+  const startedAt = useRef(Date.now()); // bot check: real people take more than a couple of seconds
+  const [hp, setHp] = useState(''); // hidden field only bots fill in
   const [f, setF] = useState({ email: '', password: '', code: '', first: '', last: '', purpose: signupType === 'domain' ? 'business' : 'personal', username: '', custom: false, pw: '', pw2: '', recovery: '', terms: false, phone: '', code: '', phoneToken: null, birthday: '', bizDomain: '', bizLocal: '', bizName: '', codeSent: false, remember: localStorage.getItem('remember') ? localStorage.getItem('remember') === '1' : isNative() }); // the phone apps keep you signed in by default
   const [show, setShow] = useState(false);
   const [error, setError] = useState('');
@@ -64,6 +68,13 @@ export default function Login({ onLogin, mode = 'signin' }) {
   const captchaRef = useRef(); const timer = useRef();
   const set = (k) => (e) => { setError(''); setF((x) => ({ ...x, [k]: e.target.type === 'checkbox' ? e.target.checked : e.target.value })); };
   const go = (s) => { setError(''); setInfo(''); setStep(s); };
+  // count how far people get in sign-up (just the step, nothing about them), once per visit
+  useEffect(() => {
+    const f = { name: 'signup_view', address: 'signup_address', 'password-new': 'signup_password', recovery: 'signup_recovery', review: 'signup_review' }[step];
+    if (!f || sessionStorage.getItem(`funnel:${f}`)) return;
+    sessionStorage.setItem(`funnel:${f}`, '1');
+    fetch('/api/funnel', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'mailcow-client' }, body: JSON.stringify({ step: f }), keepalive: true }).catch(() => {});
+  }, [step]);
   useEffect(() => { api.signupConfig().then(setCfg).catch(() => {}); }, []);
   const fullEmail = f.email.includes('@') ? f.email.trim() : `${f.email.trim()}@${cfg.domain}`;
 
@@ -292,9 +303,10 @@ export default function Login({ onLogin, mode = 'signin' }) {
           const r = await api.post('/api/signup/phone/check', { phone: f.phone, code: f.code });
           setF((x) => ({ ...x, phoneToken: r.token })); go('review');
         }); }}
-        footer={<>{f.codeSent && <button type="button" className="g-link" onClick={() => setF({ ...f, codeSent: false, code: '' })}>{t("Change number")}</button>}<button className="g-btn" disabled={busy}>{f.codeSent ? 'Verify' : 'Send code'}</button></>}>
+        footer={<>{f.codeSent && <button type="button" className="g-link" onClick={() => setF({ ...f, codeSent: false, code: '' })}>{t("Change number")}</button>}<button className="g-btn" disabled={busy}>{f.codeSent ? t('Verify') : t('Send code')}</button></>}>
         {!f.codeSent
-          ? <Field label={t("Mobile number")} type="tel" inputMode="tel" autoComplete="tel" autoFocus value={f.phone} onChange={set('phone')} error={error} hint={t("Include your country code, e.g. +1 555 123 4567")} />
+          ? <><Field label={t("Mobile number")} type="tel" inputMode="tel" autoComplete="tel" autoFocus value={f.phone} onChange={set('phone')} error={error} hint={t("Include your country code, e.g. +1 555 123 4567")} />
+            <p className="g-hint sms-consent">{t("By tapping Send code you agree to get a one-time verification text from Roammail at this number. Message and data rates may apply. Reply STOP to opt out, HELP for help.")} <a href="/terms" target="_blank" rel="noreferrer">{t("Terms")}</a> · <a href="/privacy" target="_blank" rel="noreferrer">{t("Privacy")}</a></p></>
           : <Field label={t("6-digit code")} inputMode="numeric" autoComplete="one-time-code" autoFocus value={f.code} onChange={set('code')} error={error} hint={`Sent to ${f.phone}`} />}
       </Card>
     </Shell>
@@ -303,13 +315,14 @@ export default function Login({ onLogin, mode = 'signin' }) {
     <Shell>
       <Card title={t("Privacy and Terms")} subtitle={`Almost done, ${f.first}.`}
         onSubmit={(e) => { e.preventDefault(); if (!f.terms) return setError(t("Please agree to continue")); run(async () => {
-          const r = await api.signup({ name: `${f.first} ${f.last}`.trim(), username, password: f.pw, recoveryEmail: f.recovery, captcha, acceptTerms: true, phoneToken: f.phoneToken, birthday: f.birthday, phone: f.phone, remember: isNative(),
+          const r = await api.signup({ name: `${f.first} ${f.last}`.trim(), username, password: f.pw, recoveryEmail: f.recovery, captcha, acceptTerms: true, phoneToken: f.phoneToken, birthday: f.birthday, phone: f.phone, remember: isNative(), website: hp, formMs: Date.now() - startedAt.current, ...(refCode ? { ref: refCode } : {}),
             ...(f.purpose === 'business' && f.bizDomain ? { business: { domain: f.bizDomain, local: f.bizLocal, orgName: f.bizName } } : {}) });
           // Own-domain sign-ups go straight on to connecting the domain (and choosing monthly/yearly)
           if (f.purpose === 'business') localStorage.setItem('startBusiness', '1');
           onLogin({ ...r, redirect: f.purpose === 'business' ? `${r.redirect}?setup=domain${billing ? `&billing=${billing}` : ''}` : r.redirect });
         }); }}
         footer={<><button type="button" className="g-link" onClick={() => go('recovery')}>{t("Back")}</button><button className="g-btn" disabled={busy}>{busy ? 'Creating your account…' : 'Create account'}</button></>}>
+        <input className="hp-field" name="website" tabIndex={-1} autoComplete="off" aria-hidden="true" value={hp} onChange={(e) => setHp(e.target.value)} />
         <div className="g-review">
           <div><Icon name="mail" size={16} /> <b>{username}@{cfg.domain}</b></div>
           <ul>
@@ -332,7 +345,7 @@ function Shell({ children }) {
   return (
     <div className="g-page">
       {children}
-      <div className="g-legal"><span>{t("Roammail · Your business. Delivered. · Powered by Friendly Web Services")}</span><span><a href="/legal/privacy">{t("Privacy")}</a><a href="/legal/terms">{t("Terms")}</a><a href="/legal/security">{t("Security")}</a></span></div>
+      <footer className="g-legal"><span>{t("Roammail · Your business. Delivered. · Powered by Friendly Web Services")}</span><span><a href="/legal/privacy">{t("Privacy")}</a><a href="/legal/terms">{t("Terms")}</a><a href="/legal/security">{t("Security")}</a></span></footer>
     </div>
   );
 }

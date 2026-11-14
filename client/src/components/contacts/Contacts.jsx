@@ -4,9 +4,10 @@ import { Icon } from '../../icons.jsx';
 import { useToast } from '../Toast.jsx';
 import { avatarColor, initials } from '../../util.js';
 import ContactEditor from './ContactEditor.jsx';
+import ContactGroups from './ContactGroups.jsx';
 import { t } from '../../i18n.js';
 
-export default function Contacts({ me, onEmail }) {
+export default function Contacts({ me, onEmail, onEmailMany }) {
   const toast = useToast();
   const [tab, setTab] = useState('mine');
   const [list, setList] = useState(null);
@@ -49,6 +50,7 @@ export default function Contacts({ me, onEmail }) {
         <button className="compose-btn" onClick={() => setEditing({})}><Icon name="plus" />{' '}{t("New contact")}</button>
         <div className="nav-section">
           <div className={`folder ${tab === 'mine' ? 'on' : ''}`} onClick={() => { setTab('mine'); setSel(null); }} role="button"><span className="twisty" /><Icon name="users" /><span className="fname">{t("My contacts")}</span><span className="count muted">{list?.length ?? ''}</span></div>
+          <div className={`folder ${tab === 'groups' ? 'on' : ''}`} onClick={() => { setTab('groups'); setSel(null); }} role="button"><span className="twisty" /><span className="ic-emoji">👥</span><span className="fname">{t("Groups")}</span></div>
           {business && <div className={`folder ${tab === 'dir' ? 'on' : ''}`} onClick={() => { setTab('dir'); setSel(null); }} role="button"><span className="twisty" /><Icon name="globe" /><span className="fname">{t("Company directory")}</span><span className="count muted">{dir?.length ?? ''}</span></div>}
         </div>
         <div className="nav-title">{t("Import & export")}</div>
@@ -59,6 +61,7 @@ export default function Contacts({ me, onEmail }) {
         </div>
         <p className="muted small cal-sync">{t("Export contacts from Gmail (contacts.google.com → Export → vCard) or Outlook and import them here. They sync to your phone too.")}</p>
       </aside>
+      {tab === 'groups' ? <ContactGroups onEmail={onEmailMany} /> : <>
       <section className="list contact-list">
         <div className="list-head"><h2>{tab === 'mine' ? 'My contacts' : 'Company directory'}</h2></div>
         <div className="contact-search"><Icon name="search" size={16} /><input placeholder={t("Search name, email, company, phone")} value={q} onChange={(e) => setQ(e.target.value)} /></div>
@@ -104,6 +107,7 @@ export default function Contacts({ me, onEmail }) {
           </div>
         )}
       </section>
+      </>}
       {editing && <ContactEditor contact={editing} onClose={() => setEditing(null)} onSaved={() => { setEditing(null); load(true); }} />}
     </div>
   );

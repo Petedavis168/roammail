@@ -155,6 +155,11 @@ billingWebhook.post('/api/billing/webhook', express.raw({ type: 'application/jso
   if (!valid) { console.warn('SECURITY_BAD_WEBHOOK signature'); return res.status(400).json({ error: 'bad signature' }); }
   const event = JSON.parse(req.body.toString('utf8'));
   if (await q.get('SELECT 1 FROM billing_events WHERE id = ?', event.id)) return res.json({ received: true, duplicate: true });
+  // ID checks for free accounts (idverify.js)
+  if (await (await import('./idverify.js')).idWebhook(event)) {
+    await q.run('INSERT INTO billing_events(id, type, org_id) VALUES(?, ?, ?)', event.id, event.type, null);
+    return res.json({ received: true });
+  }
   // Personal Premium subscriptions (premium.js)
   if (await (await import('./premium.js')).premiumWebhook(event)) {
     await q.run('INSERT INTO billing_events(id, type, org_id) VALUES(?, ?, ?)', event.id, event.type, null);
@@ -297,6 +302,19 @@ billing.post('/billing/:orgId/portal', wrap(async (req, res) => {
   if (!b.stripe_customer) throw fail(400, 'No billing account yet');
   const p = await stripe('POST', 'billing_portal/sessions', { customer: b.stripe_customer, return_url: `${base(req)}/${await ensureMailboxId(req.user.email)}/inbox?billing=portal` });
   res.json({ url: p.url });
+}));
+
+// Bills: every invoice for the business, with a link to pay any that are open (Stripe's secure invoice page)
+billing.get('/billing/:orgId/invoices', wrap(async (req, res) => {
+  const id = await requireOrgAdmin(req, req.params.orgId);
+  const b = await orgBilling(id);
+  if (!b.stripe_customer || !B.stripeKey) return res.json({ invoices: [] });
+  const r = await stripe('GET', `invoices?customer=${encodeURIComponent(b.stripe_customer)}&limit=36`);
+  res.json({ invoices: (r.data || []).filter((i) => i.status !== 'draft').map((i) => ({
+    id: i.id, number: i.number || null, date: Number(i.created || 0) * 1000, dueDate: i.due_date ? Number(i.due_date) * 1000 : null,
+    amount: Number(i.amount_due ?? i.total ?? 0), paid: Number(i.amount_paid || 0), currency: i.currency || B.currency,
+    status: i.status, payUrl: i.status === 'open' ? i.hosted_invoice_url || null : null, receiptUrl: i.hosted_invoice_url || null, pdf: i.invoice_pdf || null,
+  })) });
 }));
 
 // ---------------------------------------------------------------- super-admin: Friendly customer codes

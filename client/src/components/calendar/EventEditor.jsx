@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { useDialog } from '../../a11y.js';
 import { api } from '../../api.js';
 import { Icon } from '../../icons.jsx';
 import RecipientInput from '../RecipientInput.jsx';
@@ -51,9 +52,10 @@ export default function EventEditor({ event, calendars, me, onClose, onSaved }) 
     catch (err) { toast(err.message, { error: true }); }
   };
 
+  const dlg = useDialog(onClose);
   return (
     <div className="modal-wrap" onClick={onClose}>
-      <form className="modal event-editor" onClick={(e) => e.stopPropagation()} onSubmit={save}>
+      <form ref={dlg} data-dialog tabIndex={-1} role="dialog" aria-modal="true" className="modal event-editor" onClick={(e) => e.stopPropagation()} onSubmit={save}>
         <div className="modal-head"><h2>{readOnly ? 'Event' : isNew ? 'New event' : 'Edit event'}</h2><button type="button" className="icon-btn" onClick={onClose}><Icon name="close" /></button></div>
         {readOnly && <div className="banner">{t("Organized by")}{' '}{event.organizer.name || event.organizer.email}{t(". Only they can change it.")}</div>}
         <fieldset disabled={readOnly} className="form">

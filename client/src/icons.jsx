@@ -43,6 +43,13 @@ const P = {
   italic: 'M10 4h8M6 20h8M14 4l-4 16',
   underline: 'M6 3v7a6 6 0 0 0 12 0V3M4 21h16',
   list: 'M9 6h12M9 12h12M9 18h12M4 6h.01M4 12h.01M4 18h.01',
+  bell: 'M6 16V11a6 6 0 1 1 12 0v5l2 2H4zM10 20a2 2 0 0 0 4 0',
+  square: 'M5 5h14v14H5z',
+  download: 'M12 3v12M7 10l5 5 5-5M5 21h14',
+  mic: 'M12 3a3 3 0 0 1 3 3v6a3 3 0 0 1-6 0V6a3 3 0 0 1 3-3zM5 11a7 7 0 0 0 14 0M12 18v3M9 21h6',
+  play: 'M7 4l13 8-13 8z',
+  stop: 'M6 6h12v12H6z',
+  userCheck: 'M9 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8zM2 21v-1a6 6 0 0 1 6-6h2a6 6 0 0 1 4 1.5M15 18l2 2 4-4',
   link: 'M10 14a5 5 0 0 0 7 0l3-3a5 5 0 0 0-7-7l-1 1M14 10a5 5 0 0 0-7 0l-3 3a5 5 0 0 0 7 7l1-1',
   key: 'M15 7a4 4 0 1 1-3.9 5H9v2H7v2H4v-3l6.1-6.1A4 4 0 0 1 15 7z',
   external: 'M14 3h7v7M21 3l-9 9M19 14v7H3V5h7',
@@ -60,7 +67,7 @@ export function Icon({ name, size = 18, fill = 'none', className = '', style }) 
   return (
     <svg className={`icon ${className}`} style={style} width={size} height={size} viewBox="0 0 24 24" fill={fill}
       stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-      <path d={P[name] || P.folder} />
+      {name === 'more' ? <g fill="currentColor" stroke="none"><circle cx="5" cy="12" r="2" /><circle cx="12" cy="12" r="2" /><circle cx="19" cy="12" r="2" /></g> : <path d={P[name] || P.folder} />}
     </svg>
   );
 }

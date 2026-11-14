@@ -6,10 +6,13 @@ import RecipientInput from './RecipientInput.jsx';
 import { useToast } from './Toast.jsx';
 import { signatureHtml, defaultChoice } from '../signatures.js';
 import { safeHtml, onSafePaste } from '../safehtml.js';
-import { presets, fmtWhen, localInputValue } from '../snooze.js';
+import { presets, fmtWhen, localInputValue, bestSendTime } from '../snooze.js';
 import { queue, flushOutbox, isOffline } from '../outbox.js';
 import { offlineAllowed } from '../api.js';
 import { t as tr } from '../i18n.js';
+import VoiceRecorder from './VoiceRecorder.jsx';
+import { findPromise } from '../promises.js';
+import { GALLERY, customFields, builtinValues, fillTemplate, fieldLabel } from '../templategallery.js';
 
 const sigBlock = (html) => (html ? `<div class="signature" data-sig="1"><br>${safeHtml(html)}</div>` : '');
 
@@ -56,8 +59,11 @@ function Composer({ c, me, prefs, sigData, identities, onClose, onSend, focusInd
   const [dragging, setDragging] = useState(false);
   const [important, setImportant] = useState(init.priority === 'high');
   const [readR, setReadR] = useState(prefs.requestReceipts === 'always');
+  const [remindNoReply, setRemindNoReply] = useState(false); // snooze until reply: remind me if nobody answers
+  const [selfDestruct, setSelfDestruct] = useState(''); // '', '1h', '24h', '7d', 'read'
   const [delivR, setDelivR] = useState(prefs.requestReceipts === 'always');
   const [rcptMenu, setRcptMenu] = useState(false);
+  const [moreMenu, setMoreMenu] = useState(false);
   // password protection: recipients get a link; the password goes separately
   const [protect, setProtect] = useState(false);
   const [sec, setSec] = useState({ password: '', hint: '', days: 7, follow: 'later', show: false });
@@ -85,15 +91,51 @@ function Composer({ c, me, prefs, sigData, identities, onClose, onSend, focusInd
   const [tplMenu, setTplMenu] = useState(false);
   const [templates, setTemplates] = useState(null);
   const openTemplates = () => { setTplMenu((x) => !x); if (!templates) api.get('/api/templates').then(setTemplates).catch(() => setTemplates({ personal: [], company: [] })); };
-  const useTemplate = (t) => {
-    setTplMenu(false);
-    if (t.subject && !subject) setSubject(t.subject);
+  const [tplQ, setTplQ] = useState('');
+  const [tplFill, setTplFill] = useState(null); // { t, values } while asking for the fill-in fields
+  const insertTemplate = (t, values) => {
+    const f = fillTemplate(t, { ...builtinValues({ to, me }), ...values });
+    if (f.subject && !subject.trim()) setSubject(f.subject);
     const ed = editor.current; if (!ed) return;
     ed.focus();
-    document.execCommand('insertHTML', false, safeHtml(t.html));
+    document.execCommand('insertHTML', false, safeHtml(f.html));
+    markDirty();
+  };
+  const useTemplate = (t) => {
+    setTplMenu(false); setTplQ('');
+    const ask = customFields(t);
+    if (ask.length) setTplFill({ t, values: Object.fromEntries(ask.map((k) => [k, ''])) });
+    else insertTemplate(t, {});
+  };
+  // Colleagues who are out of office (business accounts): shown under the To line
+  const [away, setAway] = useState([]);
+  const rcptKey = [...to, ...cc].map((r) => r.address?.toLowerCase()).filter(Boolean).sort().join(',');
+  useEffect(() => {
+    if (!me.orgDomains?.length || !rcptKey) { setAway([]); return; }
+    const inOrg = rcptKey.split(',').filter((a) => me.orgDomains.includes(a.split('@')[1]));
+    if (!inOrg.length) { setAway([]); return; }
+    const h = setTimeout(() => api.get(`/api/ooo?emails=${encodeURIComponent(inOrg.join(','))}`).then((r) => setAway(r.away || [])).catch(() => {}), 400);
+    return () => clearTimeout(h);
+  }, [rcptKey]);
+  const [voice, setVoice] = useState(false);
+  const addVoice = ({ url, durationMs }) => {
+    setVoice(false);
+    const s2 = Math.round((durationMs || 0) / 1000); const len = `${Math.floor(s2 / 60)}:${String(s2 % 60).padStart(2, '0')}`;
+    const html = `<div><table role="presentation" cellpadding="0" cellspacing="0" style="border-collapse:separate;margin:8px 0"><tr><td style="background:#2563eb;border-radius:999px;padding:10px 18px"><a href="${escapeHtml(url)}" style="color:#ffffff;text-decoration:none;font:600 14px Arial,sans-serif">&#9654;&nbsp; ${escapeHtml(tr('Play voice message'))} (${len})</a></td></tr></table></div><div><br></div>`;
+    const ed = editor.current; if (!ed) return;
+    const cur = ed.querySelector('.signature, [data-sig]');
+    if (cur) cur.insertAdjacentHTML('beforebegin', safeHtml(html)); else { ed.focus(); document.execCommand('insertHTML', false, safeHtml(html)); }
     markDirty();
   };
   const [sendMenu, setSendMenu] = useState(false);
+  // Send at the best time for the first person on the To line (from when they usually write to you)
+  const [best, setBest] = useState(null);
+  const firstTo = to[0]?.address?.toLowerCase() || '';
+  useEffect(() => {
+    if (!sendMenu || !firstTo || best?.email === firstTo) return;
+    api.get('/api/people/activity', { email: firstTo }).then((r) => setBest({ email: firstTo, name: to[0]?.name || firstTo.split('@')[0], ...bestSendTime(r.times) }))
+      .catch(() => setBest({ email: firstTo, name: to[0]?.name || firstTo.split('@')[0], ...bestSendTime([]) }));
+  }, [sendMenu, firstTo]);
   const [pickTime, setPickTime] = useState(false);
   const [customTime, setCustomTime] = useState(() => localInputValue(new Date(Date.now() + 3600e3)));
   const sig = sigBlock(signatureHtml(sigData, sigChoice));
@@ -138,7 +180,7 @@ function Composer({ c, me, prefs, sigData, identities, onClose, onSend, focusInd
     to, cc, bcc, subject, files, html: editor.current?.innerHTML || '', text: editor.current?.innerText || '',
     inReplyTo: init.inReplyTo, references: init.references, replyFolder: init.replyFolder, replyUid: init.replyUid,
     forwardFolder: init.forwardFolder, forwardUid: init.forwardUid, draftUid: draft.uid, draftFolder: draft.folder,
-    priority: important ? 'high' : 'normal', readReceipt: readR, deliveryReceipt: delivR,
+    priority: important ? 'high' : 'normal', readReceipt: readR, deliveryReceipt: delivR, remindDays: remindNoReply ? 3 : 0, ...(selfDestruct && !protect ? { selfDestruct } : {}),
     ...(protect ? { protect: true, securePassword: sec.password, secureHint: sec.hint, secureDays: sec.days, pwFollow: sec.follow } : {}), fromAddress, asMailbox: fromChoices.find((i) => i.address === fromAddress)?.mailboxId,
     fromName: fromAddress !== me.email ? ((identities || []).find((i) => i.address === fromAddress)?.name || '') : (prefs.displayName || me.name || ''),
   });
@@ -157,6 +199,16 @@ function Composer({ c, me, prefs, sigData, identities, onClose, onSend, focusInd
 
   const markDirty = () => { dirty.current = true; };
   useEffect(markDirty, [to, cc, bcc, subject, files]);
+  // "… is typing" for the Roammail people in the conversation you're replying to (every few seconds while typing)
+  const typingRef = useRef({ last: 0, sent: false });
+  const replyRef = init.inReplyTo || null;
+  const rcptList = () => [...to, ...cc].map((r) => r.address).filter(Boolean);
+  const typing = () => {
+    if (!replyRef || Date.now() - typingRef.current.last < 4000) return;
+    typingRef.current = { last: Date.now(), sent: true };
+    api.post('/api/live/typing', { to: rcptList(), ref: replyRef }).catch(() => {});
+  };
+  useEffect(() => () => { if (typingRef.current.sent && replyRef) api.post('/api/live/typing', { to: rcptList(), ref: replyRef, stop: true }).catch(() => {}); }, []);
 
   const close = async () => {
     const hasContent = to.length || subject || (editor.current?.innerText || '').trim().replace(/^--[\s\S]*$/, '').trim();
@@ -213,6 +265,12 @@ function Composer({ c, me, prefs, sigData, identities, onClose, onSend, focusInd
           right={!showCc && <button type="button" className="link small" onClick={() => setShowCc(true)}>{tr("Cc Bcc")}</button>} />
         {showCc && <RecipientInput label={tr("Cc")} value={cc} onChange={setCc} />}
         {showCc && <RecipientInput label={tr("Bcc")} value={bcc} onChange={setBcc} />}
+        {away.map((a) => (
+          <div className="away-note" key={a.email} role="note"><Icon name="clock" size={14} />
+            <span><b>{a.email}</b> {tr('is out of office')}{a.until ? ` ${tr('until')} ${new Date(`${a.until}T12:00:00`).toLocaleDateString(undefined, { weekday: 'short', day: 'numeric', month: 'short' })}` : ''}.
+              {a.cover && <> {tr('Contact')} <button type="button" className="link" onClick={() => !to.some((r) => r.address?.toLowerCase() === a.cover) && setTo((x) => [...x, { address: a.cover, name: a.coverName || '' }])}>{a.coverName || a.cover}</button> {tr('instead')}.</>}</span>
+          </div>
+        ))}
         <input className="subject-input" placeholder={tr("Subject")} value={subject} onChange={(e) => setSubject(e.target.value)} aria-label={tr("Subject")} />
         {protect && (
           <div className="protect-panel">
@@ -236,7 +294,7 @@ function Composer({ c, me, prefs, sigData, identities, onClose, onSend, focusInd
         )}
         <div className="editor-wrap">
           {!ready && <div className="list-msg"><div className="spinner" /></div>}
-          <div ref={editor} className="editor" contentEditable suppressContentEditableWarning onInput={markDirty} aria-label={tr("Message body")} role="textbox" aria-multiline="true"
+          <div ref={editor} className="editor" contentEditable suppressContentEditableWarning onInput={() => { markDirty(); typing(); }} aria-label={tr("Message body")} role="textbox" aria-multiline="true"
             onPaste={(e) => {
               const imgs = [...e.clipboardData.files].filter((f) => f.type.startsWith('image/'));
               if (imgs.length) { e.preventDefault(); addFiles(imgs); return; }
@@ -259,6 +317,17 @@ function Composer({ c, me, prefs, sigData, identities, onClose, onSend, focusInd
           </div>
         )}
         {init.forwardUid && <div className="muted small c-note">{tr("Original attachments will be included.")}</div>}
+        {voice && <VoiceRecorder onAdd={addVoice} onClose={() => setVoice(false)} />}
+        {tplFill && (
+          <form className="tpl-fill" onSubmit={(e) => { e.preventDefault(); insertTemplate(tplFill.t, tplFill.values); setTplFill(null); }}>
+            <b>{tr('Fill in')} “{tplFill.t.name}”</b>
+            {Object.keys(tplFill.values).map((k, i) => (
+              <label key={k}>{fieldLabel(k)}<input autoFocus={i === 0} value={tplFill.values[k]} onChange={(e) => setTplFill((f) => ({ ...f, values: { ...f.values, [k]: e.target.value } }))} /></label>
+            ))}
+            <div className="actions"><button className="btn primary" type="submit">{tr('Insert')}</button><button className="btn" type="button" onClick={() => setTplFill(null)}>{tr('Cancel')}</button></div>
+            <div className="muted small">{tr('Anything left empty stays as a blank you can fill in later.')}</div>
+          </form>
+        )}
         <div className="composer-foot">
           <div className="split-send dd">
             <button className="btn primary" onClick={() => send()} title={tr("Send (Ctrl+Enter)")}><Icon name="send" size={16} />{' '}{tr("Send")}</button>
@@ -266,6 +335,14 @@ function Composer({ c, me, prefs, sigData, identities, onClose, onSend, focusInd
             {sendMenu && (
               <div className="menu up" onMouseLeave={() => { setSendMenu(false); setPickTime(false); }}>
                 <div className="menu-head"><b>{tr("Schedule send")}</b></div>
+                {firstTo && best?.email === firstTo && (
+                  <button className="best-time" onClick={() => { setSendMenu(false); send(best.at); }}>
+                    <Icon name="spark" size={15} /> <span><b>{tr('Best time for')} {best.name.split(' ')[0]}</b>
+                      <small>{best.usual ? `${tr('They usually email around')} ${new Date(2000, 0, 1, best.hour).toLocaleTimeString([], { hour: 'numeric' })}` : tr('A weekday morning, when most email gets read')}</small></span>
+                    <small className="muted right">{fmtWhen(best.at)}</small>
+                  </button>
+                )}
+                {firstTo && best?.email !== firstTo && <div className="menu-note">{tr('Working out the best time…')}</div>}
                 {presets('send').map(([l, d]) => (
                   <button key={l} onClick={() => { setSendMenu(false); send(d.getTime()); }}>{l}<small className="muted right">{fmtWhen(d)}</small></button>
                 ))}
@@ -282,39 +359,55 @@ function Composer({ c, me, prefs, sigData, identities, onClose, onSend, focusInd
             <button type="button" className="icon-btn" title={tr("Attach files")} onClick={() => fileInput.current.click()}><Icon name="clip" size={16} /></button>
             <button type="button" className="icon-btn" title={tr("Bold")} onMouseDown={(e) => { e.preventDefault(); exec('bold'); }}><Icon name="bold" size={16} /></button>
             <button type="button" className="icon-btn" title={tr("Italic")} onMouseDown={(e) => { e.preventDefault(); exec('italic'); }}><Icon name="italic" size={16} /></button>
-            <button type="button" className="icon-btn" title={tr("Underline")} onMouseDown={(e) => { e.preventDefault(); exec('underline'); }}><Icon name="underline" size={16} /></button>
-            <button type="button" className="icon-btn" title={tr("Bulleted list")} onMouseDown={(e) => { e.preventDefault(); exec('insertUnorderedList'); }}><Icon name="list" size={16} /></button>
             <button type="button" className="icon-btn" title={tr("Insert link")} onMouseDown={(e) => { e.preventDefault(); addLink(); }}><Icon name="link" size={16} /></button>
-            <button type="button" className={`icon-btn ${important ? 'on-red' : ''}`} title={tr("High importance")} onClick={() => setImportant((x) => !x)}>!</button>
+            <button type="button" className={`icon-btn ${voice ? 'on' : ''}`} title={tr("Voice message")} aria-label={tr("Voice message")} onClick={() => setVoice((x) => !x)}><Icon name="mic" size={16} /></button>
             <button type="button" className={`icon-btn ${protect ? 'on' : ''}`} title={tr("Protect with a password")} aria-label={tr("Protect with a password")} aria-pressed={protect} onClick={() => { setProtect((x) => !x); if (!protect && !sec.password) genPassword(); }}><Icon name="lock" size={16} /></button>
-            {prefs.requestReceipts !== 'never' && (
-              <div className="dd">
-                <button type="button" className={`icon-btn ${readR || delivR ? 'on' : ''}`} title={tr("Receipts")} aria-label={tr("Receipts")} aria-expanded={rcptMenu} onClick={() => setRcptMenu((x) => !x)}><Icon name="check" size={16} />{readR && <Icon name="check" size={16} />}</button>
-                {rcptMenu && (
-                  <div className="menu up rcpt-menu" onMouseLeave={() => setRcptMenu(false)}>
-                    <label className="check"><input type="checkbox" checked={delivR} onChange={(e) => setDelivR(e.target.checked)} /> {tr("Request a delivery receipt")}</label>
-                    <label className="check"><input type="checkbox" checked={readR} onChange={(e) => setReadR(e.target.checked)} /> {tr("Request a read receipt")}</label>
-                    <small className="muted">{tr("The recipient's mail app may ask them first, so a read receipt isn't guaranteed.")}</small>
-                  </div>
-                )}
-              </div>
-            )}
             <div className="dd">
-              <button type="button" className="icon-btn" title={tr("Insert a template")} onClick={openTemplates}>📄</button>
-              {tplMenu && (
-                <div className="menu up" onMouseLeave={() => setTplMenu(false)}>
-                  <div className="menu-head"><b>{tr("Templates")}</b></div>
-                  {!templates && <div className="menu-note">{tr("Loading…")}</div>}
-                  {templates?.company?.length > 0 && <div className="menu-note">{tr("Company")}</div>}
-                  {templates?.company?.map((t) => <button key={`c${t.id}`} onClick={() => useTemplate(t)}><span className="ic-space" /> {t.name}</button>)}
-                  {templates?.company?.length > 0 && templates?.personal?.length > 0 && <div className="menu-note">{tr("Mine")}</div>}
-                  {templates?.personal?.map((t) => <button key={t.id} onClick={() => useTemplate(t)}><span className="ic-space" /> {t.name}</button>)}
-                  {templates && !templates.personal.length && !templates.company.length && <div className="menu-note">{tr("Create templates in Settings → Templates.")}</div>}
+              <button type="button" className={`icon-btn ${important || readR || delivR ? 'on' : ''}`} title={tr("More options")} aria-label={tr("More options")} aria-expanded={moreMenu} onClick={() => setMoreMenu((x) => !x)}><Icon name="more" size={16} /></button>
+              {moreMenu && (
+                <div className="menu up more-menu" onMouseLeave={() => setMoreMenu(false)}>
+                  <button onMouseDown={(e) => { e.preventDefault(); exec('underline'); }}><Icon name="underline" size={15} /> {tr("Underline")}</button>
+                  <button onMouseDown={(e) => { e.preventDefault(); exec('insertUnorderedList'); }}><Icon name="list" size={15} /> {tr("Bulleted list")}</button>
+                  <button onMouseDown={(e) => { e.preventDefault(); exec('insertOrderedList'); }}><span className="ic-num">1.</span> {tr("Numbered list")}</button>
+                  <div className="menu-sep" />
+                  <button onClick={() => setImportant((x) => !x)}><Icon name={important ? 'check' : 'alert'} size={15} /> {tr("Important")}</button>
+                  {prefs.requestReceipts !== 'never' && <>
+                    <button onClick={() => setDelivR((x) => !x)}><Icon name={delivR ? 'check' : 'send'} size={15} /> {tr("Delivery receipt")}</button>
+                    <button onClick={() => setReadR((x) => !x)}><Icon name={readR ? 'check' : 'mail'} size={15} /> {tr("Read receipt")}</button>
+                    <button onClick={() => setRemindNoReply((x) => !x)}><Icon name={remindNoReply ? 'check' : 'clock'} size={15} /> {tr("Remind me if no reply (3 days)")}</button>
+                    <div className="menu-sep" />
+                    <div className="menu-note">{tr('Disappearing email')}</div>
+                    {[['', 'Off'], ['1h', 'Disappears after 1 hour'], ['24h', 'Disappears after 1 day'], ['7d', 'Disappears after 1 week'], ['read', 'Disappears after reading']].map(([k, l]) => (
+                      <button key={k || 'off'} onClick={() => { setSelfDestruct(k); if (k) setProtect(false); }}><Icon name={selfDestruct === k ? 'check' : k ? 'clock' : 'close'} size={15} /> {tr(l)}</button>
+                    ))}
+                  </>}
+                  <div className="menu-sep" />
+                  <button onClick={() => { setMoreMenu(false); openTemplates(); }}><Icon name="copy" size={15} /> {tr("Template")}…</button>
+                  <button onClick={() => { setMoreMenu(false); setSigMenu(true); }}><Icon name="pen" size={15} /> {tr("Signature")}…</button>
                 </div>
               )}
             </div>
             <div className="dd">
-              <button type="button" className="icon-btn" title={tr("Signature")} onClick={() => setSigMenu((x) => !x)}><Icon name="pen" size={16} /></button>
+              {tplMenu && (() => {
+                const match = (t) => !tplQ || `${t.name} ${t.subject} ${t.category || ''}`.toLowerCase().includes(tplQ.toLowerCase());
+                const comp = (templates?.company || []).filter(match); const mine = (templates?.personal || []).filter(match);
+                const ready = GALLERY.filter(match);
+                return (
+                  <div className="menu up tpl-menu" onMouseLeave={() => setTplMenu(false)}>
+                    <div className="menu-head"><b>{tr("Templates")}</b></div>
+                    <input type="search" autoFocus placeholder={tr('Search templates')} value={tplQ} onChange={(e) => setTplQ(e.target.value)} aria-label={tr('Search templates')} />
+                    {!templates && <div className="menu-note">{tr("Loading…")}</div>}
+                    {comp.length > 0 && <div className="menu-note">{tr("Company")}</div>}
+                    {comp.map((t) => <button key={`c${t.id}`} onClick={() => useTemplate(t)}><Icon name="copy" size={15} /> {t.name}</button>)}
+                    {mine.length > 0 && <div className="menu-note">{tr("Mine")}</div>}
+                    {mine.map((t) => <button key={t.id} onClick={() => useTemplate(t)}><Icon name="copy" size={15} /> {t.name}</button>)}
+                    {ready.length > 0 && <div className="menu-note">{tr("Ready-made")}</div>}
+                    {ready.map((t) => <button key={t.id} onClick={() => useTemplate(t)}><Icon name="copy" size={15} /> {t.name}</button>)}
+                  </div>
+                );
+              })()}
+            </div>
+            <div className="dd">
               {sigMenu && (
                 <div className="menu up" onMouseLeave={() => setSigMenu(false)}>
                   <div className="menu-head"><b>{tr("Signature")}</b></div>
@@ -343,7 +436,7 @@ function toForm(p) {
   fd.append('to', list(p.to)); fd.append('cc', list(p.cc)); fd.append('bcc', list(p.bcc));
   fd.append('subject', p.subject);
   fd.append('html', p.html); fd.append('text', p.text);
-  for (const k of ['inReplyTo', 'references', 'replyFolder', 'replyUid', 'forwardFolder', 'forwardUid', 'draftUid', 'priority', 'fromName', 'fromAddress', 'sendAt', 'readReceipt', 'deliveryReceipt', 'protect', 'securePassword', 'secureHint', 'secureDays']) {
+  for (const k of ['inReplyTo', 'references', 'replyFolder', 'replyUid', 'forwardFolder', 'forwardUid', 'draftUid', 'priority', 'fromName', 'fromAddress', 'sendAt', 'readReceipt', 'deliveryReceipt', 'protect', 'securePassword', 'secureHint', 'secureDays', 'selfDestruct']) {
     if (p[k]) fd.append(k, p[k]);
   }
   for (const f of p.files) fd.append('attachments', f, f.name);
@@ -390,6 +483,21 @@ export default function ComposeManager({ composers, setComposers, me, prefs, sig
     return () => window.removeEventListener('online', flush);
   }, []);
 
+  // After a send: "remind me if no reply", and smart reminders for promises made in the email
+  const afterSend = (payload, r) => {
+    const who = [...(payload.to || []), ...(payload.cc || [])].map((a) => a.name || a.address).join(', ');
+    if (payload.remindDays && r?.messageId) {
+      const at = new Date(); at.setDate(at.getDate() + payload.remindDays); at.setHours(9, 0, 0, 0);
+      api.post('/api/followups', { messageId: r.messageId, subject: payload.subject, recipients: who, remindAt: at.getTime() }).catch(() => {});
+    }
+    const promise = findPromise(payload.text);
+    if (promise) {
+      setTimeout(() => toast(`${tr('You promised:')} “${promise.text}”. ${tr('Remind you')} ${new Date(promise.due).toLocaleString([], { weekday: 'short', hour: 'numeric', minute: '2-digit' })}?`, {
+        duration: 12000, action: tr('Remind me'),
+        onAction: () => api.post('/api/tasks', { title: promise.text.slice(0, 280), details: `${tr('To')} ${who}: ${payload.subject || ''}`, dueAt: promise.due, remindAt: promise.due - 3600e3 }).then(() => toast(tr('Reminder set'))).catch((e) => toast(e.message, { error: true })),
+      }), 1200);
+    }
+  };
   const onSend = (c, payload) => {
     remove(c.id);
     // Sending from another signed-in account: references to this mailbox's folders don't apply there
@@ -401,6 +509,7 @@ export default function ComposeManager({ composers, setComposers, me, prefs, sig
       try {
         const r = await api.form('/api/send', form, payload.asMailbox);
         onSent();
+        if (r?.secure?.selfDestruct) { toast(tr('Disappearing email sent. They get a link; it’s gone when the time is up.')); afterSend(payload, r); return; }
         if (r?.secure) {
           if (payload.pwFollow === 'manual') { setShare({ ...r.secure, password: payload.securePassword }); return; }
           await api.post(`/api/secure/${r.secure.id}/send-password`, { password: payload.securePassword, delayMinutes: payload.pwFollow === 'now' ? 0 : 5 })
@@ -409,11 +518,13 @@ export default function ComposeManager({ composers, setComposers, me, prefs, sig
           return;
         }
         toast(tr("Message sent"));
+        afterSend(payload, r);
       } catch (e) {
         if (isOffline(e) && offlineAllowed() && !payload.protect) { // protected emails are never stored on the device (they hold the password) // no connection: keep it on this device and send it when we're back online
           try { await queue(form, payload.asMailbox, payload.subject || '(no subject)'); toast(tr("You’re offline. Saved to your Outbox; it will send when you reconnect.")); return; } catch { /* fall through */ }
         }
-        toast(`Couldn't send: ${e.message}`, { error: true, duration: 8000 });
+        if (e.code === 'monthly_cap') toast(e.message, { error: true, duration: 15000, action: tr('Verify now'), onAction: () => window.dispatchEvent(new CustomEvent('roammail:settings', { detail: 'security' })) });
+        else toast(`Couldn't send: ${e.message}`, { error: true, duration: 8000 });
         setComposers((cs) => [...cs, { id: Date.now(), initial: { ...c.initial, ...payload, html: payload.html, draftUid: payload.draftUid } }]);
       }
     };

@@ -26,7 +26,8 @@ export default function RecipientInput({ label, value, onChange, autoFocus, righ
     }, 150);
   }, [text, value]);
 
-  const add = (list) => {
+  const add = (picked) => {
+    const list = picked.flatMap((a) => (a.group ? a.members : [a])); // a contact group adds everyone in it
     const fresh = list.filter((a) => a.address && !value.some((v) => v.address.toLowerCase() === a.address.toLowerCase()));
     if (fresh.length) onChange([...value, ...fresh]);
     setText(''); setSugg([]);
@@ -64,8 +65,8 @@ export default function RecipientInput({ label, value, onChange, autoFocus, righ
         <div className="sugg">
           {sugg.map((c, i) => (
             <button type="button" key={c.address} className={i === hi ? 'hi' : ''} onMouseDown={(e) => { e.preventDefault(); add([c]); }}>
-              <span className="avatar" style={{ background: avatarColor(c.address) }}>{initials(c)}</span>
-              <span><b>{c.name || c.address}</b>{c.name && <small>{c.address}</small>}</span>
+              {c.group ? <span className="avatar group-av">👥</span> : <span className="avatar" style={{ background: avatarColor(c.address) }}>{initials(c)}</span>}
+              <span><b>{c.name || c.address}</b>{c.group ? <small>{c.members.length} {c.members.length === 1 ? 'person' : 'people'}: {c.members.slice(0, 3).map((m) => m.name || m.address).join(', ')}{c.members.length > 3 ? '…' : ''}</small> : c.name && <small>{c.address}</small>}</span>
             </button>
           ))}
         </div>

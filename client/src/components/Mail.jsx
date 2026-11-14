@@ -1,12 +1,15 @@
 import { createPortal } from 'react-dom';
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { api, mailUrl } from '../api.js';
-import { messageKey, parseMessageKey, sectionForFolder, folderForSection, loginHref } from '../nav.js';
+import { listKey, cachedList, saveList, warmList, prefetch } from '../fastcache.js';
+import { messageKey, parseMessageKey, sectionForFolder, folderForSection, loginHref, onAdminHost, appHref } from '../nav.js';
 import { Icon } from '../icons.jsx';
 import { usePrefs, catKeyword } from '../prefs.js';
 import { useToast } from './Toast.jsx';
 import Sidebar from './Sidebar.jsx';
 import MessageList from './MessageList.jsx';
+import HelpPanel from './HelpPanel.jsx';
+import { unseenCount } from '../whatsnew.js';
 import ReadingPane from './ReadingPane.jsx';
 import Ribbon from './Ribbon.jsx';
 import ComposeManager, { replyDraft } from './Compose.jsx';
@@ -21,12 +24,29 @@ import ScheduledList from './ScheduledList.jsx';
 import SnoozeMenu from './SnoozeMenu.jsx';
 import QuarantineList from './QuarantineList.jsx';
 import SubscriptionsList from './SubscriptionsList.jsx';
+import ScreenerList from './ScreenerList.jsx';
+import ContactCard from './ContactCard.jsx';
+import CatchUp from './CatchUp.jsx';
+import { sayNewMail } from '../voice.js';
+import { installMode as getInstallMode, onInstallChange, promptInstall, isInstalled } from '../install.js';
+import { pushState, enablePush } from '../push.js';
 import AliasesList from './AliasesList.jsx';
+import CommandBar from './CommandBar.jsx';
+import { TABS as SETTINGS_TABS } from './Settings.jsx';
 import { t } from '../i18n.js';
 const Calendar = lazy(() => import('./calendar/Calendar.jsx'));
 const Contacts = lazy(() => import('./contacts/Contacts.jsx'));
 
-export default function Mail({ me, route, refreshMe, theme, setTheme, onLogout }) {
+/** "mailto:ann@x.com,bob@y.com?cc=c@z.com&subject=Hi&body=Hello" -> a new email ready to write */
+function parseMailto(m) {
+  if (!m || !/^mailto:/i.test(m)) return {};
+  const [addr, query = ''] = m.slice(7).split('?');
+  const q = new URLSearchParams(query);
+  const list = (v) => decodeURIComponent(v || '').split(',').map((a) => a.trim()).filter((a) => /^[^\s@<>"]+@[^\s@<>"]+$/.test(a)).slice(0, 50).map((address) => ({ name: '', address }));
+  return { to: list(addr), cc: list(q.get('cc')), bcc: list(q.get('bcc')), subject: (q.get('subject') || '').slice(0, 300), prefillText: (q.get('body') || '').slice(0, 5000) };
+}
+
+export default function Mail({ me, route, refreshMe, theme, setTheme, themePref = 'auto', onLogout }) {
   const toast = useToast();
   const [prefs, setPrefs] = usePrefs(me.email);
   const [view, setView] = useState(() => {
@@ -39,19 +59,93 @@ export default function Mail({ me, route, refreshMe, theme, setTheme, onLogout }
   const mailbox = route.id; // the mailbox ID in the URL
   const [sharedBoxes, setSharedBoxes] = useState([]);
   useEffect(() => { api.get('/api/shared-mailboxes').then(setSharedBoxes).catch(() => {}); }, []);
+  const isTeamBox = sharedBoxes.some((b) => b.mailboxId === route.id && !b.archive); // a shared mailbox the team works from
+  const [teamInfo, setTeamInfo] = useState(null); // who each email in the list is assigned to
+  // Notifications: in the installed app (and on phones), ask once with a clear button. iPhone only allows this
+  // from a tap inside the Home Screen app, which is why it's a button and not an automatic prompt.
+  const [askPush, setAskPush] = useState(false);
+  useEffect(() => {
+    if (me.delegated || localStorage.getItem('pushAsked') === '1') return;
+    if (!isInstalled() && !matchMedia('(max-width: 899px)').matches) return;
+    pushState().then((st) => setAskPush(st === 'off')).catch(() => {});
+  }, [me.email]);
+  const turnOnPush = async () => {
+    try { await enablePush(); localStorage.setItem('pushAsked', '1'); setAskPush(false); toast(t('Notifications are on. You’ll hear about new mail even when Roammail is closed.')); }
+    catch (e) { toast(e.message, { error: true }); }
+  };
+  // Right-click on an email: the common actions, plus "Make a rule"
+  const [rowMenu, setRowMenu] = useState(null);
+  useEffect(() => { const on = (e) => setRowMenu(e.detail); window.addEventListener('roammail:rowmenu', on); return () => window.removeEventListener('roammail:rowmenu', on); }, []);
+  useEffect(() => { if (!rowMenu) return undefined; const close = () => setRowMenu(null); window.addEventListener('click', close); window.addEventListener('scroll', close, true); window.addEventListener('keydown', close); return () => { window.removeEventListener('click', close); window.removeEventListener('scroll', close, true); window.removeEventListener('keydown', close); }; }, [rowMenu]);
+  const makeRule = (m) => {
+    const f = m?.from?.[0] || {};
+    sessionStorage.setItem('ruleSeed', JSON.stringify({ from: f.address || '', name: f.name || f.address || '', subject: m?.subject || '' }));
+    setShowSettings('rules');
+  };
+  useEffect(() => { const on = (e) => makeRule(e.detail); window.addEventListener('roammail:makerule', on); return () => window.removeEventListener('roammail:makerule', on); }, []);
+  // Read later: a calm "Read later" folder for long emails and newsletters
+  const readLater = async (uid) => {
+    const name = 'Read later';
+    if (!folders.some((f) => f.path === name)) { await api.post('/api/folders', { path: name }).catch(() => {}); await loadFolders(); }
+    act.move(name, uid, 'saved to Read later');
+  };
+  const readLaterRef = useRef(readLater); readLaterRef.current = readLater;
+  useEffect(() => { const on = (e) => readLaterRef.current(e.detail?.uid); window.addEventListener('roammail:readlater', on); return () => window.removeEventListener('roammail:readlater', on); }, []);
+  // Report scam / phishing: to Junk, and (if it came from a Roammail address) reported to us
+  const reportScam = async (m) => {
+    if (!m?.uid || !confirm(t('Report this email as a scam or phishing? It will move to Junk.'))) return;
+    try {
+      const r = await api.post('/api/report-scam', { folder: m.folder || listFolder, uid: m.uid });
+      setList((l) => ({ ...l, messages: l.messages.filter((x) => x.uid !== m.uid) })); setActive(null); loadFolders();
+      toast(r.reported ? t('Thanks. We moved it to Junk and our team will look into the sender.') : t('Moved to Junk. Thanks for reporting it.'));
+    } catch (e) { toast(e.message, { error: true }); }
+  };
+  const reportRef = useRef(reportScam); reportRef.current = reportScam;
+  useEffect(() => { const on = (e) => reportRef.current(e.detail); window.addEventListener('roammail:reportscam', on); return () => window.removeEventListener('roammail:reportscam', on); }, []);
+  // Contact cards: click any name in an email
+  const [card, setCard] = useState(null);
+  useEffect(() => { const on = (e) => setCard(e.detail); window.addEventListener('roammail:card', on); return () => window.removeEventListener('roammail:card', on); }, []);
+  // Install the app (PWA): the browser's prompt, or how-to on iPhone
+  const [installMode, setInstallMode] = useState(getInstallMode());
+  const [iosInstall, setIosInstall] = useState(false);
+  useEffect(() => onInstallChange(() => setInstallMode(getInstallMode())), []);
+  // Screener: how many new people are waiting (badge on the rail; refreshed with the mail)
+  const [screenerCount, setScreenerCount] = useState(0);
+  const railFolder = folder === '@subscriptions' || folder === '@screener';
+  // Auto-tidy (if turned on): runs on the server when the inbox opens, at most every few hours
+  useEffect(() => { if (!me.delegated) api.post('/api/catchup/autotidy', {}).then((r) => { if (r.done && (r.done.newsletters || r.done.updates || r.done.old)) loadFolders(); }).catch(() => {}); }, [me.email]);
+  // Out of office: a bar while it's on, so it's never left on by mistake
+  const [ooo, setOoo] = useState(null);
+  useEffect(() => {
+    if (me.delegated) return;
+    api.get('/api/vacation').then(setOoo).catch(() => {});
+    const on = (e) => setOoo(e.detail); window.addEventListener('roammail:ooo', on); return () => window.removeEventListener('roammail:ooo', on);
+  }, [me.email]);
+  const oooOff = async () => { try { const r = await api.put('/api/vacation', { ...ooo, enabled: false }); setOoo(r); } catch {} };
   // Switching mailbox = changing the ID in the path (a full page load, so nothing from the other mailbox lingers)
   const switchMailbox = (id) => {
     const m = /^(\d{8}|\d{6}-\d{3}-[A-Z]{2})$/.exec(String(id || '')); // only real mailbox IDs, never another site
     if (m && m[1] !== route.id) location.assign(`/${encodeURIComponent(m[1])}/inbox`);
   };
   const [filter, setFilter] = useState('');
+  const [inboxTab, setInboxTab] = useState('primary'); // smart inbox tabs
+  const tabsOn = prefs.inboxTabs !== false;
   const [search, setSearch] = useState(null); // active query string
   const [searchInput, setSearchInput] = useState('');
   const [list, setList] = useState({ messages: [], total: 0, page: 0, loading: true, folder: 'INBOX' });
+  useEffect(() => { if (!me.delegated && folder === 'INBOX') api.get('/api/screener').then((d) => setScreenerCount(d.enabled ? d.waiting.length : 0)).catch(() => {}); }, [folder, list.total, me.delegated]);
   const [selected, setSelected] = useState(new Set());
   const [active, setActive] = useState(null); // uid
   const [composers, setComposers] = useState([]);
-  const [showSettings, setShowSettings] = useState(false);
+  const [helpOpen, setHelpOpen] = useState(null); // 'help' | 'new' | null
+  const [newCount, setNewCount] = useState(unseenCount);
+  const [showSettings, setShowSettings] = useState(false); // true, or the name of a settings page to open
+  const [palette, setPalette] = useState(false);
+  useEffect(() => {
+    const onCmdK = (e) => { if ((e.ctrlKey || e.metaKey) && !e.shiftKey && !e.altKey && e.key.toLowerCase() === 'k') { e.preventDefault(); setPalette((x) => !x); } };
+    window.addEventListener('keydown', onCmdK);
+    return () => window.removeEventListener('keydown', onCmdK);
+  }, []);
   const [showHelp, setShowHelp] = useState(false);
   // Sidebar (item 11): 240 px by default, drag to 200-320 px, collapses to a 64 px rail ( [ key ),
   // collapses automatically under 1280 px and becomes a slide-in drawer under 900 px.
@@ -77,6 +171,9 @@ export default function Mail({ me, route, refreshMe, theme, setTheme, onLogout }
   const [importMsg] = useState(() => new URLSearchParams(location.search).get('import')); // back from Microsoft sign-in
   const [ssoMsg] = useState(() => new URLSearchParams(location.search).get('sso')); // back from linking a work account
   const [premiumMsg] = useState(() => new URLSearchParams(location.search).get('premium')); // back from Premium checkout
+  const [idvBack] = useState(() => new URLSearchParams(location.search).get('idv')); // back from the ID check
+  useEffect(() => { if (idvBack) setShowSettings('security'); }, []);
+  useEffect(() => { const on = (e) => setShowSettings(e.detail || true); window.addEventListener('roammail:settings', on); return () => window.removeEventListener('roammail:settings', on); }, []);
   // Item 9: tasks / notes / follow-ups panel
   const [panel, setPanel] = useState(() => { const p = new URLSearchParams(location.search).get('panel'); return ['tasks', 'notes', 'followups'].includes(p) ? p : null; });
   const [panelTab, setPanelTab] = useState(() => new URLSearchParams(location.search).get('panel') || 'tasks');
@@ -103,6 +200,16 @@ export default function Mail({ me, route, refreshMe, theme, setTheme, onLogout }
   const isAdmin = me.superAdmin || me.orgs?.some((o) => o.role === 'admin');
   const inOrg = me.orgs?.length > 0;
   const listFolder = list.folder;
+  useEffect(() => {
+    if (!isTeamBox || !list.messages?.length) { setTeamInfo(null); return undefined; }
+    const ids = list.messages.map((m) => String(m.messageId || '').replace(/^<|>$/g, '')).filter(Boolean).join(',');
+    const get = () => api.get('/api/team', { ids }).then(setTeamInfo).catch(() => {});
+    get();
+    const on = () => get();
+    window.addEventListener('roammail:team', on);
+    const iv = setInterval(get, 30000);
+    return () => { window.removeEventListener('roammail:team', on); clearInterval(iv); };
+  }, [isTeamBox, list.messages]);
   const msgs = list.messages;
   const activeMsg = msgs.find((m) => m.uid === active) || null;
   const special = (use) => folders.find((f) => f.specialUse === use)?.path;
@@ -112,24 +219,33 @@ export default function Mail({ me, route, refreshMe, theme, setTheme, onLogout }
   // ---------- loading ----------
   const loadFolders = useCallback(() => api.folders().then(setFolders).catch(() => {}), []);
 
+  const listKeyRef = useRef(null);
+  // keep the instant copy in step with what's on screen (archived, read, deleted ...)
+  useEffect(() => { if (listKeyRef.current && !list.loading && !list.page && list.messages && listKeyRef.current.split('|')[1] === list.folder) saveList(listKeyRef.current, { messages: list.messages, total: list.total, folder: list.folder, tabs: list.tabs || null }); }, [list]);
   const load = useCallback(async ({ page = 0, append = false, quiet = false } = {}) => {
     const id = ++reqId.current;
-    if (!quiet) setList((l) => ({ ...l, loading: true, ...(append ? {} : { messages: page ? l.messages : [] }) }));
+    const tab = folder === 'INBOX' && tabsOn ? inboxTab : null;
+    const key = !page && !append && !search && folder !== '@all' ? listKey(folder, filter, tab) : null;
+    listKeyRef.current = key;
+    const have = key && cachedList(key);
+    if (have) setList(() => ({ ...have, page: 0, loading: false, folder: have.folder || folder })); // show the last copy at once
+    else if (!quiet) setList((l) => ({ ...l, loading: true, ...(append ? {} : { messages: page ? l.messages : [] }) }));
     try {
       const r = folder === '@all' && !search
         ? await api.get('/api/all-inboxes').then((x) => ({ ...x, messages: x.messages.map((m) => ({ ...m, origUid: m.uid, uid: `${m.mailboxId}:${m.uid}` })) }))
-        : await api.messages(folder, page, filter);
+        : await api.messages(folder, page, filter, folder === 'INBOX' && tabsOn ? inboxTab : null);
       if (id !== reqId.current) return;
       setList((l) => ({
         messages: append ? [...l.messages, ...r.messages.filter((m) => !l.messages.some((x) => x.uid === m.uid))] : r.messages,
-        total: r.total, page, loading: false, folder: r.folder || folder,
+        total: r.total, page, loading: false, folder: r.folder || folder, tabs: r.tabs || null,
       }));
+      if (key) { saveList(key, { messages: r.messages, total: r.total, folder: r.folder || folder, tabs: r.tabs || null }); warmList(r.folder || folder, r.messages, prefsRef.current?.conversation); }
     } catch (e) {
       if (id !== reqId.current) return;
       setList((l) => ({ ...l, loading: false }));
       toast(e.message, { error: true });
     }
-  }, [folder, filter, search, toast]);
+  }, [folder, filter, search, toast, inboxTab, tabsOn]);
 
   useEffect(() => { loadFolders(); }, [loadFolders, mailbox]);
 
@@ -176,6 +292,8 @@ export default function Mail({ me, route, refreshMe, theme, setTheme, onLogout }
   // ---------- live updates ----------
   const loadRef = useRef(load);
   loadRef.current = load;
+  const prefsRef = useRef(prefs);
+  prefsRef.current = prefs;
   const folderRef = useRef(folder);
   folderRef.current = folder;
   useEffect(() => {
@@ -184,6 +302,7 @@ export default function Mail({ me, route, refreshMe, theme, setTheme, onLogout }
       es = new EventSource(mailUrl('/api/events'));
       es.addEventListener('new', (e) => {
         const d = JSON.parse(e.data);
+        if (prefsRef.current.voiceAlert && d.messages?.length) sayNewMail({ phrase: prefsRef.current.voicePhrase, voice: prefsRef.current.voiceName, style: prefsRef.current.voiceStyle || 'voice' });
         loadFolders();
         if (folderRef.current === 'INBOX') loadRef.current({ quiet: true });
         const m = d.messages?.[0];
@@ -192,17 +311,35 @@ export default function Mail({ me, route, refreshMe, theme, setTheme, onLogout }
         }
       });
       es.addEventListener('changed', () => { loadFolders(); if (folderRef.current === 'INBOX') loadRef.current({ quiet: true }); });
-      es.onerror = () => { es.close(); retry = setTimeout(connect, 15000); };
+      es.addEventListener('ready', () => { fails = 0; });
+      // iMessage-style status from other Roammail users
+      es.addEventListener('status', (e) => window.dispatchEvent(new CustomEvent('roammail:status', { detail: JSON.parse(e.data) })));
+      es.addEventListener('typing', (e) => window.dispatchEvent(new CustomEvent('roammail:typing', { detail: JSON.parse(e.data) })));
+      es.addEventListener('team', (e) => window.dispatchEvent(new CustomEvent('roammail:team', { detail: JSON.parse(e.data) })));
+      // Reconnect quickly (2s, 4s, 8s… up to 30s) so new mail keeps arriving after a network blip
+      es.onerror = () => { es.close(); clearTimeout(retry); retry = setTimeout(connect, Math.min(30000, 2000 * 2 ** fails++)); };
     };
+    let fails = 0;
     connect();
+    // Back on the app (phone unlocked, tab focused, network back): reconnect and check for mail straight away
+    let lastWake = 0;
+    const wake = () => {
+      if (document.hidden || Date.now() - lastWake < 10000) return;
+      lastWake = Date.now();
+      if (!es || es.readyState === 2) { clearTimeout(retry); fails = 0; connect(); }
+      loadFolders(); if (folderRef.current === 'INBOX') loadRef.current({ quiet: true });
+    };
+    document.addEventListener('visibilitychange', wake); window.addEventListener('online', wake); window.addEventListener('focus', wake);
     if ('Notification' in window && Notification.permission === 'default') Notification.requestPermission().catch(() => {});
-    return () => { es?.close(); clearTimeout(retry); };
+    return () => { es?.close(); clearTimeout(retry); document.removeEventListener('visibilitychange', wake); window.removeEventListener('online', wake); window.removeEventListener('focus', wake); };
   }, [loadFolders, prefs.notifications, mailbox]);
 
   // Page title with unread count
   useEffect(() => {
     const inbox = folders.find((f) => f.specialUse === '\\Inbox');
-    document.title = `${inbox?.unread ? `(${inbox.unread}) ` : ''}${view === 'admin' ? 'Admin' : folder === '@scheduled' ? 'Scheduled' : folder === '@subscriptions' ? 'Subscriptions' : folder === '@aliases' ? 'Aliases' : folder === '@quarantine' ? 'Spam quarantine' : folder === '@all' ? 'All inboxes' : folderLabel(currentFolderObj || { name: 'Inbox' })} - ${me.email}`;
+    document.title = `${inbox?.unread ? `(${inbox.unread}) ` : ''}${view === 'admin' ? 'Admin' : folder === '@scheduled' ? 'Scheduled' : folder === '@subscriptions' ? 'Subscriptions' : folder === '@screener' ? 'Screener' : folder === '@catchup' ? 'Catch up' : folder === '@aliases' ? 'Aliases' : folder === '@quarantine' ? 'Spam quarantine' : folder === '@all' ? 'All inboxes' : folderLabel(currentFolderObj || { name: 'Inbox' })} - ${me.email}`;
+    // Unread count on the app icon (installed app on Windows, Mac, Android, iPhone)
+    if ('setAppBadge' in navigator) (inbox?.unread ? navigator.setAppBadge(inbox.unread) : navigator.clearAppBadge()).catch(() => {});
   }, [folders, currentFolderObj, me.email, view]);
 
   // ---------- helpers ----------
@@ -312,12 +449,43 @@ export default function Mail({ me, route, refreshMe, theme, setTheme, onLogout }
   };
 
   // ---------- compose ----------
+  // Follow-up nudge: reply to my own unanswered email, to the same people, quoting it
+  const bump = async (n) => {
+    try {
+      const m = await api.get(`/api/message?folder=${encodeURIComponent(n.folder)}&uid=${n.uid}`);
+      compose({ ...replyDraft({ ...m, folder: n.folder, uid: n.uid }, 'all', me.email), prefillText: t('Hi, just following up on this. Any thoughts?') });
+      api.post('/api/nudges/dismiss', { messageId: n.messageId }).then(() => window.dispatchEvent(new Event('roammail:nudges'))).catch(() => {});
+    } catch (e) { toast(e.message, { error: true }); }
+  };
   const compose = (initial = {}) => setComposers((c) => {
     if (c.length >= 3) { toast(t("Close a draft before opening another")); return c; }
     return [...c, { id: Date.now() + Math.random(), initial }];
   });
   // Home-screen shortcut "New mail" (/app?compose=1)
-  useEffect(() => { if (new URLSearchParams(location.search).get('compose') === '1') { compose(); history.replaceState(null, '', location.pathname); } }, []);
+  // Also "mailto:" links from the desktop app or the browser (/app?compose=1&mailto=mailto:…)
+  // Shared to Roammail from another app (share sheet): a new email with the link, text and files
+  useEffect(() => {
+    if (new URLSearchParams(location.search).get('share') !== '1' || !('caches' in window)) return;
+    history.replaceState(null, '', location.pathname);
+    (async () => {
+      const c = await caches.open('share-v1');
+      const meta = await (await c.match('/share/meta'))?.json().catch(() => null);
+      if (!meta) { compose({}); return; }
+      const files = [];
+      for (const f of meta.files || []) {
+        const r = await c.match(`/share/file/${f.i}`);
+        if (r) files.push(new File([await r.blob()], f.name || `file-${f.i + 1}`, { type: f.type || 'application/octet-stream' }));
+      }
+      await caches.delete('share-v1');
+      compose({ subject: meta.title || (files.length === 1 ? files[0].name : ''), prefillText: [meta.text, meta.url].filter(Boolean).join('\n'), files });
+    })().catch(() => compose({}));
+  }, []);
+  useEffect(() => {
+    const p = new URLSearchParams(location.search);
+    if (p.get('compose') !== '1') return;
+    compose(parseMailto(p.get('mailto')));
+    history.replaceState(null, '', location.pathname);
+  }, []);
   const addTaskFrom = (m) => {
     if (!m) { setPanel('tasks'); setPanelTab('tasks'); return; }
     setTaskSeed({ title: m.subject && m.subject !== '(no subject)' ? m.subject : '', message: { key: messageKey(m.folder || listFolder, m.uid), subject: m.subject, mailboxId: route.id } });
@@ -348,6 +516,21 @@ export default function Mail({ me, route, refreshMe, theme, setTheme, onLogout }
 
   // ---------- search ----------
   const runSearch = (q) => { setSearch(q.trim() || null); setSearchInput(q); };
+  // Instant search: results as you type (after a short pause), and matching people on top
+  const typeTimer = useRef(null);
+  const [people, setPeople] = useState([]);
+  const [peopleOpen, setPeopleOpen] = useState(false);
+  const onSearchType = (v) => {
+    setSearchInput(v); setPeopleOpen(true);
+    clearTimeout(typeTimer.current);
+    typeTimer.current = setTimeout(() => {
+      const q = v.trim();
+      if (!q) { setSearch(null); setPeople([]); return; }
+      if (q.length < 2) return;
+      setSearch(q);
+      if (!/[:]/.test(q)) api.contacts(q).then((r) => setPeople((r || []).filter((x) => !x.group).slice(0, 4))).catch(() => setPeople([])); else setPeople([]);
+    }, 300);
+  };
   const clearSearch = () => { setSearch(null); setSearchInput(''); };
 
   // ---------- keyboard shortcuts (Gmail + Outlook) ----------
@@ -399,11 +582,22 @@ export default function Mail({ me, route, refreshMe, theme, setTheme, onLogout }
     <div className={`app density-${prefs.density}`}>
       <header className="topbar">
         <button className="icon-btn on-dark" onClick={toggleNav} aria-label={t("Toggle navigation")} title={t("Collapse or expand navigation ([)")} aria-expanded={navMode === 'full' || (navMode === 'drawer' && navPeek)}><Icon name="menu" /></button>
-        <div className="brand" onClick={() => { setView('mail'); setFolder('INBOX'); clearSearch(); }}><img src="/roammail-mark-white.png" alt="" /> <span>{t("Roammail")}</span></div>
+        <div className="brand" onClick={() => { setView('mail'); setFolder('INBOX'); clearSearch(); }}><img className="logo-light" src="/assets/roammail-symbol.png" alt="" /><img className="logo-dark" src="/roammail-mark-white.png" alt="" /> <span>{t("Roammail")}</span></div>
         {view === 'mail' ? (
           <form className="search" onSubmit={(e) => { e.preventDefault(); runSearch(searchInput); }}>
             <Icon name="search" />
-            <input ref={searchRef} value={searchInput} onChange={(e) => setSearchInput(e.target.value)} placeholder={t("Search mail")} aria-label={t("Search mail")} />
+            <input ref={searchRef} value={searchInput} onChange={(e) => onSearchType(e.target.value)} onFocus={() => setPeopleOpen(true)} onBlur={() => setTimeout(() => setPeopleOpen(false), 200)} placeholder={t("Search mail")} aria-label={t("Search mail")} />
+            {peopleOpen && people.length > 0 && searchInput.trim().length >= 2 && (
+              <div className="menu search-people" role="listbox" aria-label={t('People')}>
+                <div className="menu-note">{t('People')}</div>
+                {people.map((p) => (
+                  <button type="button" key={p.address} onMouseDown={(e) => { e.preventDefault(); setPeopleOpen(false); window.dispatchEvent(new CustomEvent('roammail:card', { detail: { person: p, anchor: searchRef.current } })); }}>
+                    <span className="avatar xs" style={{ background: avatarColor(p.address) }}>{initials(p)}</span><span><b>{p.name || p.address}</b>{p.name && <small className="muted"> {p.address}</small>}</span>
+                  </button>
+                ))}
+                <button type="button" onMouseDown={(e) => { e.preventDefault(); setPeopleOpen(false); runSearch(`from:${people[0].address}`); }}><Icon name="search" size={14} /> {t('All email from')} {people[0].name || people[0].address}</button>
+              </div>
+            )}
             {search && <button type="button" className="icon-btn" onClick={clearSearch} aria-label={t("Clear search")}><Icon name="close" /></button>}
             <div className="dd">
               <button type="button" className="icon-btn" onClick={() => setOpsHelp((o) => !o)} title={t("Search tips")} aria-label={t("Search tips")}><Icon name="filter" /></button>
@@ -419,8 +613,9 @@ export default function Mail({ me, route, refreshMe, theme, setTheme, onLogout }
           </form>
         ) : <div className="spacer" />}
         <div className="topbar-right">
-          {view === 'admin' && <button className="top-btn" aria-label={t("Back to mail")} onClick={() => setView('mail')}><Icon name="mail" /> <span>{t("Back to mail")}</span></button>}
+          {view === 'admin' && <button className="top-btn" aria-label={t("Back to mail")} onClick={() => (onAdminHost() ? location.assign(appHref(`/${mailbox}/inbox`)) : setView('mail'))}><Icon name="mail" /> <span>{t("Back to mail")}</span></button>}
           <button className={`icon-btn on-dark ${panel ? 'pressed' : ''}`} onClick={() => setPanel((p) => (p ? null : panelTab))} title={t("Tasks, notes and follow-ups (T)")} aria-label={t("Tasks, notes and follow-ups")} aria-pressed={!!panel}><Icon name="check" /></button>
+          <button className={`icon-btn on-dark help-btn ${helpOpen ? 'pressed' : ''}`} onClick={() => setHelpOpen((h) => (h ? null : (newCount ? 'new' : 'help')))} title={t('Help and what’s new')} aria-label={newCount ? `${t('Help and what’s new')} (${newCount} ${t('new')})` : t('Help and what’s new')} aria-pressed={!!helpOpen}><span className="help-q" aria-hidden="true">?</span>{newCount > 0 && <span className="help-dot" aria-hidden="true" />}</button>
           <button className="icon-btn on-dark" onClick={() => setShowSettings(true)} title={t("Settings")} aria-label={t("Settings")}><Icon name="settings" /></button>
           <div className="user-menu-wrap">
             <button className="avatar sm" style={{ background: avatarColor(me.email) }} onClick={() => setUserMenu((u) => !u)} title={me.email}>
@@ -430,7 +625,14 @@ export default function Mail({ me, route, refreshMe, theme, setTheme, onLogout }
               <div className="menu right" onMouseLeave={() => setUserMenu(false)}>
                 <div className="menu-head"><b>{prefs.displayName || me.name || me.email.split('@')[0]}</b><small>{me.email}</small></div>
                 <button onClick={() => { setShowSettings(true); setUserMenu(false); }}><Icon name="settings" />{' '}{t("Settings")}</button>
-                <button onClick={() => { setTheme(theme === 'dark' ? 'light' : 'dark'); setUserMenu(false); }}><Icon name={theme === 'dark' ? 'sun' : 'moon'} /> {theme === 'dark' ? 'Light mode' : 'Dark mode'}</button>
+                <button className="phone-only" onClick={() => { setPanel(panelTab); setUserMenu(false); }}><Icon name="check" />{' '}{t("Tasks, notes & follow-ups")}</button>
+                {installMode && <button onClick={async () => { setUserMenu(false); if (installMode === 'ios') setIosInstall(true); else await promptInstall(); }}><Icon name="download" /> {t('Install the Roammail app')}</button>}
+                <div className="menu-note">{t('Appearance')}</div>
+                <div className="theme-pick" role="radiogroup" aria-label={t('Appearance')}>
+                  {[['auto', 'phone', 'Device'], ['light', 'sun', 'Light'], ['dark', 'moon', 'Dark']].map(([k, ic, l]) => (
+                    <button key={k} role="radio" aria-checked={themePref === k} className={themePref === k ? 'on' : ''} onClick={() => setTheme(k)}><Icon name={ic} size={15} /> {t(l)}</button>
+                  ))}
+                </div>
                 <button onClick={() => { setShowHelp(true); setUserMenu(false); }}><Icon name="key" />{' '}{t("Keyboard shortcuts")}</button>
                 <a className="menu-link" href="/help" target="_blank" rel="noreferrer"><Icon name="external" />{' '}{t("Help center")}</a>
                 {(isAdmin || !inOrg) && <button onClick={() => { setView('admin'); setUserMenu(false); }}><Icon name="shield" /> {isAdmin ? 'Admin portal' : 'Set up business email'}</button>}
@@ -441,17 +643,81 @@ export default function Mail({ me, route, refreshMe, theme, setTheme, onLogout }
                 <a className="menu-link" href={loginHref('?add=1')}><Icon name="plus" />{' '}{t("Add another account")}</a>
                 <button onClick={() => onLogout(false)}><Icon name="logout" />{' '}{t("Sign out")}{(me.accounts || []).length > 1 ? ` of ${me.email}` : ''}</button>
                 {(me.accounts || []).length > 1 && <button onClick={() => onLogout(true)}><Icon name="logout" />{' '}{t("Sign out of all accounts")}</button>}
+                {!me.delegated && <button onClick={async () => { setUserMenu(false); if (!confirm(t('Sign out of Roammail on every other phone, computer and browser? You stay signed in here.'))) return; try { await api.post('/api/security/signout-all', {}); toast(t('Signed out everywhere else. If you think someone else knows your password, change it now in Settings → Security.')); } catch (e) { toast(e.message, { error: true }); } }}><Icon name="lock" />{' '}{t("Sign out everywhere else")}</button>}
               </div>
             )}
           </div>
         </div>
       </header>
+      {rowMenu && (
+        <div className="menu ctx-menu" style={{ left: Math.min(rowMenu.x, innerWidth - 230), top: Math.min(rowMenu.y, innerHeight - 380) }} onClick={(e) => e.stopPropagation()} role="menu">
+          {[
+            ['reply', 'Reply', () => api.get('/api/message', { folder: listFolder, uid: rowMenu.m.uid, peek: 1 }).then((full) => reply({ ...full, folder: listFolder, uid: rowMenu.m.uid }, 'reply'))],
+            ['forward', 'Forward', () => api.get('/api/message', { folder: listFolder, uid: rowMenu.m.uid, peek: 1 }).then((full) => reply({ ...full, folder: listFolder, uid: rowMenu.m.uid }, 'forward'))],
+            null,
+            ['archive', 'Archive', () => act.archive(rowMenu.m.uid)],
+            ['trash', 'Delete', () => act.del(rowMenu.m.uid)],
+            ['mail', rowMenu.m.seen ? 'Mark as unread' : 'Mark as read', () => act.read(!rowMenu.m.seen, rowMenu.m.uid)],
+            ['flag', rowMenu.m.flagged ? 'Remove flag' : 'Flag', () => act.flag(rowMenu.m.uid)],
+            ['clock', 'Snooze…', () => act.snooze(rowMenu.m.uid)],
+            ['archive', 'Read later', () => readLater(rowMenu.m.uid)],
+            null,
+            ['filter', 'Make a rule…', () => makeRule(rowMenu.m)],
+            ['shield', 'Report scam', () => reportScam({ ...rowMenu.m, folder: listFolder })],
+            ['users', 'Contact card', () => window.dispatchEvent(new CustomEvent('roammail:card', { detail: { person: rowMenu.m.from?.[0] || {}, anchor: null } }))],
+            ...(me.delegated ? [] : [['block', `Block ${rowMenu.m.from?.[0]?.address || 'sender'}`, () => act.block(rowMenu.m.from?.[0]?.address)]]),
+          ].map((x, i) => (x ? <button key={x[1]} role="menuitem" onClick={() => { setRowMenu(null); Promise.resolve(x[2]()).catch((e) => toast(e.message, { error: true })); }}><Icon name={x[0]} size={15} /> {t(x[1])}</button> : <div key={`s${i}`} className="menu-sep" />))}
+        </div>
+      )}
+      {card && (
+        <ContactCard person={card.person} anchor={card.anchor} me={me} onClose={() => setCard(null)}
+          onEmail={(p) => compose({ to: [p] })}
+          onMeeting={(p) => { sessionStorage.setItem('calNewWith', JSON.stringify([{ email: p.address, name: p.name }])); setView('calendar'); }}
+          onOpenMessage={(m) => location.assign(`/${route.id}/message/${messageKey(m.folder, m.uid)}`)}
+          onShowAll={(a) => { setView('mail'); setFolder('INBOX'); runSearch(a); }}
+          onBlock={me.delegated ? null : (a) => act.block(a)} />
+      )}
+      {askPush && (
+        <div className="push-ask" role="region" aria-label={t('Notifications')}>
+          <Icon name="bell" size={18} /><span><b>{t('Get notified about new mail')}</b><small>{t('Even when Roammail is closed. You can change this any time in Settings.')}</small></span>
+          <button className="btn sm primary" onClick={turnOnPush}>{t('Turn on')}</button>
+          <button className="btn sm" onClick={() => { localStorage.setItem('pushAsked', '1'); setAskPush(false); }}>{t('Not now')}</button>
+        </div>
+      )}
+      {iosInstall && (
+        <div className="modal-wrap" onClick={(e) => e.target === e.currentTarget && setIosInstall(false)}>
+          <div className="modal ios-install" role="dialog" aria-label={t('Install the Roammail app')}>
+            <h3>{t('Add Roammail to your Home Screen')}</h3>
+            <ol>
+              <li>{t('Tap the Share button')} <span className="ios-share" aria-hidden="true">⬆︎</span> {t('at the bottom of Safari')}</li>
+              <li>{t('Scroll down and tap')} <b>{t('Add to Home Screen')}</b></li>
+              <li>{t('Tap')} <b>{t('Add')}</b>. {t('Roammail opens like an app, with notifications and your unread count on the icon.')}</li>
+            </ol>
+            <div className="actions"><button className="btn primary" onClick={() => setIosInstall(false)}>{t('Got it')}</button></div>
+          </div>
+        </div>
+      )}
+      {me.passwordLeaked && (
+        <div className="leak-bar" role="alert"><Icon name="shield" size={16} />
+          <span><b>{t('Your password appeared in a data leak from another website.')}</b> {t('Change it now to keep your account safe.')}</span>
+          <button className="btn sm primary" onClick={() => setShowSettings('security')}>{t('Change password')}</button>
+        </div>
+      )}
+      {ooo?.activeNow && (
+        <div className="ooo-bar" role="status"><Icon name="clock" size={16} />
+          <span>{t('Out of office is on')}{ooo.end ? ` ${t('until')} ${new Date(`${ooo.end}T12:00:00`).toLocaleDateString(undefined, { weekday: 'short', day: 'numeric', month: 'short' })}` : ''}. {t('People who email you get your automatic reply.')}</span>
+          <button className="btn sm" onClick={() => setShowSettings('autoreply')}>{t('Edit')}</button>
+          <button className="btn sm" onClick={oooOff}>{t('Turn off')}</button>
+        </div>
+      )}
 
       <div className="shell">
       <nav className="app-rail" aria-label={t("Apps")}>
         {[['mail', 'mail', 'Mail'], ['calendar', 'calendar', 'Calendar'], ['contacts', 'users', 'Contacts']].map(([v, i, l]) => (
-          <button key={v} className={view === v ? 'on' : ''} onClick={() => setView(v)} title={l} aria-label={l}><Icon name={i} size={20} /><small>{l}</small></button>
+          <button key={v} className={view === v && !(v === 'mail' && railFolder) ? 'on' : ''} onClick={() => { setView(v); if (v === 'mail' && railFolder) setFolder('INBOX'); }} title={l} aria-label={l}><Icon name={i} size={20} /><small>{l}</small></button>
         ))}
+        {!me.delegated && <button className={view === 'mail' && folder === '@screener' ? 'on' : ''} onClick={() => { setView('mail'); setFolder('@screener'); clearSearch(); setActive(null); }} title={t("Screener")} aria-label={t("Screener")}><Icon name="userCheck" size={20} /><small>{t("Screener")}</small>{screenerCount > 0 && <b className="rail-badge">{screenerCount > 99 ? '99+' : screenerCount}</b>}</button>}
+        <button className={view === 'mail' && folder === '@subscriptions' ? 'on' : ''} onClick={() => { setView('mail'); setFolder('@subscriptions'); clearSearch(); setActive(null); }} title={t("Subscriptions")} aria-label={t("Subscriptions")}><Icon name="list" size={20} /><small className="rail-long">{t("Subscriptions")}</small><small className="rail-short">{t("Lists")}</small></button>
         {multi && (
           <div className="rail-accounts" aria-label={t("Accounts")}>
             {accounts.map((a, i) => (
@@ -466,11 +732,11 @@ export default function Mail({ me, route, refreshMe, theme, setTheme, onLogout }
         )}
       </nav>
       {view === 'admin' ? (
-        <Suspense fallback={<div className="spinner" />}><Admin me={me} refreshMe={refreshMe} onExit={() => setView('mail')} /></Suspense>
+        <Suspense fallback={<div className="spinner" />}><Admin me={me} refreshMe={refreshMe} onExit={() => (onAdminHost() ? location.assign(appHref(`/${mailbox}/inbox`)) : setView('mail'))} /></Suspense>
       ) : view === 'calendar' ? (
         <Suspense fallback={<div className="spinner" />}><Calendar me={me} /></Suspense>
       ) : view === 'contacts' ? (
-        <Suspense fallback={<div className="spinner" />}><Contacts me={me} onEmail={(c) => { compose({ to: [{ name: c.name, address: c.email }] }); setView('mail'); }} /></Suspense>
+        <Suspense fallback={<div className="spinner" />}><Contacts me={me} onEmail={(c) => { compose({ to: [{ name: c.name, address: c.email }] }); setView('mail'); }} onEmailMany={(list) => { compose({ to: list }); setView('mail'); }} /></Suspense>
       ) : (
         <div className="body">
           {navPeek && vw < 1280 && <div className={`nav-backdrop ${navMode === 'drawer' ? '' : 'clear'}`} onClick={() => setNavPeek(false)} />}
@@ -479,12 +745,12 @@ export default function Mail({ me, route, refreshMe, theme, setTheme, onLogout }
               me={me} mailboxes={sharedBoxes} mailbox={mailbox} onMailbox={switchMailbox}
               onSelect={(p) => { setFolder(p); clearSearch(); setFilter(''); if (vw < 1280) setNavPeek(false); }}
               onDropMessages={(dest, uids) => act.move(dest, uids)} onScheduled={() => { setFolder('@scheduled'); clearSearch(); }} onQuarantine={() => { setFolder('@quarantine'); clearSearch(); }} qCount={qCount}
-              onSubscriptions={mailbox && !me.delegated ? () => { setFolder('@subscriptions'); clearSearch(); setActive(null); if (vw < 1280) setNavPeek(false); } : null}
               onAliases={!me.delegated ? () => { setFolder('@aliases'); clearSearch(); setActive(null); if (vw < 1280) setNavPeek(false); } : null}
               allInboxes={multi ? accounts.reduce((n, a) => n + (a.unread || 0), 0) : null} onAllInboxes={() => { setFolder('@all'); clearSearch(); }}
               categories={prefs.categories} onCategory={(c) => runSearch(`label:${catKeyword(c.name).slice(4)}`)} />
           )}
           <main className={`main ${paneClass} ${active ? 'has-active' : ''}`}>
+            <h1 className="sr-only">{view === 'mail' ? (search ? t('Search results') : (currentFolderObj ? folderLabel(currentFolderObj) : t('Mail'))) : view === 'calendar' ? t('Calendar') : view === 'contacts' ? t('Contacts') : t('Admin')}</h1>
             {(folderUse === '\\Junk' || folder === '@quarantine') && !search && (
               <div className="tabs" role="tablist">
                 <button role="tab" aria-selected={folder !== '@quarantine'} className={folder !== '@quarantine' ? 'on' : ''} onClick={() => special('\\Junk') && setFolder(special('\\Junk'))}>{t("Junk")}</button>
@@ -499,14 +765,24 @@ export default function Mail({ me, route, refreshMe, theme, setTheme, onLogout }
               density={prefs.density} setDensity={(v) => setPrefs({ density: v })}
             />}
             <div className="panes">
-              {folder === '@subscriptions' && !search ? <SubscriptionsList onShowSender={(a) => { setFolder('INBOX'); runSearch(`from:${a}`); }} onBlock={async (a) => { try { await api.post('/api/block', { address: a }); toast(`Blocked ${a}`); } catch (e) { toast(e.message, { error: true }); } }} />
+              {folder === '@catchup' && !search ? <CatchUp onClose={() => setFolder('INBOX')} onReply={(m) => reply(m, 'reply')} onChanged={() => { loadFolders(); }} onRule={makeRule} />
+                : folder === '@screener' && !search ? <ScreenerList onChanged={setScreenerCount} />
+                : folder === '@subscriptions' && !search ? <SubscriptionsList onShowSender={(a) => { setFolder('INBOX'); runSearch(`from:${a}`); }} onBlock={async (a) => { try { await api.post('/api/block', { address: a }); toast(`Blocked ${a}`); } catch (e) { toast(e.message, { error: true }); } }} />
                 : folder === '@aliases' && !search ? <AliasesList onShowAlias={(a) => { setFolder('INBOX'); runSearch(`to:${a}`); }} />
                 : folder === '@quarantine' && !search ? <QuarantineList onChanged={setQCount} /> : folder === '@scheduled' && !search ? <ScheduledList onCompose={compose} /> : <MessageList
                 snoozeMap={folder.toLowerCase() === 'snoozed' ? snoozeMap : null}
                 list={list} title={search ? `Results for "${search}"` : folder === '@all' ? 'All inboxes' : folderLabel(currentFolderObj || { name: folder })}
-                search={search} onClearSearch={clearSearch} isInbox={folder === 'INBOX' && !search}
+                search={search} onClearSearch={clearSearch} isInbox={folder === 'INBOX' && !search} onBump={me.delegated ? null : bump}
+                inboxTab={folder === 'INBOX' && tabsOn && !search ? inboxTab : null} setInboxTab={(x) => { setInboxTab(x); setActive(null); setSelected(new Set()); }}
+                onSwipe={folder === '@all' ? null : (m, side) => {
+                  const what = (side === 'left' ? prefs.swipeLeft : prefs.swipeRight) || (side === 'left' ? 'archive' : 'read');
+                  if (what === 'read') act.read(!m.seen, m.uid); else if (what === 'flag') act.flag(m.uid); else if (act[what]) act[what](m.uid);
+                }}
+                unreadInbox={folders.find((f) => f.specialUse === '\\Inbox')?.unread || 0} onCatchUp={() => { setFolder('@catchup'); setActive(null); }}
+                swipe={{ left: prefs.swipeLeft, right: prefs.swipeRight }} onRefresh={() => { loadFolders(); load({ quiet: true }); }}
                 folderUse={currentFolderObj?.specialUse} filter={filter} setFilter={setFilter}
-                selected={selected} setSelected={setSelected} active={active} onOpen={openMessage}
+                selected={selected} setSelected={setSelected} active={active} onOpen={openMessage} team={teamInfo} meEmail={me.email}
+                onHover={folder === '@all' ? undefined : (m) => prefetch(listFolder, m.uid, prefs.conversation)}
                 act={act} categories={prefs.categories} density={prefs.density} allInboxes={folder === '@all'}
                 onLoadMore={() => !search && list.messages.length < list.total && !list.loading && load({ page: list.page + 1, append: true })}
                 onEmpty={act.emptyFolder} onMarkAllRead={act.markAllRead}
@@ -514,7 +790,7 @@ export default function Mail({ me, route, refreshMe, theme, setTheme, onLogout }
               {(!folder.startsWith('@')) && (prefs.readingPane !== 'off' || active) ? (
                 <ReadingPane
                   key={`${listFolder}:${active}`} folder={listFolder} msg={activeMsg} me={me} prefs={prefs} setPrefs={setPrefs}
-                  conversation={prefs.conversation} onReply={reply} act={act} categories={prefs.categories}
+                  conversation={prefs.conversation} team={isTeamBox} onReply={reply} act={act} categories={prefs.categories}
                   onClose={() => setActive(null)} isJunk={currentFolderObj?.specialUse === '\\Junk'} orgDomains={me.orgDomains || []}
                   onAddTask={addTaskFrom} onFollowUp={followUp} onThread={setOpenThreadMsg}
                 />
@@ -534,8 +810,20 @@ export default function Mail({ me, route, refreshMe, theme, setTheme, onLogout }
       {snoozeFor && <SnoozeMenu onPick={act.doSnooze} onClose={() => setSnoozeFor(null)} />}
       <ComposeManager composers={composers} setComposers={setComposers} me={me} prefs={prefs} sigData={sigData}
         onSent={() => { loadFolders(); if (listFolder === special('\\Sent') || listFolder === special('\\Drafts')) load({ quiet: true }); }} />
-      {showSettings && <SettingsPanel prefs={prefs} setPrefs={setPrefs} me={me} folders={folders} sigData={sigData} reloadSigs={reloadSigs} onClose={() => setShowSettings(false)} initialTab={importMsg ? 'import' : premiumMsg ? 'premium' : ssoMsg ? 'security' : undefined} importMsg={importMsg} premiumMsg={premiumMsg} ssoMsg={ssoMsg} />}
+      {helpOpen && <HelpPanel startTab={helpOpen} onClose={() => { setHelpOpen(null); setNewCount(unseenCount()); }} />}
+      {showSettings && <SettingsPanel prefs={prefs} setPrefs={setPrefs} me={me} folders={folders} sigData={sigData} reloadSigs={reloadSigs} onClose={() => setShowSettings(false)} initialTab={typeof showSettings === 'string' ? showSettings : importMsg ? 'import' : premiumMsg ? 'premium' : idvBack ? 'security' : ssoMsg ? 'security' : undefined} importMsg={importMsg} premiumMsg={premiumMsg} ssoMsg={ssoMsg} />}
       {showHelp && <ShortcutsHelp onClose={() => setShowHelp(false)} />}
+      {palette && <CommandBar onClose={() => setPalette(false)} settingsTabs={SETTINGS_TABS}
+        folders={folders.map((f) => ({ ...f, label: folderLabel(f) }))}
+        actions={{
+          compose: () => compose(),
+          folder: (p) => { setView('mail'); setFolder(p); clearSearch(); setActive(null); },
+          view: (v) => setView(v),
+          settings: (tab) => setShowSettings(tab),
+          search: (q) => { setView('mail'); if (folder.startsWith('@')) setFolder('INBOX'); runSearch(q); },
+          toggleTheme: () => setTheme(theme === 'dark' ? 'light' : 'dark'),
+          shortcuts: () => setShowHelp(true),
+        }} />}
     </div>
   );
 }

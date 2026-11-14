@@ -100,6 +100,7 @@ export function DomainStatus({ domain, onActivated, onDone }) {
             <button className="btn primary" disabled={!!busy} onClick={autoDns}>{busy === 'r53' ? 'Setting up…' : 'Set up automatically'}</button>
           </div>
         )}
+        {!s.route53 && <CloudflareSetup domain={s.domain} onDone={async () => { await load(); }} />}
         <RecordTable records={[{ ...s.verify, key: 'verify', host: '@', ok: s.verify.ok }]} />
         <details className="help"><summary>Where do I add this?</summary>
           <ul>{HELP.map(([p, h]) => <li key={p}><b>{p}:</b> {h}</li>)}</ul>
@@ -124,6 +125,7 @@ export function DomainStatus({ domain, onActivated, onDone }) {
           {s.sending && <span className={`pill ${s.sending === 'relay' ? 'ok' : ''}`} style={{ marginLeft: 8, verticalAlign: 'middle' }} title={s.sending === 'relay' ? 'Outgoing mail is delivered through a trusted relay for better inbox placement' : 'Outgoing mail is delivered straight from our mail server'}>Sending: {s.sending === 'relay' ? 'Trusted relay' : 'Direct'}</span>}</h3>
           <p className="muted">{s.ready ? 'All required records are in place. Mail to your domain now arrives here.' : `Add these records at your DNS provider. ${done} of ${required.length} required records found. We check automatically.`}</p></div></div>
       <div className="progress"><div style={{ width: `${(done / required.length) * 100}%` }} /></div>
+      {!s.route53 && !s.ready && <CloudflareSetup domain={s.domain} onDone={async () => { await load(); onActivated?.(); }} />}
       {s.route53 && !s.ready && (
         <div className="callout good"><Icon name="check" /> <div><b>This domain is in your AWS account.</b></div>
           <button className="btn primary" disabled={!!busy} onClick={autoDns}>{busy === 'r53' ? 'Setting up…' : 'Add records automatically'}</button></div>
@@ -194,6 +196,40 @@ export function DomainWizard({ orgId, onCreated, onDone, refreshMe }) {
         )}
       </div>
       {created && <DomainStatus domain={created} onActivated={refreshMe} onDone={() => onDone?.(created)} />}
+    </div>
+  );
+}
+
+/** Domains on Cloudflare: paste a one-time API token and every record is added for you. */
+function CloudflareSetup({ domain, onDone }) {
+  const toast = useToast();
+  const [open, setOpen] = useState(false);
+  const [token, setToken] = useState('');
+  const [busy, setBusy] = useState(false);
+  const run = async (e) => {
+    e.preventDefault(); setBusy(true);
+    try {
+      const r = await api.post(`/api/domains/${encodeURIComponent(domain)}/cloudflare`, { token });
+      toast(`Done: ${r.added} records added${r.replaced ? `, ${r.replaced} old mail records replaced` : ''}. Checking them now…`);
+      setToken(''); setOpen(false); await onDone?.();
+    } catch (x) { toast(x.message, { error: true }); }
+    setBusy(false);
+  };
+  return (
+    <div className="callout cf-setup">
+      <div><b>☁️ Is {domain} on Cloudflare?</b> We can add everything for you in one step.</div>
+      {!open ? <button className="btn" onClick={() => setOpen(true)}>Set up with Cloudflare</button> : (
+        <form onSubmit={run} className="form">
+          <ol className="small">
+            <li>In Cloudflare, open <b>My Profile → API Tokens → Create Token</b> and use the <b>“Edit zone DNS”</b> template.</li>
+            <li>Under <b>Zone Resources</b> choose <b>{domain}</b>, then create the token and copy it.</li>
+            <li>Paste it here. We use it once to add your records and don’t keep it. You can delete the token afterwards.</li>
+          </ol>
+          <input value={token} onChange={(e) => setToken(e.target.value)} placeholder="Cloudflare API token" autoComplete="off" required aria-label="Cloudflare API token" />
+          <p className="muted small">This replaces your domain’s current mail (MX), SPF and DMARC records so email goes to Roammail. Your website is not touched.</p>
+          <div className="actions"><button className="btn primary" disabled={busy}>{busy ? 'Adding records…' : 'Add records'}</button><button type="button" className="btn" onClick={() => setOpen(false)}>Cancel</button></div>
+        </form>
+      )}
     </div>
   );
 }

@@ -86,10 +86,10 @@ const recordOut = (r, job) => ({
   ...(job ? { running: Number(job.is_running) === 1, lastRun: job.last_run || null, success: job.success === null || job.success === undefined ? null : Number(job.success) === 1, active: Number(job.active) === 1 } : {}),
   readyToSwitch: r.status === 'active' && (r.kind === 'upload' || (job ? job.last_run && Number(job.success) === 1 : !!r.first_done_at)),
 });
-async function createSyncImport(email, { provider, host, port, user, password, by }) {
+async function createSyncImport(email, { provider, host, port, user, password, by, maxAgeDays = 0 }) {
   if (Number((await q.get("SELECT COUNT(*) AS n FROM import_records WHERE email = ? AND status = 'active'", email)).n) >= MAX_IMPORTS) throw fail(400, `You can have up to ${MAX_IMPORTS} imports running`);
   const found = await probe({ host, port, user, password });
-  await mailcow.addSyncJob(email, { host, port, user, password });
+  await mailcow.addSyncJob(email, { host, port, user, password, maxage: maxAgeDays });
   const jobId = await findSyncJobId(email, user);
   const now = Date.now();
   const id = await q.insert(`INSERT INTO import_records(email, kind, provider, remote_user, remote_host, syncjob_id, status, messages_found, created_at, stop_at, created_by)
@@ -124,7 +124,8 @@ function connFrom(body) {
   const user = String(body.user || '').trim();
   const password = String(body.password || '');
   if (!user || !password) throw fail(400, 'Enter the email address and app password of the old account');
-  return { provider: PROVIDERS[body.provider] ? body.provider : 'other', host, port: Number(body.port || p.port || 993), user, password };
+  const years = [0, 1, 2, 5, 10].includes(Number(body.years)) ? Number(body.years) : 0; // how far back (0 = everything)
+  return { provider: PROVIDERS[body.provider] ? body.provider : 'other', host, port: Number(body.port || p.port || 993), user, password, maxAgeDays: years * 365 };
 }
 
 // Step 1: test the login and count what will be copied

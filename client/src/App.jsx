@@ -2,6 +2,7 @@ import { clearOutbox } from './outbox.js';
 import { refreshPush } from './push.js';
 import { useEffect, useState } from 'react';
 import { api, setMailboxId } from './api.js';
+import { clearFast } from './fastcache.js';
 import { parseLocation, setHosts, loginHref } from './nav.js';
 import Login from './components/Login.jsx';
 import Mail from './components/Mail.jsx';
@@ -17,12 +18,18 @@ export default function App() {
   // keep the wizard open through its optional steps once it started
   const [wizardOpen, setWizardOpen] = useState(true);
   useEffect(() => { api.signupConfig().then(setHosts).catch(() => {}).finally(() => setHostsReady(true)); }, []);
-  const [theme, setTheme] = useState(() => localStorage.getItem('theme') || (matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'));
-
+  // Theme: follows the device (light/dark) unless the person picks one. 'auto' | 'light' | 'dark'
+  const [themePref, setThemePref] = useState(() => localStorage.getItem('themePref') || 'auto');
+  const darkQuery = matchMedia('(prefers-color-scheme: dark)');
+  const [sysDark, setSysDark] = useState(darkQuery.matches);
+  useEffect(() => { const on = (e) => setSysDark(e.matches); darkQuery.addEventListener('change', on); return () => darkQuery.removeEventListener('change', on); }, []);
+  const theme = themePref === 'auto' ? (sysDark ? 'dark' : 'light') : themePref;
+  const setTheme = (x) => setThemePref(x);
   useEffect(() => {
     document.documentElement.dataset.theme = theme;
+    localStorage.setItem('themePref', themePref);
     localStorage.setItem('theme', theme);
-  }, [theme]);
+  }, [theme, themePref]);
 
   const refreshMe = () => api.me().then(setMe).catch(() => setMe(null));
   useEffect(() => { if (me) refreshPush(); }, [me?.email]); // keeps this device's notifications from expiring
@@ -62,6 +69,7 @@ export default function App() {
     // Forget the offline copy of mail and anything waiting in the Outbox on this device
     navigator.serviceWorker?.controller?.postMessage({ type: 'signout' });
     await clearOutbox().catch(() => {});
+    clearFast();
     api.post('/api/logout', all ? { all: true } : {}).finally(() => location.assign(loginHref()));
   };
 
@@ -71,7 +79,7 @@ export default function App() {
       {me && (me.setup?.setupRequired?.length || (me.setup && !me.setup.onboarded && wizardOpen)) ? (
         <SetupWizard me={me} onDone={() => { setWizardOpen(false); refreshMe(); }} onLogout={() => signOut(false)} />
       ) : me ? (
-        <Mail me={me} route={route} refreshMe={refreshMe} theme={theme} setTheme={setTheme} onLogout={signOut} />
+        <Mail me={me} route={route} refreshMe={refreshMe} theme={theme} setTheme={setTheme} themePref={themePref} onLogout={signOut} />
       ) : (
         <Login mode={route.page} onLogin={afterAuth} />
       )}

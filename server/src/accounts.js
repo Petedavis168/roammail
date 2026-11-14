@@ -4,6 +4,8 @@ import { syncArchive } from './archive.js';
 import { applySendingRoute, applyRate, RAMP, BUSINESS_RATE } from './outbound.js';
 // Free sign-up, business domains, and the admin / super-admin portals.
 import express from 'express';
+import { checkSignupBot, isDisposable } from './scamguard.js';
+import { recordReferral } from './referrals.js';
 import crypto from 'node:crypto';
 import { rateLimit } from './shared.js';
 import { config } from './config.js';
@@ -12,6 +14,7 @@ import { mailcow } from './mailcow.js';
 import { setSession, requireAuth, revokeSessions, seal } from './session.js';
 import { verifyRecord, requiredRecords, checkVerification, checkRecords } from './dns.js';
 import { findZone, applyRecords } from './route53.js';
+import { applyCloudflare } from './cloudflaredns.js';
 import { saveProfile, getProfile, deleteUserData } from './signatures.js';
 import { setRecoveryEmail } from './security.js';
 import { deliverWelcome } from './welcome.js';
@@ -60,7 +63,7 @@ publicAccounts.get('/signup/config', async (req, res) => res.json({
   domain: config.signup.domain,
   turnstileSiteKey: config.turnstile.siteKey || null,
   // where sign-in and the app live (the web app uses these to build links)
-  rootDomain: config.rootDomain || null, loginHost: config.loginHost || null,
+  rootDomain: config.rootDomain || null, loginHost: config.loginHost || null, adminHost: config.adminHost || null,
   // mailbox sizes (config values, in MB)
   quota: { free: config.signup.quotaMb, business: config.business.defaultQuotaMb, businessMax: config.business.maxQuotaMb },
   minAge: config.signup.minAge, requireDetails: config.signup.requireDetails,
@@ -139,6 +142,7 @@ publicAccounts.get('/signup/suggest', rateLimit({ windowMs: 60_000, limit: 30 })
 
 publicAccounts.post('/signup', rateLimit({ windowMs: 60 * 60_000, limit: 10 }), wrap(async (req, res) => {
   if (!config.signup.enabled || !await setting('signupEnabled', true) || !config.signup.domain) throw fail(403, 'Sign-ups are currently closed');
+  checkSignupBot(req.body); // hidden field + minimum time to fill in the form
   const local = String(req.body.username || '').trim().toLowerCase();
   const name = String(req.body.name || '').trim().slice(0, 100);
   const password = String(req.body.password || '');
@@ -163,6 +167,7 @@ publicAccounts.post('/signup', rateLimit({ windowMs: 60 * 60_000, limit: 10 }), 
     const recovery = String(req.body.recoveryEmail || '').trim().toLowerCase();
     if (!looksLikeEmail(recovery)) throw fail(400, 'Enter a recovery email address (a different account you can get into)');
     if (recovery === `${local}@${config.signup.domain}`) throw fail(400, 'Use a different address than the new one for recovery');
+    if (isDisposable(recovery)) throw fail(400, 'That looks like a temporary inbox. Use an email address you’ll keep, so you can always get back in.');
     details = { birthday, phone: normalizePhone(req.body.phone) };
     // with SMS verification on, the number we keep must be the one they just confirmed
     if (phoneHash && hashPhone(details.phone) !== phoneHash) throw fail(400, 'Use the mobile number you verified by text message');
@@ -185,6 +190,8 @@ publicAccounts.post('/signup', rateLimit({ windowMs: 60 * 60_000, limit: 10 }), 
   if (config.signup.rateLimit) await applyRate(email, RAMP[0]).catch((e) => console.warn('rate limit not set:', e.message));
   await q.run('INSERT INTO signups(email, ip, recovery_email, terms_version, phone_hash) VALUES(?, ?, ?, ?, ?) ON CONFLICT(email) DO UPDATE SET ip = excluded.ip, recovery_email = excluded.recovery_email, terms_version = excluded.terms_version, created_at = excluded.created_at, phone_hash = excluded.phone_hash', email, req.ip, String(req.body.recoveryEmail || '').slice(0, 200) || null, config.legal.termsVersion, phoneHash);
   await audit(email, null, 'signup', { ip: req.ip, phoneVerified: !!phoneHash });
+  if (req.body.ref) await recordReferral(email, req.body.ref, { ip: req.ip, phoneHash }).catch(() => {}); // refer a friend
+  (await import('./insights.js')).recordStep('signup_done').catch(() => {});
   if (biz) await createOrgWithDomain(email, biz.domain, biz.orgName, biz.local);
   await saveProfile(email, { name });
   await setRecoveryEmail(email, String(req.body.recoveryEmail || '').trim());
@@ -405,6 +412,15 @@ accounts.post('/domains/:domain/auto-dns', requireSuper, wrap(async (req, res) =
   await applyRecords(zone, d.domain, requiredRecords(d.domain, dkimOf(fresh)));
   await audit(req.user.email, d.org_id, 'domain.route53', { domain: d.domain, zone });
   res.json({ ok: true });
+}));
+
+// One click DNS for any domain admin whose domain is on Cloudflare (token used once, never kept)
+accounts.post('/domains/:domain/cloudflare', rateLimit({ windowMs: 3600e3, limit: 10 }), wrap(async (req, res) => {
+  const d = await requireDomainAdmin(req, req.params.domain);
+  const recs = [...(d.status === 'pending' ? [verifyRecord(d.domain, d.verify_token)] : []), ...requiredRecords(d.domain, dkimOf(await orgOf(d.domain)))];
+  const r = await applyCloudflare(req.body.token, d.domain, recs);
+  await audit(req.user.email, d.org_id, 'domain.cloudflare', { domain: d.domain, ...r });
+  res.json({ ok: true, ...r });
 }));
 
 accounts.delete('/domains/:domain', wrap(async (req, res) => {

@@ -192,6 +192,34 @@ CREATE TABLE IF NOT EXISTS bookings (
 CREATE INDEX IF NOT EXISTS bookings_owner ON bookings(owner, start_at);
 CREATE UNIQUE INDEX IF NOT EXISTS bookings_token ON bookings(token_hash);
 CREATE TABLE IF NOT EXISTS subscription_state (email TEXT NOT NULL, sender TEXT NOT NULL, status TEXT NOT NULL, at INTEGER NOT NULL, PRIMARY KEY (email, sender));
+CREATE TABLE IF NOT EXISTS nudge_dismissed (email TEXT NOT NULL, message_id TEXT NOT NULL, at INTEGER NOT NULL, PRIMARY KEY (email, message_id));
+CREATE TABLE IF NOT EXISTS voice_notes (id TEXT PRIMARY KEY, owner TEXT NOT NULL, mime TEXT NOT NULL, data BLOB NOT NULL, duration_ms INTEGER, plays INTEGER NOT NULL DEFAULT 0, created_at INTEGER NOT NULL, expires_at INTEGER NOT NULL);
+CREATE INDEX IF NOT EXISTS voice_notes_owner ON voice_notes(owner);
+CREATE TABLE IF NOT EXISTS msg_status (message_id TEXT NOT NULL, sender TEXT NOT NULL, recipient TEXT NOT NULL, delivered_at INTEGER, read_at INTEGER, PRIMARY KEY (message_id, recipient));
+CREATE INDEX IF NOT EXISTS msg_status_sender ON msg_status(sender, message_id);
+CREATE TABLE IF NOT EXISTS contact_groups (id INTEGER PRIMARY KEY AUTOINCREMENT, email TEXT NOT NULL, name TEXT NOT NULL, members TEXT NOT NULL, updated_at INTEGER NOT NULL);
+CREATE INDEX IF NOT EXISTS contact_groups_email ON contact_groups(email);
+CREATE TABLE IF NOT EXISTS status_days (day TEXT NOT NULL, component TEXT NOT NULL, ok INTEGER NOT NULL, total INTEGER NOT NULL, PRIMARY KEY (day, component));
+CREATE TABLE IF NOT EXISTS monthly_sends (email TEXT NOT NULL, month TEXT NOT NULL, count INTEGER NOT NULL DEFAULT 0, PRIMARY KEY (email, month));
+CREATE TABLE IF NOT EXISTS webmail_msgids (msgid TEXT PRIMARY KEY, at INTEGER NOT NULL);
+CREATE TABLE IF NOT EXISTS counted_qids (qid TEXT PRIMARY KEY, at INTEGER NOT NULL);
+CREATE TABLE IF NOT EXISTS id_verifications (email TEXT PRIMARY KEY, status TEXT NOT NULL, session_id TEXT, country TEXT, doc_type TEXT, person_hash TEXT, reason TEXT, verified_at INTEGER, updated_at INTEGER NOT NULL);
+CREATE TABLE IF NOT EXISTS team_assign (mailbox TEXT NOT NULL, msgid TEXT NOT NULL, assignee TEXT NOT NULL, by_email TEXT NOT NULL, at INTEGER NOT NULL, PRIMARY KEY (mailbox, msgid));
+CREATE TABLE IF NOT EXISTS team_notes (id INTEGER PRIMARY KEY AUTOINCREMENT, mailbox TEXT NOT NULL, msgid TEXT NOT NULL, author TEXT NOT NULL, body TEXT NOT NULL, at INTEGER NOT NULL);
+CREATE INDEX IF NOT EXISTS team_notes_msg ON team_notes(mailbox, msgid);
+CREATE TABLE IF NOT EXISTS team_presence (mailbox TEXT NOT NULL, msgid TEXT NOT NULL, email TEXT NOT NULL, state TEXT NOT NULL, at INTEGER NOT NULL, PRIMARY KEY (mailbox, msgid, email));
+CREATE TABLE IF NOT EXISTS phone_codes (phone_hash TEXT PRIMARY KEY, code_hash TEXT NOT NULL, exp INTEGER NOT NULL, tries INTEGER NOT NULL DEFAULT 0, sent_at INTEGER NOT NULL);
+CREATE TABLE IF NOT EXISTS funnel_days (day TEXT NOT NULL, step TEXT NOT NULL, count INTEGER NOT NULL DEFAULT 0, PRIMARY KEY (day, step));
+CREATE TABLE IF NOT EXISTS deliverability_days (day TEXT PRIMARY KEY, sent INTEGER, bounced INTEGER, deferred INTEGER, complaints INTEGER, listed INTEGER, held INTEGER, by_provider TEXT, google TEXT, microsoft TEXT);
+CREATE TABLE IF NOT EXISTS referral_codes (email TEXT PRIMARY KEY, code TEXT NOT NULL UNIQUE, created_at INTEGER NOT NULL);
+CREATE TABLE IF NOT EXISTS referrals (referee TEXT PRIMARY KEY, referrer TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'pending', reason TEXT, created_at INTEGER NOT NULL, rewarded_at INTEGER);
+CREATE INDEX IF NOT EXISTS referrals_referrer ON referrals(referrer);
+CREATE TABLE IF NOT EXISTS privacy_stats (email TEXT NOT NULL, month TEXT NOT NULL, pixels INTEGER NOT NULL DEFAULT 0, links INTEGER NOT NULL DEFAULT 0, PRIMARY KEY (email, month));
+CREATE TABLE IF NOT EXISTS student_claims (school_hash TEXT PRIMARY KEY, email TEXT NOT NULL, claimed_at INTEGER NOT NULL);
+CREATE TABLE IF NOT EXISTS student_status (email TEXT PRIMARY KEY, verified_at INTEGER NOT NULL, expires_at INTEGER NOT NULL);
+CREATE TABLE IF NOT EXISTS chat_hooks (id INTEGER PRIMARY KEY AUTOINCREMENT, email TEXT NOT NULL, kind TEXT NOT NULL, url TEXT NOT NULL, only_from TEXT, creds TEXT NOT NULL, last_at INTEGER, last_ok INTEGER, created_at INTEGER NOT NULL);
+CREATE INDEX IF NOT EXISTS chat_hooks_email ON chat_hooks(email);
+CREATE TABLE IF NOT EXISTS screener_list (email TEXT NOT NULL, address TEXT NOT NULL, decision TEXT NOT NULL, source TEXT, at INTEGER NOT NULL, PRIMARY KEY (email, address));
 CREATE TABLE IF NOT EXISTS user_aliases (
   id INTEGER PRIMARY KEY AUTOINCREMENT, email TEXT NOT NULL, address TEXT NOT NULL UNIQUE, mailcow_id TEXT NOT NULL, note TEXT, active INTEGER NOT NULL DEFAULT 1, created_at INTEGER NOT NULL
 );
@@ -265,7 +293,7 @@ const MIGRATIONS = [['orgs', 'require_2fa', 'INTEGER NOT NULL DEFAULT 0'], ['org
   ['orgs', 'stripe_subscription', 'TEXT'], ['orgs', 'billing_status', "TEXT NOT NULL DEFAULT 'none'"], ['orgs', 'paid_seats', 'INTEGER NOT NULL DEFAULT 0'],
   ['orgs', 'canceled_at', 'TEXT'],
   ['user_security', 'recovery_verified', 'INTEGER NOT NULL DEFAULT 0'], ['user_security', 'recovery_pending', 'TEXT'],
-  ['user_security', 'recovery_code', 'TEXT'], ['user_security', 'recovery_code_exp', 'INTEGER'], ['user_security', 'recovery_code_tries', 'INTEGER NOT NULL DEFAULT 0'], ['jobs', 'claimed_at', 'INTEGER'], ['shared_mailboxes', 'kind', "TEXT NOT NULL DEFAULT 'shared'"], ['orgs', 'account_no', 'TEXT'], ['password_resets', 'kind', "TEXT NOT NULL DEFAULT 'reset'"], ['password_resets', 'invite_to', 'TEXT'], ['sessions', 'user_id', 'TEXT'], ['sessions', 'remember', 'INTEGER NOT NULL DEFAULT 0'], ['signups', 'phone_hash', 'TEXT'], ['orgs', 'comp_until', 'INTEGER'], ['orgs', 'comp_note', 'TEXT'], ['orgs', 'comp_by', 'TEXT'], ['orgs', 'comp_warned', 'INTEGER NOT NULL DEFAULT 0'], ['domains', 'owner_local', 'TEXT'], ['domains', 'owner_mailbox', 'TEXT'], ['user_security', 'birthday', 'TEXT'], ['user_security', 'phone', 'TEXT'], ['user_security', 'push_preview', 'INTEGER NOT NULL DEFAULT 1'], ['user_security', 'ai_enabled', 'INTEGER NOT NULL DEFAULT 0'], ['user_security', 'premium_until', 'INTEGER'], ['orgs', 'ai_blocked', 'INTEGER NOT NULL DEFAULT 0'], ['orgs', 'sso_provider', 'TEXT'], ['orgs', 'sso_tenant', 'TEXT']];
+  ['user_security', 'recovery_code', 'TEXT'], ['user_security', 'recovery_code_exp', 'INTEGER'], ['user_security', 'recovery_code_tries', 'INTEGER NOT NULL DEFAULT 0'], ['jobs', 'claimed_at', 'INTEGER'], ['shared_mailboxes', 'kind', "TEXT NOT NULL DEFAULT 'shared'"], ['orgs', 'account_no', 'TEXT'], ['password_resets', 'kind', "TEXT NOT NULL DEFAULT 'reset'"], ['password_resets', 'invite_to', 'TEXT'], ['sessions', 'user_id', 'TEXT'], ['sessions', 'remember', 'INTEGER NOT NULL DEFAULT 0'], ['signups', 'phone_hash', 'TEXT'], ['orgs', 'comp_until', 'INTEGER'], ['orgs', 'comp_note', 'TEXT'], ['orgs', 'comp_by', 'TEXT'], ['orgs', 'comp_warned', 'INTEGER NOT NULL DEFAULT 0'], ['domains', 'owner_local', 'TEXT'], ['domains', 'owner_mailbox', 'TEXT'], ['user_security', 'birthday', 'TEXT'], ['user_security', 'phone', 'TEXT'], ['user_security', 'push_preview', 'INTEGER NOT NULL DEFAULT 1'], ['user_security', 'ai_enabled', 'INTEGER NOT NULL DEFAULT 0'], ['user_security', 'premium_until', 'INTEGER'], ['orgs', 'ai_blocked', 'INTEGER NOT NULL DEFAULT 0'], ['orgs', 'sso_provider', 'TEXT'], ['orgs', 'sso_tenant', 'TEXT'], ['premium', 'gift_until', 'INTEGER'], ['user_security', 'pw_leak_at', 'INTEGER'], ['secure_messages', 'burn', 'INTEGER NOT NULL DEFAULT 0'], ['user_security', 'pw_checked_at', 'INTEGER'], ['premium', 'gift_done', 'INTEGER NOT NULL DEFAULT 0']];
 
 // Indexes on migrated columns (run after MIGRATIONS)
 const AFTER = ['CREATE UNIQUE INDEX IF NOT EXISTS orgs_account_no ON orgs(account_no)'];
@@ -337,6 +365,8 @@ async function pgDriver(url) {
     // Verified TLS; the image trusts Amazon RDS's certificate authority (NODE_EXTRA_CA_CERTS)
     ssl: local ? false : { rejectUnauthorized: process.env.DATABASE_SSL_INSECURE !== 'true' },
   });
+  // An idle connection the database closed (restart, failover, maintenance) is replaced on next use; never crash on it
+  pool.on('error', (e) => console.warn('database connection closed:', e.code || e.message));
   // Only one app server at a time creates or upgrades the tables
   const c = await pool.connect();
   try {
@@ -352,12 +382,25 @@ async function pgDriver(url) {
     if (!t) { t = toPg(sql); if (cache.size < 1000) cache.set(sql, t); }
     return t;
   };
+  // The database password is changed automatically every week (RDS-managed secret). This process keeps the password
+  // it started with, so once the database rejects it, exit: ECS starts a fresh copy with the current password.
+  // (Connections already open keep working; only new ones fail. A few failures in a row, not one, triggers it.)
+  let authFails = 0;
+  const query = async (sql, a) => {
+    try { const r = await pool.query(sql, a); authFails = 0; return r; } catch (e) {
+      if (e.code === '28P01' && fromEnv && ++authFails >= 3) {
+        console.error('APP_ERROR database password was changed: restarting to pick up the new one');
+        setTimeout(() => process.exit(1), 500).unref();
+      }
+      throw e;
+    }
+  };
   return {
     dialect: 'postgres', raw: pool,
-    get: async (sql, a) => (await pool.query(tr(sql), a)).rows[0],
-    all: async (sql, a) => (await pool.query(tr(sql), a)).rows,
-    run: async (sql, a) => ({ changes: (await pool.query(tr(sql), a)).rowCount }),
-    insert: async (sql, a) => Number((await pool.query(`${tr(sql)} RETURNING id`, a)).rows[0]?.id),
+    get: async (sql, a) => (await query(tr(sql), a)).rows[0],
+    all: async (sql, a) => (await query(tr(sql), a)).rows,
+    run: async (sql, a) => ({ changes: (await query(tr(sql), a)).rowCount }),
+    insert: async (sql, a) => Number((await query(`${tr(sql)} RETURNING id`, a)).rows[0]?.id),
     close: () => pool.end(),
   };
 }
@@ -366,6 +409,8 @@ const driver = config.databaseUrl ? await pgDriver(config.databaseUrl) : await s
 /** The underlying SQLite database (null on PostgreSQL). */
 export const db = driver.dialect === 'sqlite' ? driver.raw : null;
 export const dialect = driver.dialect;
+/** The PostgreSQL connection pool (null on SQLite), for the message bus between servers. */
+export const pgPool = driver.dialect === 'postgres' ? driver.raw : null;
 const args = (a) => a.map((v) => (v === undefined ? null : typeof v === 'boolean' ? Number(v) : v));
 export const q = {
   get: (sql, ...a) => driver.get(sql, args(a)),

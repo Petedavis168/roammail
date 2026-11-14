@@ -6,6 +6,8 @@ import { initNative } from './native.js';
 import { startErrorReporting } from './errors.js';
 import '@fontsource-variable/inter';
 import './styles.css';
+import { watchForUpdates } from './updates.js';
+import './install.js'; // listen for the browser's install prompt from the start
 
 startErrorReporting(); // crashes in the browser or phone app reach the error alarm
 initNative(); // phone apps (mobile/): links, attachments, notifications
@@ -19,3 +21,5 @@ if ('serviceWorker' in navigator && (location.protocol === 'https:' || location.
     navigator.serviceWorker.ready.then((r) => r.active?.postMessage({ type: 'shell' })).catch(() => {});
   }
 }
+
+watchForUpdates(); // offer a reload when a new version is released

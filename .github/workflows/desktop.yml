@@ -1,0 +1,71 @@
+# Builds Roammail for Mac (.dmg), Windows (installer .exe) and Linux (AppImage, .deb).
+# Run it from GitHub: Actions > "Desktop apps" > Run workflow; the installers are attached to the run.
+# Signing (optional; without it the apps work but show an "unidentified developer" warning the first time):
+#   Mac:     MAC_CERT_P12_BASE64, MAC_CERT_PASSWORD, APPLE_ID, APPLE_APP_SPECIFIC_PASSWORD, APPLE_TEAM_ID
+#   Windows: WIN_CERT_P12_BASE64, WIN_CERT_PASSWORD
+name: Desktop apps
+
+on:
+  workflow_dispatch:
+  push:
+    tags: ['desktop-v*']
+  pull_request:
+    paths: ['desktop/**', '.github/workflows/desktop.yml']
+
+permissions:
+  contents: read
+
+concurrency:
+  group: desktop-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: macos-15, target: --mac, name: mac }
+          - { os: windows-latest, target: --win, name: windows }
+          - { os: ubuntu-latest, target: --linux, name: linux }
+    runs-on: ${{ matrix.os }}
+    defaults: { run: { working-directory: desktop } }
+    env:
+      HAS_MAC_CERT: ${{ secrets.MAC_CERT_P12_BASE64 != '' }}
+      HAS_WIN_CERT: ${{ secrets.WIN_CERT_P12_BASE64 != '' }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22, cache: npm, cache-dependency-path: desktop/package-lock.json }
+      - run: npm ci
+      - run: npm run check
+      - name: Build (signed when the certificates are set up)
+        shell: bash
+        run: |
+          if [ "${{ matrix.name }}" = mac ] && [ "$HAS_MAC_CERT" = true ]; then
+            export CSC_LINK="$MAC_CERT_P12_BASE64" CSC_KEY_PASSWORD="$MAC_CERT_PASSWORD"
+            [ -n "$APPLE_ID" ] && node -e "const p=require('./package.json');p.build.mac.notarize=true;require('fs').writeFileSync('package.json',JSON.stringify(p,null,2))"
+          elif [ "${{ matrix.name }}" = windows ] && [ "$HAS_WIN_CERT" = true ]; then
+            export CSC_LINK="$WIN_CERT_P12_BASE64" CSC_KEY_PASSWORD="$WIN_CERT_PASSWORD"
+          else
+            export CSC_IDENTITY_AUTO_DISCOVERY=false
+          fi
+          npx electron-builder ${{ matrix.target }} --publish never
+        env:
+          MAC_CERT_P12_BASE64: ${{ secrets.MAC_CERT_P12_BASE64 }}
+          MAC_CERT_PASSWORD: ${{ secrets.MAC_CERT_PASSWORD }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          WIN_CERT_P12_BASE64: ${{ secrets.WIN_CERT_P12_BASE64 }}
+          WIN_CERT_PASSWORD: ${{ secrets.WIN_CERT_PASSWORD }}
+      - uses: actions/upload-artifact@v4
+        with:
+          name: roammail-desktop-${{ matrix.name }}-${{ github.run_number }}
+          path: |
+            desktop/dist/*.dmg
+            desktop/dist/*-mac.zip
+            desktop/dist/*.exe
+            desktop/dist/*.AppImage
+            desktop/dist/*.deb
+          if-no-files-found: error

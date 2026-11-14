@@ -28,6 +28,12 @@
     try { info = await api(`/api/public/secure/${encodeURIComponent(id)}`); } catch (e) { return show(h('div', { class: 'sc-msg' }, e.message)); }
     const msgs = { revoked: 'The sender has withdrawn this email.', expired: 'This protected email has expired.', locked: 'Too many wrong passwords were tried, so this email is locked. Ask the sender to send it again.' };
     if (msgs[info.state]) return show(h('div', { class: 'sc-lock' }, h('div', { class: 'sc-icon' }, '🔒'), h('h1', {}, 'Not available'), h('p', {}, msgs[info.state])));
+    // Disappearing message: the key is in the link (after #), so it opens straight away
+    const k = new URLSearchParams(location.hash.slice(1)).get('k');
+    if (k) {
+      history.replaceState(null, '', location.pathname); // don't leave the key in the address bar or history
+      try { return read(await api(`/api/public/secure/${encodeURIComponent(id)}/open`, { password: k }), true); } catch (e) { return show(h('div', { class: 'sc-msg' }, e.message)); }
+    }
     const pw = h('input', { type: 'password', autocomplete: 'off', 'aria-label': 'Password', placeholder: 'Password', required: true });
     const err = h('div');
     const btn = h('button', { class: 'sc-btn', type: 'submit' }, 'Open');
@@ -44,8 +50,9 @@
     pw.focus();
   }
 
-  function read(m) {
+  function read(m, disappearing) {
     document.title = m.subject || 'Protected email';
+    if (disappearing) setTimeout(() => { const n = document.createElement('div'); n.className = 'sc-hint'; n.textContent = `⏳ This message disappears ${Number(m.expiresAt) - Date.now() < 20 * 60e3 ? 'in a few minutes' : `on ${date(m.expiresAt)}`}. Save anything you need now.`; app.prepend(n); }, 0);
     const head = h('div', { class: 'sc-head' }, h('h1', {}, m.subject || '(no subject)'),
       h('div', { class: 'sc-meta' }, `From ${m.from.name ? `${m.from.name} <${m.from.address}>` : m.from.address} · ${date(m.sentAt)}`));
     let body;

@@ -173,20 +173,24 @@ calendar.get('/calendar/events', wrap(async (req, res) => {
   const from = new Date(String(req.query.from)); const to = new Date(String(req.query.to));
   if (Number.isNaN(from.getTime()) || Number.isNaN(to.getTime()) || to <= from) throw fail(400, 'Invalid range');
   if (to - from > 100 * 864e5) throw fail(400, 'Range too large');
-  const d = await discover(req.user);
-  const cals = await listCollections(req.user, 'calendar');
-  const wanted = req.query.calendars ? new Set(String(req.query.calendars).split(',')) : null;
+  res.json(await eventsIn(req.user, from, to, req.query.calendars ? new Set(String(req.query.calendars).split(',')) : null));
+}));
+
+/** Every event in the person's calendars between two dates (used by the calendar and by contact timelines). */
+export async function eventsIn(user, from, to, wanted = null) {
+  const d = await discover(user);
+  const cals = await listCollections(user, 'calendar');
   const stamp = (t) => t.toISOString().replace(/[-:]/g, '').replace(/\.\d+/, '');
   const body = `<?xml version="1.0" encoding="utf-8"?><c:calendar-query xmlns:d="DAV:" xmlns:c="urn:ietf:params:xml:ns:caldav"><d:prop><d:getetag/><c:calendar-data/></d:prop><c:filter><c:comp-filter name="VCALENDAR"><c:comp-filter name="VEVENT"><c:time-range start="${stamp(from)}" end="${stamp(to)}"/></c:comp-filter></c:comp-filter></c:filter></c:calendar-query>`;
   const results = await Promise.all(cals.filter((c) => !wanted || wanted.has(c.href)).map(async (c) => {
     assertOwnHref(c.href, d.calHome);
-    const items = await report(req.user, c.href, body).catch(() => []);
+    const items = await report(user, c.href, body).catch(() => []);
     return items.flatMap((it) => {
       try { return expand(it.data, from, to).map((e) => ({ ...e, href: it.href, etag: it.etag, calendar: c.href, color: c.color })); } catch { return []; }
     });
   }));
-  res.json(results.flat().sort((a, b) => new Date(a.start) - new Date(b.start)));
-}));
+  return results.flat().sort((a, b) => new Date(a.start) - new Date(b.start));
+}
 
 function validate(body, me) {
   const f = {

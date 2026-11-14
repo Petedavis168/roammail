@@ -1,3 +1,4 @@
+import { cachedList } from './listcache.js';
 import express from 'express';
 import multer from 'multer';
 import nodemailer from 'nodemailer';
@@ -14,10 +15,20 @@ import { count, gauge } from './ops.js';
 import { getClient, closeClient, withMailbox, specialFolder, makeClient, userTransport } from './imap.js';
 import { parseQuery } from './search.js';
 import { lookalike } from './lookalike.js';
-import { requestReceipts, saveTracked } from './receipts.js';
+import { requestReceipts, saveTracked, describeReport, collectReceipts } from './receipts.js';
+import { inboxTabs, TABS } from './inboxtabs.js';
+import { attachmentRisk, scanInfo } from './mailsafety.js';
+import { learnRecipients } from './screener.js';
+import { recordDelivered, recordRead, isRoammail } from './status.js';
+import { setLiveSender } from './live.js';
+import { broadcast, onBroadcast } from './shared.js';
+import { groupsFor } from './contactgroups.js';
+import { eventsIn } from './calendar.js';
+import { checkOutgoing } from './scamguard.js';
 import { protectEmail, noticeMail, checkSecurePassword } from './secure.js';
 import { rolesFor, q, twoFactorPolicy } from './db.js';
-import { applyEnforcedSignature } from './signatures.js';
+import { applyEnforcedSignature, applyCompanyFooter, htmlToText } from './signatures.js';
+import crypto from 'node:crypto';
 import { spamInfo } from './spam.js';
 import { parseInvite } from './calendar.js';
 import { allContacts, directory } from './contacts.js';
@@ -100,6 +111,16 @@ function uidList(uids) {
   return list.join(',');
 }
 
+// After-send work (Sent copy, flags, draft) runs one at a time per mailbox, in order, without holding up the reply
+const afterQueues = new Map();
+function afterSend(email, fn) {
+  const prev = afterQueues.get(email) || Promise.resolve();
+  const next = prev.then(fn).catch((e) => console.warn('after-send tasks failed', e.message));
+  afterQueues.set(email, next);
+  next.finally(() => { if (afterQueues.get(email) === next) afterQueues.delete(email); });
+  return next;
+}
+
 function transport(user) {
   return userTransport(nodemailer, user);
 }
@@ -123,6 +144,7 @@ api.get('/me', async (req, res) => res.json({
   // set when the URL points at a shared mailbox this person can open
   viewing: req.delegatedMailbox ? { email: req.delegatedMailbox, mailboxId: await ensureMailboxId(req.delegatedMailbox) } : null,
   twoFactor: await twoFactorPolicy(req.user.email), adminRequires2fa: appConfig.requireAdmin2fa,
+  passwordLeaked: !!(await q.get('SELECT pw_leak_at FROM user_security WHERE email = ?', req.user.email).catch(() => null))?.pw_leak_at,
   orgDomains: (await q.all("SELECT d.domain FROM domains d WHERE d.status = 'active' AND d.org_id = (SELECT org_id FROM domains WHERE domain = ?)", req.user.email.split('@')[1])).map((d) => d.domain),
   clientSettings: { meetUrl: (process.env.MEETING_URL || 'https://meet.jit.si').replace(/\/$/, ''), imapHost: appConfig.imap.host, imapPort: appConfig.imap.port, smtpHost: appConfig.smtp.host, smtpPort: appConfig.smtp.port, smtpSecure: appConfig.smtp.secure, davEnabled: appConfig.davEnabled, davHost: appConfig.davHost },
 }));
@@ -169,9 +191,25 @@ api.get('/messages', wrap(async (req, res) => {
   const page = Math.max(0, Number(req.query.page || 0));
   const pageSize = Math.min(200, Math.max(10, Number(req.query.pageSize || 50)));
   const filter = req.query.filter; // unread | flagged | attachments
+  // File delivery reports / read receipts out of the inbox (at most every 30 seconds; never holds up the list)
+  if (folder === 'INBOX' && !req.delegatedMailbox) collectReceipts(req.user, { minGap: 30e3 }).catch((e) => console.warn('receipts scan failed', e.message));
 
-  const result = await withMailbox(req.user, folder, async (client) => {
+  const tab = folder === 'INBOX' && TABS.includes(req.query.tab) ? req.query.tab : null;
+  const cacheKey = `${String(req.user.email).toLowerCase()}|${folder}|${page}|${pageSize}|${filter || ''}|${tab || ''}`;
+  const result = await withMailbox(req.user, folder, (client) => cachedList(client, cacheKey, async () => {
     const total = client.mailbox.exists;
+    if (tab) { // smart inbox tabs: Primary / Updates / Newsletters (optionally also filtered)
+      const t = await inboxTabs(client);
+      let uids = [...t[tab]];
+      if (filter) {
+        const crit = filter === 'unread' ? { seen: false } : filter === 'flagged' ? { flagged: true } : { header: { 'Content-Type': 'multipart/mixed' } };
+        const f = new Set((await client.search(crit, { uid: true })) || []);
+        uids = uids.filter((u) => f.has(u));
+      }
+      uids.sort((a, b) => b - a);
+      const slice = uids.slice(page * pageSize, (page + 1) * pageSize);
+      return { total: uids.length, tab, tabs: t.unread, messages: slice.length ? await fetchSummaries(client, slice.join(','), { uid: true }) : [] };
+    }
     if (filter) {
       const crit = filter === 'unread' ? { seen: false } : filter === 'flagged' ? { flagged: true }
         : { header: { 'Content-Type': 'multipart/mixed' } };
@@ -185,7 +223,7 @@ api.get('/messages', wrap(async (req, res) => {
     if (end < 1) return { total, messages: [] };
     const start = Math.max(1, end - pageSize + 1);
     return { total, messages: await fetchSummaries(client, `${start}:${end}`) };
-  });
+  }));
   res.json({ folder, page, pageSize, ...result });
 }));
 
@@ -282,6 +320,11 @@ function fullMessage(folder, msg, parsed) {
     listUnsubscribe: parsed.headers.get('list-unsubscribe') || null,
     secureId: /^[\w-]{10,40}$/.test(String(parsed.headers.get('x-roammail-secure-id') || '')) ? String(parsed.headers.get('x-roammail-secure-id')) : null,
     receiptRequested: !!parsed.headers.get('disposition-notification-to') && !(msg.flags || new Set()).has('$MDNSent'),
+    report: (() => { // delivery reports and read receipts: a plain summary instead of their raw contents
+      const parts = [parsed.text || '', ...(parsed.attachments || []).filter((a) => /^(?:message\/|text\/rfc822-headers)/i.test(a.contentType || '') && a.size < 2e6).map((a) => `Content-Type: ${a.contentType}\n\n${a.content.toString('utf8')}`)];
+      const ct = String(parsed.headers.get('content-type')?.value || '') + String(parsed.headers.get('content-type')?.params?.['report-type'] ? ` report-type=${parsed.headers.get('content-type').params['report-type']}` : '');
+      return describeReport(`${ct}\n${parts.join('\n\n')}`);
+    })(),
     security: senderSecurity(parsed),
     spam: spamInfo(parsed.headers.get('x-spamd-result')),
     invite: (() => {
@@ -295,15 +338,28 @@ function fullMessage(folder, msg, parsed) {
       size: a.size,
       cid: a.contentId?.replace(/[<>]/g, '') || null,
       inline: a.contentDisposition === 'inline' && !!a.contentId,
+      risk: attachmentRisk(a.filename, a.contentType),
     })),
+    scan: scanInfo(parsed),
   };
+}
+
+/** Sent from one Roammail account to others only: it never travelled over the public internet. */
+async function privateDelivery(m) {
+  const people = [...(m.from || []), ...(m.to || []), ...(m.cc || [])].map((a) => a.address).filter(Boolean);
+  if (!people.length || m.security?.dmarc === 'fail' || m.security?.spoofedName || m.security?.lookalike) return false;
+  for (const a of people) if (!(await isRoammail(a))) return false;
+  return true;
 }
 
 api.get('/message', wrap(async (req, res) => {
   const { folder = 'INBOX', uid } = req.query;
   const r = await loadMessage(req.user, folder, uid, { markSeen: req.query.peek !== '1' });
   if (!r) return res.status(404).json({ error: 'Message not found' });
-  res.json(fullMessage(folder, r.msg, r.parsed));
+  const full = fullMessage(folder, r.msg, r.parsed);
+  full.privateDelivery = await privateDelivery(full).catch(() => false);
+  if (req.query.peek !== '1' && !req.delegatedMailbox) recordRead(req.user.email, full).catch(() => {});
+  res.json(full);
 }));
 
 // Gmail-style conversation: find related messages in this folder + Sent. Also used by AI help (ai.js).
@@ -348,8 +404,11 @@ export async function loadThread(user, folder = 'INBOX', uid, { markSeen = true 
 }
 
 api.get('/thread', wrap(async (req, res) => {
-  const t = await loadThread(req.user, req.query.folder || 'INBOX', req.query.uid);
+  const t = await loadThread(req.user, req.query.folder || 'INBOX', req.query.uid, { markSeen: req.query.peek !== '1' });
   if (!t) return res.status(404).json({ error: 'Message not found' });
+  for (const m of t.messages || []) m.privateDelivery = await privateDelivery(m).catch(() => false);
+  // peek=1: the app is loading it ahead of time (not opened yet), so don't tell senders it was read
+  if (!req.delegatedMailbox && req.query.peek !== '1') for (const m of t.messages || []) recordRead(req.user.email, m).catch(() => {});
   res.json(t);
 }));
 
@@ -358,6 +417,10 @@ api.get('/attachment', wrap(async (req, res) => {
   const r = await loadMessage(req.user, folder, uid, { markSeen: false });
   const att = r?.parsed.attachments?.[Number(index)];
   if (!att) return res.status(404).json({ error: 'Attachment not found' });
+  // Files that can run code on a computer are only handed out after an explicit "I trust this"
+  if (attachmentRisk(att.filename, att.contentType) === 'block' && req.query.confirm !== '1') {
+    return res.status(403).json({ error: 'This file can run programs on your computer, so it was blocked to keep you safe.', code: 'blocked_attachment' });
+  }
   const name = (att.filename || 'attachment').replace(/["\r\n]/g, '');
   res.setHeader('Content-Type', att.contentType || 'application/octet-stream');
   res.setHeader('Content-Disposition', `${req.query.inline === '1' ? 'inline' : 'attachment'}; filename="${encodeURIComponent(name)}"; filename*=UTF-8''${encodeURIComponent(name)}`);
@@ -440,7 +503,10 @@ function buildMail(user, body, files) {
     bcc: body.bcc || undefined,
     subject: body.subject || '',
     html: body.html || undefined,
-    text: body.text || undefined,
+    // A plain-text version alongside the HTML, and a Message-ID on the sender's own domain: both help mail land
+    // in the inbox rather than spam
+    text: body.text || (body.html ? htmlToText(body.html) : undefined),
+    messageId: `<${crypto.randomUUID()}@${String(address).split('@')[1] || 'localhost'}>`,
     inReplyTo: body.inReplyTo || undefined,
     references: body.references || undefined,
     priority: body.priority || 'normal',
@@ -472,19 +538,34 @@ async function resolveFrom(req) {
 
 api.post('/send', upload.array('attachments'), wrap(async (req, res) => {
   await resolveFrom(req);
+  // A name next to the address ("Casey Adams <casey@…>") reads better and looks less like spam
+  if (!String(req.body.fromName || '').trim() && !req.body._fromAddress) {
+    req.body.fromName = req.user.name || (await q.get('SELECT name FROM profiles WHERE email = ?', req.user.email).catch(() => null))?.name || '';
+  }
   const files = [...(req.files || []), ...(await forwardedAttachments(req.user, req.body))];
   let mail = buildMail(req.user, req.body, files);
   if (!mail.to && !mail.cc && !mail.bcc) return res.status(400).json({ error: 'Add at least one recipient' });
   const rcptCount = [mail.to, mail.cc, mail.bcc].filter(Boolean).flatMap((v) => addressparser(v)).filter((a) => a.address).length;
-  await checkSendQuota(req.user.email, rcptCount);
+  await checkSendQuota(req.user.email, rcptCount, mail.messageId);
   mail = await applyEnforcedSignature(req.user, mail, !!(req.body.inReplyTo || req.body.forwardUid));
+  await checkOutgoing(req.user.email, mail); // new free accounts: refuse clear scams / phishing
+  mail = await applyCompanyFooter(req.user, mail, [mail.to, mail.cc, mail.bcc].filter(Boolean).flatMap((v) => addressparser(v)).map((a) => String(a.address || '').toLowerCase()).filter(Boolean)); // company disclaimer
   // delivery / read receipts, if asked for
   const rr = requestReceipts(req.user, mail, { read: req.body.readReceipt === 'true', delivery: req.body.deliveryReceipt === 'true' });
   mail = rr.mail;
   const rcpts = [mail.to, mail.cc, mail.bcc].filter(Boolean).flatMap((v) => addressparser(v)).map((a) => String(a.address || '').toLowerCase()).filter(Boolean);
+  if (!req.delegatedMailbox) learnRecipients(req.user.email, rcpts).catch(() => {}); // the Screener lets people you write to through
   // Password-protected: the recipients get a link; the real email is kept encrypted with the password
   let original = null; let secure = null;
-  if (req.body.protect === 'true') {
+  const selfDestruct = String(req.body.selfDestruct || ''); // '1h' | '24h' | '7d' | 'read'
+  if (selfDestruct && req.body.protect !== 'true') {
+    // Disappearing email: the recipients get a link (the key is in the link), it's gone after the time or after reading
+    const hours = { '1h': 1, '24h': 24, '7d': 168, read: 168 }[selfDestruct];
+    if (!hours) return res.status(400).json({ error: 'Pick when it should disappear' });
+    original = mail;
+    secure = await protectEmail(req, mail, { password: crypto.randomBytes(18).toString('base64url'), hours, burn: selfDestruct === 'read', linkKey: true, recipients: rcpts });
+    mail = noticeMail(mail, req.user, secure, '');
+  } else if (req.body.protect === 'true') {
     const password = checkSecurePassword(req.body.securePassword);
     original = mail;
     secure = await protectEmail(req, mail, { password, hint: req.body.secureHint, days: req.body.secureDays, recipients: rcpts });
@@ -507,27 +588,34 @@ api.post('/send', upload.array('attachments'), wrap(async (req, res) => {
     return res.json({ ok: true, scheduled: true, id, sendAt, secure: secure && { id: secure.id, url: secure.url } });
   }
   const info = await transport(req.user).sendMail(mail);
+  if (!secure && !req.delegatedMailbox) recordDelivered(req.user.email, info.messageId, rcpts).catch(() => {}); // "Delivered" for Roammail recipients
   count('mail_sent');
   await saveTracked(req.user, mail, rr.track, rcpts).catch((e) => console.warn('receipt tracking failed', e.message));
 
-  // mailcow (Postfix) does not store sent mail itself; append a copy to Sent.
-  try {
-    const sent = await specialFolder(req.user, '\\Sent', { create: true });
-    // your own copy keeps the real content (it's your mailbox), marked so it shows the protection status
-    const raw = await compile(original ? { ...original, messageId: info.messageId, headers: { ...(original.headers || {}), 'X-Roammail-Secure-Id': secure.id } } : { ...mail, messageId: info.messageId });
-    const client = await getClient(req.user);
-    await client.append(sent, raw, ['\\Seen']);
-  } catch (e) { console.warn('Could not save to Sent:', e.message); }
+  // The email is on its way: answer now, and file the Sent copy / flags / draft clean-up right after
+  // (they don't need to hold up the person sending).
+  const after = afterSend(req.user.email, async () => {
+    // mailcow (Postfix) does not store sent mail itself; append a copy to Sent.
+    try {
+      const sent = await specialFolder(req.user, '\\Sent', { create: true });
+      // your own copy keeps the real content (it's your mailbox), marked so it shows the protection status
+      const raw = await compile(original ? { ...original, messageId: info.messageId, headers: { ...(original.headers || {}), 'X-Roammail-Secure-Id': secure.id } } : { ...mail, messageId: info.messageId });
+      const client = await getClient(req.user);
+      await client.append(sent, raw, ['\\Seen']);
+    } catch (e) { console.warn('Could not save to Sent:', e.message); }
 
-  // Mark the original as answered, delete the draft if this came from one
-  if (req.body.replyFolder && req.body.replyUid) {
-    await withMailbox(req.user, req.body.replyFolder, (c) => c.messageFlagsAdd(String(req.body.replyUid), [req.body.forwardUid ? '$Forwarded' : '\\Answered'], { uid: true })).catch(() => {});
-  }
-  if (req.body.draftUid) {
-    const drafts = await specialFolder(req.user, '\\Drafts');
-    if (drafts) await withMailbox(req.user, drafts, (c) => c.messageDelete(String(req.body.draftUid), { uid: true })).catch(() => {});
-  }
-  res.json({ ok: true, messageId: info.messageId, accepted: info.accepted, rejected: info.rejected, secure: secure && { id: secure.id, url: secure.url } });
+    // Mark the original as answered, delete the draft if this came from one
+    if (req.body.replyFolder && req.body.replyUid) {
+      await withMailbox(req.user, req.body.replyFolder, (c) => c.messageFlagsAdd(String(req.body.replyUid), [req.body.forwardUid ? '$Forwarded' : '\\Answered'], { uid: true })).catch(() => {});
+    }
+    if (req.body.draftUid) {
+      const drafts = await specialFolder(req.user, '\\Drafts');
+      if (drafts) await withMailbox(req.user, drafts, (c) => c.messageDelete(String(req.body.draftUid), { uid: true })).catch(() => {});
+    }
+  });
+  void after;
+
+  res.json({ ok: true, messageId: info.messageId, accepted: info.accepted, rejected: info.rejected, secure: secure && { id: secure.id, url: secure.url, selfDestruct: !!secure.selfDestruct } });
 }));
 
 api.post('/drafts', upload.array('attachments'), wrap(async (req, res) => {
@@ -551,6 +639,76 @@ async function directoryCached(email) {
   const list = await directory(email); dirCache.set(domain, { at: Date.now(), list }); return list;
 }
 setInterval(() => { const now = Date.now(); for (const [k, v] of contactCache) if (now - v.at > 30 * 60 * 1000) contactCache.delete(k); }, 10 * 60 * 1000).unref();
+// ---------- contact card (click a name): who they are, recent emails both ways, your notes ----------
+api.get('/people/card', wrap(async (req, res) => {
+  const email = String(req.query.email || '').trim().toLowerCase();
+  if (!/^[^\s@<>"]{1,64}@[^\s@<>".]{1,63}(?:\.[^\s@<>".]{1,63}){1,8}$/.test(email)) return res.status(400).json({ error: 'Pick a person' });
+  const [book, dir] = await Promise.all([
+    allContacts(req.user).catch(() => []),
+    directoryCached(req.user.email).catch(() => []),
+  ]);
+  const contact = book.find((c) => (c.emails || []).some((e) => e.value === email)) || null;
+  const coworker = dir.find((p) => p.email === email) || null;
+  // Recent emails: from them (Inbox, Archive) and to them (Sent)
+  const recent = [];
+  let received = 0; let sentCount = 0;
+  const boxes = await (await getClient(req.user)).list();
+  const pick = (use) => boxes.find((b) => b.specialUse === use)?.path;
+  for (const [box, crit, dir2] of [['INBOX', { from: email }, 'in'], [pick('\\Archive'), { from: email }, 'in'], [pick('\\Sent'), { to: email }, 'out']]) {
+    if (!box) continue;
+    try {
+      await withMailbox(req.user, box, async (c) => {
+        const uids = ((await c.search(crit, { uid: true })) || []).sort((a, b) => b - a);
+        if (dir2 === 'in') received += uids.length; else sentCount += uids.length;
+        if (uids.length) for (const m of await fetchSummaries(c, uids.slice(0, 6).join(','), { uid: true })) recent.push({ ...m, folder: box, dir: dir2 });
+      }, { readOnly: true });
+    } catch { /* folder may not exist */ }
+  }
+  recent.sort((a, b) => new Date(b.date) - new Date(a.date));
+  const name = contact?.name || coworker?.name || recent.find((m) => m.dir === 'in' && m.from?.[0]?.name)?.from?.[0]?.name || (recent.length ? (await q.get('SELECT name FROM profiles WHERE email = ?', email).catch(() => null))?.name : '') || ''; // their profile name only if you've emailed each other
+  const notes = await q.all('SELECT id, body, updated_at FROM notes WHERE email = ? AND contact = ? ORDER BY updated_at DESC LIMIT 3', req.user.email, email).catch(() => []);
+  // Customer timeline: meetings with them (last 6 months and next 3), bookings they made, tasks about their emails
+  const meetings = await eventsIn(req.user, new Date(Date.now() - 180 * 864e5), new Date(Date.now() + 90 * 864e5))
+    .then((evs) => evs.filter((e) => (e.attendees || []).some((a) => String(a.email || '').toLowerCase() === email) || String(e.organizer?.email || '').toLowerCase() === email))
+    .catch(() => []);
+  const bookings = await q.all("SELECT start_at, status FROM bookings WHERE owner = ? AND lower(guest_email) = ? ORDER BY start_at DESC LIMIT 10", req.user.email, email).catch(() => []);
+  const timeline = [
+    ...recent.map((m) => ({ kind: m.dir === 'out' ? 'sent' : 'received', at: new Date(m.date).getTime(), title: m.subject || '(no subject)', folder: m.folder, uid: m.uid })),
+    ...meetings.map((e) => ({ kind: 'meeting', at: new Date(e.start).getTime(), title: e.title || 'Meeting' })),
+    ...bookings.map((b) => ({ kind: 'booking', at: Number(b.start_at), title: b.status === 'cancelled' ? 'Booking (cancelled)' : 'Booked a time with you' })),
+    ...notes.map((n) => ({ kind: 'note', at: typeof n.updated_at === 'number' ? n.updated_at : Date.parse(n.updated_at) || Date.now(), title: String(n.body).slice(0, 120) })),
+  ].filter((x) => Number.isFinite(x.at)).sort((a, b) => b.at - a.at).slice(0, 25);
+  res.json({
+    email, name,
+    title: coworker?.title || contact?.title || '', company: contact?.company || (coworker ? 'Your company' : ''), department: coworker?.department || '',
+    phones: [...(contact?.phones || []).map((p) => ({ value: p.value, type: p.type })), ...(coworker?.phone ? [{ value: coworker.phone, type: 'work' }] : []), ...(coworker?.mobile ? [{ value: coworker.mobile, type: 'mobile' }] : [])].slice(0, 4),
+    address: contact?.address || null, birthday: contact?.birthday || '',
+    inContacts: !!contact, contactHref: contact?.href || null, coworker: !!coworker,
+    stats: { received, sent: sentCount, first: recent.length ? recent[recent.length - 1].date : null, last: recent[0]?.date || null },
+    recent: recent.slice(0, 6).map((m) => ({ uid: m.uid, folder: m.folder, subject: m.subject, date: m.date, dir: m.dir, attachments: !!m.hasAttachments })),
+    notes: notes.map((n) => ({ id: n.id, body: String(n.body).slice(0, 400), updatedAt: n.updated_at })),
+    timeline,
+  });
+}));
+
+// When does this person usually write? (times of their recent emails, for "send at the best time")
+api.get('/people/activity', wrap(async (req, res) => {
+  const email = String(req.query.email || '').trim().toLowerCase();
+  if (!/^[^\s@<>"]{1,64}@[^\s@<>".]{1,63}(?:\.[^\s@<>".]{1,63}){1,8}$/.test(email)) return res.status(400).json({ error: 'Pick a person' });
+  const times = [];
+  const boxes = await (await getClient(req.user)).list();
+  for (const box of ['INBOX', boxes.find((b) => b.specialUse === '\\Archive')?.path].filter(Boolean)) {
+    try {
+      await withMailbox(req.user, box, async (c) => {
+        const uids = ((await c.search({ from: email, since: new Date(Date.now() - 180 * 864e5) }, { uid: true })) || []).sort((a, b) => b - a).slice(0, 300);
+        if (!uids.length) return;
+        for await (const m of c.fetch(uids.join(','), { uid: true, internalDate: true }, { uid: true })) times.push(new Date(m.internalDate).getTime());
+      }, { readOnly: true });
+    } catch { /* no such folder */ }
+  }
+  res.json({ email, times: times.sort((a, b) => b - a).slice(0, 300) });
+}));
+
 api.get('/contacts', wrap(async (req, res) => {
   const key = req.user.sid;
   let cached = contactCache.get(key);
@@ -593,12 +751,19 @@ api.get('/contacts', wrap(async (req, res) => {
   try { for (const c of await allContacts(req.user)) for (const e of c.emails) add(e.value, c.name, 1000); } catch { /* calendar server unavailable */ }
   try { for (const p of await directoryCached(req.user.email)) add(p.email, p.name, 900); } catch { /* not a business */ }
   const match = (p) => !q || p.address.toLowerCase().includes(q) || p.name.toLowerCase().includes(q);
-  res.json([...merged.values()].filter(match).sort((a, b) => b.score - a.score).slice(0, 10));
+  // My contact groups first when the name matches: picking one adds everyone in it
+  const groups = (await groupsFor(req.user.email).catch(() => [])).filter((g) => g.members.length && (!q || g.name.toLowerCase().includes(q)))
+    .slice(0, 3).map((g) => ({ group: true, id: g.id, name: g.name, address: `group:${g.id}`, members: g.members }));
+  res.json([...groups, ...[...merged.values()].filter(match).sort((a, b) => b.score - a.score).slice(0, 10 - groups.length)]);
 }));
 
 // ---------- live updates (Server-Sent Events + IMAP IDLE) ----------
 // One IDLE connection per person, shared by all their open tabs and devices (was one per tab).
 const hubs = new Map(); // email -> { subs: Set<fn>, client, ready: Promise }
+// Live events go to every app server (Redis or the database bus); each delivers to the windows it has open
+const deliverLocal = ({ email, event, data }) => { const h = hubs.get(email); if (h) for (const fn of h.subs) fn(event, data); };
+onBroadcast('live', deliverLocal);
+setLiveSender((email, event, data) => broadcast('live', { email, event, data }));
 gauge('live_users', () => hubs.size);
 gauge('preview_cache_entries', () => previewCache.size);
 export const liveStats = () => ({ users: hubs.size, streams: [...hubs.values()].reduce((n, h) => n + h.subs.size, 0) });

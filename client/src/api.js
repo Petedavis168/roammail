@@ -49,7 +49,7 @@ export const api = {
   signup: (data) => api.post('/api/signup', data),
 
   folders: () => api.get('/api/folders'),
-  messages: (folder, page, filter) => api.get('/api/messages', { folder, page, filter }),
+  messages: (folder, page, filter, tab) => api.get('/api/messages', { folder, page, filter, ...(tab ? { tab } : {}) }),
   search: (q, folder) => api.get('/api/search', { q, folder }),
   thread: (folder, uid) => api.get('/api/thread', { folder, uid }),
   flags: (folder, uids, add = [], remove = []) => api.post('/api/flags', { folder, uids, add, remove }),

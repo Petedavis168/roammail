@@ -1,19 +1,24 @@
 import { useEffect, useState } from 'react';
+import { prefetched, openNow } from '../fastcache.js';
+import TeamBar from './TeamBar.jsx';
 import { api, mailUrl } from '../api.js';
 import { Icon } from '../icons.jsx';
 import { fmtDate, fmtSize, personName, avatarColor, initials } from '../util.js';
 import MessageBody from './MessageBody.jsx';
 import AiPanel from './AiPanel.jsx';
 import { t } from '../i18n.js';
+import { openCard } from '../people.js';
 
 function AddrList({ label, list }) {
   if (!list?.length) return null;
-  return <div className="addr-line"><span>{label}</span> {list.map((a, i) => <span key={i} title={a.address}>{a.name || a.address}{i < list.length - 1 ? ', ' : ''}</span>)}</div>;
+  return <div className="addr-line"><span>{label}</span> {list.map((a, i) => <span key={i}><button type="button" className="person-link" title={a.address} onClick={(e) => openCard(e, a)}>{a.name || a.address}</button>{i < list.length - 1 ? ', ' : ''}</span>)}</div>;
 }
 
 function SecurityBanner({ m, sender, orgDomains }) {
   const sec = m.security || {};
   const issues = [];
+  if (m.scan?.virus) issues.push('⚠ A virus was found in this email. Don’t open its attachments or links. Delete it.');
+  if (m.scan?.phish) issues.push('⚠ This email contains links known to be used for phishing. Don’t click them or enter any passwords.');
   if (sec.dmarc === 'fail') issues.push(`This message claims to be from ${sender.address?.split('@')[1]} but failed the domain's own authenticity check.`);
   else if (sec.spf === 'fail' && sec.dkim !== 'pass') issues.push('We couldn\'t confirm this message really came from the sender\'s domain.');
   if (sec.spoofedName) issues.push(`The sender's name shows a different email address than the one it was really sent from (${sender.address}).`);
@@ -147,16 +152,88 @@ function SecureStatus({ id }) {
   );
 }
 
-function ThreadMessage({ m, expanded, onToggle, onReply, prefs, setPrefs, last, orgDomains, onBlock, isJunk, me, onAddTask, onFollowUp }) {
+/** Delivery reports and read receipts, in plain words (the raw report only behind "Technical details"). */
+function ReportCard({ m }) {
+  const [raw, setRaw] = useState(false);
+  const r = m.report;
+  const when = fmtDate(m.date, true);
+  const subj = r.subject ? <> “<b>{r.subject}</b>”</> : null;
+  return (
+    <div className="report-card">
+      {r.recipients.map((x, i) => {
+        const ok = x.kind === 'delivered' || x.kind === 'read';
+        const icon = x.kind === 'failed' ? 'close' : x.kind === 'delayed' ? 'clock' : 'check';
+        const title = x.kind === 'read' ? t('Read') : x.kind === 'delivered' ? t('Delivered') : x.kind === 'failed' ? t('Not delivered') : x.kind === 'delayed' ? t('Delayed') : t('Receipt');
+        return (
+          <div key={i} className={`report-line ${ok ? 'ok' : x.kind}`}>
+            <span className="report-icon"><Icon name={icon} size={18} /></span>
+            <div>
+              <div className="report-title">{title}</div>
+              <div className="report-text">
+                {x.kind === 'read' && <>{t('Your email')}{subj} {t('was opened by')} <b>{x.address}</b>.</>}
+                {x.kind === 'delivered' && <>{t('Your email')}{subj} {t('was delivered to')} <b>{x.address}</b>.</>}
+                {x.kind === 'delayed' && <>{t('Your email')}{subj} {t('to')} <b>{x.address}</b> {t('hasn’t been delivered yet. Their mail server will keep trying — no need to do anything.')}</>}
+                {x.kind === 'failed' && <>{t('Your email')}{subj} {t('couldn’t be delivered to')} <b>{x.address}</b>. {t(x.reason)}</>}
+                {x.kind === 'deleted' && <>{t('Your email')}{subj} {t('was deleted without being read by')} <b>{x.address}</b>.</>}
+                {x.kind === 'other' && <>{t('A receipt came back from')} <b>{x.address}</b>.</>}
+              </div>
+              <div className="muted small">{when}</div>
+            </div>
+          </div>
+        );
+      })}
+      <button className="link small" onClick={() => setRaw((v) => !v)}>{raw ? t('Hide technical details') : t('Technical details')}</button>
+      {raw && <pre className="report-raw">{m.text}</pre>}
+    </div>
+  );
+}
+
+/** iMessage-style: "Delivered" / "Read 3:42 PM" under an email you sent to someone on Roammail. */
+function ChatStatus({ list }) {
+  if (!list?.length) return null;
+  const fmtT = (ms) => { const d = new Date(ms); const today = new Date().toDateString() === d.toDateString(); return d.toLocaleString([], today ? { hour: 'numeric', minute: '2-digit' } : { weekday: 'short', hour: 'numeric', minute: '2-digit' }); };
+  const one = list.length === 1;
+  const read = list.filter((x) => x.read);
+  const text = one
+    ? (list[0].read ? `${t('Read')} ${fmtT(list[0].read)}` : t('Delivered'))
+    : read.length === list.length ? `${t('Read by everyone')} · ${fmtT(Math.max(...read.map((x) => x.read)))}` : read.length ? `${t('Read by')} ${read.length} ${t('of')} ${list.length}` : t('Delivered');
+  return <div className={`chat-status ${read.length ? 'read' : ''}`} title={list.map((x) => `${x.address}: ${x.read ? `read ${new Date(x.read).toLocaleString()}` : 'delivered'}`).join('\n')}>{text}</div>;
+}
+
+/** "Robin is typing…" (another Roammail user writing a reply in this conversation right now). */
+function TypingBubble({ ids }) {
+  const [who, setWho] = useState({});
+  useEffect(() => {
+    const on = (e) => {
+      const d = e.detail; if (!ids.includes(d.ref)) return;
+      setWho((w) => { const n = { ...w }; if (d.stop) delete n[d.from]; else n[d.from] = { name: d.name || d.from.split('@')[0], until: Date.now() + 7000 }; return n; });
+    };
+    window.addEventListener('roammail:typing', on);
+    const tick = setInterval(() => setWho((w) => { const n = Object.fromEntries(Object.entries(w).filter(([, v]) => v.until > Date.now())); return Object.keys(n).length === Object.keys(w).length ? w : n; }), 1000);
+    return () => { window.removeEventListener('roammail:typing', on); clearInterval(tick); };
+  }, [ids.join(',')]);
+  const names = Object.values(who).map((v) => v.name.split(' ')[0]);
+  if (!names.length) return null;
+  return <div className="typing-bubble" role="status"><span className="dots"><i /><i /><i /></span> {names.join(', ')} {names.length === 1 ? t('is typing…') : t('are typing…')}</div>;
+}
+
+function ThreadMessage({ m, expanded, onToggle, onReply, prefs, setPrefs, last, orgDomains, onBlock, isJunk, me, onAddTask, onFollowUp, chatStatus }) {
   const sender = m.from?.[0] || {};
   const trusted = prefs.showImages === 'always' || prefs.trustedSenders.includes(sender.address?.toLowerCase());
   const [allow, setAllow] = useState(trusted);
   const [blocked, setBlocked] = useState(0);
   const [trackers, setTrackers] = useState({ pixels: [], links: 0 });
+  // count blocked trackers for the monthly privacy report (once per email, numbers only)
+  useEffect(() => {
+    const k = `trk:${m.folder}:${m.uid}`;
+    if ((!trackers.pixels.length && !trackers.links) || sessionStorage.getItem(k)) return;
+    sessionStorage.setItem(k, '1');
+    api.post('/api/privacy-report/trackers', { pixels: trackers.pixels.length, links: trackers.links }).catch(() => {});
+  }, [trackers.pixels.length, trackers.links]);
   const [showTrackers, setShowTrackers] = useState(false);
   const [details, setDetails] = useState(false);
   const [menu, setMenu] = useState(false);
-  const files = (m.attachments || []).filter((a) => !a.inline);
+  const files = m.report ? [] : (m.attachments || []).filter((a) => !a.inline);
   const external = orgDomains.length > 0 && sender.address && !orgDomains.some((d) => sender.address.toLowerCase().endsWith(`@${d}`));
   const lu = m.listUnsubscribe;
   const unsubUrl = !lu ? null : typeof lu === 'object' ? lu.url || null : (/<(https?:[^>]+)>/.exec(lu) || [])[1] || null;
@@ -174,14 +251,16 @@ function ThreadMessage({ m, expanded, onToggle, onReply, prefs, setPrefs, last, 
   return (
     <article className="tmsg">
       <header className="tmsg-head" onClick={last ? undefined : onToggle}>
-        <span className="avatar lg" style={{ background: avatarColor(sender.address) }}>{initials(sender)}</span>
+        <button type="button" className="avatar lg avatar-btn" style={{ background: avatarColor(sender.address) }} onClick={(e) => openCard(e, sender)} ><span aria-hidden="true">{initials(sender)}</span><span className="sr-only">{`${personName(sender)}: ${t('contact card')}`}</span></button>
         <div className="who">
-          <div><b>{personName(sender)}</b> <span className="muted">&lt;{sender.address}&gt;</span>
+          <div><button type="button" className="person-link strong" onClick={(e) => openCard(e, sender)}>{personName(sender)}</button> <span className="muted">&lt;{sender.address}&gt;</span>
             {external && <span className="ext-tag" title={t("This message came from outside your organization")}>{t("External")}</span>}
             {m.security?.dkim === 'pass' && m.security?.dmarc === 'pass' && !m.security?.lookalike && <span className="verified" title={t("Sender's domain verified (DKIM + DMARC)")}><Icon name="check" size={11} /> {t("Verified")}</span>}
+            {m.privateDelivery && <span className="private-pill" title={t('Sent between Roammail accounts: it never travelled over the public internet, and was encrypted on the way')}><Icon name="lock" size={11} /> {t('Private')}</span>}
+            {m.scan?.checked && !m.scan.virus && !m.scan.phish && sender.address?.toLowerCase() !== me?.email?.toLowerCase() && <span className="scanned" title={t('Checked when it arrived: no viruses found, and scanned for spam and phishing')}><Icon name="shield" size={11} /> {t('Scanned')}</span>}
           </div>
           <div className="muted small" onClick={(e) => { e.stopPropagation(); setDetails((d) => !d); }} style={{ cursor: 'pointer' }}>
-            to {[...(m.to || []), ...(m.cc || [])].map((a) => (a.address?.toLowerCase() === me?.email?.toLowerCase() ? 'me' : personName(a))).join(', ') || 'undisclosed recipients'} <Icon name="down" size={12} />
+            to {[...(m.to || []), ...(m.cc || [])].map((a, i, all) => (<span key={i}>{a.address?.toLowerCase() === me?.email?.toLowerCase() ? 'me' : <button type="button" className="person-link" onClick={(e) => openCard(e, a)}>{personName(a)}</button>}{i < all.length - 1 ? ', ' : ''}</span>))}{!(m.to?.length || m.cc?.length) && 'undisclosed recipients'} <Icon name="down" size={12} />
           </div>
           {details && (
             <div className="details">
@@ -212,6 +291,9 @@ function ThreadMessage({ m, expanded, onToggle, onReply, prefs, setPrefs, last, 
                     <button key={d} onClick={() => { setMenu(false); onFollowUp(m, d); }}><Icon name="clock" /> {l}</button>
                   ))}
                 </>}
+                <button onClick={() => { setMenu(false); window.dispatchEvent(new CustomEvent('roammail:readlater', { detail: m })); }}><Icon name="archive" />{' '}{t("Read later")}</button>
+                <button onClick={() => { setMenu(false); window.dispatchEvent(new CustomEvent('roammail:makerule', { detail: m })); }}><Icon name="filter" />{' '}{t("Make a rule…")}</button>
+                <button onClick={() => { setMenu(false); window.dispatchEvent(new CustomEvent('roammail:reportscam', { detail: m })); }}><Icon name="shield" />{' '}{t("Report scam or phishing")}</button>
                 {sender.address && <button onClick={() => { setMenu(false); onBlock(sender.address); }}><Icon name="block" />{' '}{t("Block")}{' '}{sender.address}</button>}
                 <button onClick={() => window.open(mailUrl(`/api/raw?folder=${encodeURIComponent(m.folder)}&uid=${m.uid}`), '_blank')}><Icon name="external" />{' '}{t("View source")}</button>
                 <button onClick={() => { const f = document.querySelector(`[data-msg="${m.folder}:${m.uid}"] iframe`); f?.contentWindow?.print(); }}><Icon name="print" />{' '}{t("Print")}</button>
@@ -224,7 +306,7 @@ function ThreadMessage({ m, expanded, onToggle, onReply, prefs, setPrefs, last, 
       {!isJunk && <InviteCard m={m} me={me} />}
       <SecurityBanner m={m} sender={sender} orgDomains={orgDomains} />
       {!isJunk && sender.address?.toLowerCase() !== me?.email?.toLowerCase() && <ReceiptAsk m={m} prefs={prefs} sender={sender} />}
-      {sender.address?.toLowerCase() === me?.email?.toLowerCase() && <ReceiptStatus m={m} />}
+      {sender.address?.toLowerCase() === me?.email?.toLowerCase() && (chatStatus ? <ChatStatus list={chatStatus} /> : <ReceiptStatus m={m} />)}
       {m.secureId && sender.address?.toLowerCase() === me?.email?.toLowerCase() && <SecureStatus id={m.secureId} />}
       {isJunk && <div className="img-banner"><Icon name="shield" size={16} />{' '}{t("Links and pictures are turned off in Junk. Mark it as not junk to use them.")}</div>}
       {blocked > 0 && !allow && !isJunk && (
@@ -247,14 +329,21 @@ function ThreadMessage({ m, expanded, onToggle, onReply, prefs, setPrefs, last, 
       )}
       {unsubUrl && <div className="unsub">{t("Mailing list ·")}{' '}<a href={unsubUrl} target="_blank" rel="noreferrer">{t("Unsubscribe")}</a></div>}
       <div className="tmsg-body" data-msg={`${m.folder}:${m.uid}`}>
-        <MessageBody msg={m} allowRemote={allow && !isJunk} onBlocked={setBlocked} onTrackers={setTrackers} disableLinks={isJunk} />
+        {m.report ? <ReportCard m={m} /> : <MessageBody msg={m} allowRemote={allow && !isJunk} onBlocked={setBlocked} onTrackers={setTrackers} disableLinks={isJunk} />}
       </div>
       {files.length > 0 && (
         <div className="attachments">
           {files.map((a) => (
-            <a key={a.index} className="att" href={api.attachmentUrl(m.folder, m.uid, a.index)} download={a.filename}>
-              {a.contentType?.startsWith('image/') ? <img src={api.attachmentUrl(m.folder, m.uid, a.index, true)} alt="" /> : <Icon name="clip" size={22} />}
-              <div><div className="att-name" title={a.filename}>{a.filename}</div><div className="muted small">{fmtSize(a.size)}</div></div>
+            <a key={a.index} className={`att ${a.risk ? `risk-${a.risk}` : ''}`} href={api.attachmentUrl(m.folder, m.uid, a.index)} download={a.filename}
+              onClick={(e) => {
+                if (a.risk === 'block') {
+                  e.preventDefault();
+                  if (confirm(t('This file can run programs on your computer. Files like this are the most common way computers get infected.\n\nOnly open it if you were expecting it and you trust the sender. Download it anyway?'))) location.href = `${api.attachmentUrl(m.folder, m.uid, a.index)}&confirm=1`;
+                } else if ((a.risk === 'macro' || a.risk === 'html') && !confirm(a.risk === 'macro' ? t('This Office file contains macros (small programs). Never click “Enable content” unless you trust the sender. Download it?') : t('This attachment is a web page. Fake sign-in pages are often sent like this — never type a password into it. Download it?'))) e.preventDefault();
+              }}>
+              {a.contentType?.startsWith('image/') && !a.risk ? <img src={api.attachmentUrl(m.folder, m.uid, a.index, true)} alt="" /> : <Icon name={a.risk === 'block' ? 'shield' : 'clip'} size={22} />}
+              <div><div className="att-name" title={a.filename}>{a.filename}</div>
+                <div className="muted small">{fmtSize(a.size)}{a.risk === 'block' ? ` · ${t('Blocked: can run programs')}` : a.risk === 'macro' ? ` · ${t('Has macros')}` : a.risk === 'html' ? ` · ${t('Web page: careful')}` : a.risk === 'archive' ? ` · ${t('Archive')}` : ''}</div></div>
             </a>
           ))}
         </div>
@@ -263,7 +352,9 @@ function ThreadMessage({ m, expanded, onToggle, onReply, prefs, setPrefs, last, 
   );
 }
 
-export default function ReadingPane({ folder, msg, me, prefs, setPrefs, conversation, onReply, act, categories, onClose, isJunk, orgDomains = [], onAddTask, onFollowUp, onThread }) {
+export default function ReadingPane({ folder, msg, me, prefs, setPrefs, conversation, team, onReply: onReplyRaw, act, categories, onClose, isJunk, orgDomains = [], onAddTask, onFollowUp, onThread }) {
+  // in a shared mailbox, starting a reply tells teammates "X is replying"
+  const onReply = (m, how) => { if (team && how !== 'forward') window.dispatchEvent(new CustomEvent('roammail:replying', { detail: m?.messageId })); onReplyRaw(m, how); };
   const [thread, setThread] = useState(null);
   const [error, setError] = useState('');
   const [expanded, setExpanded] = useState(new Set());
@@ -271,13 +362,37 @@ export default function ReadingPane({ folder, msg, me, prefs, setPrefs, conversa
   useEffect(() => {
     if (!msg) return;
     setThread(null); setError('');
-    const p = conversation ? api.thread(folder, msg.uid) : api.get('/api/message', { folder, uid: msg.uid }).then((m) => ({ subject: m.subject, messages: [m] }));
-    p.then((t) => {
+    let live = true; let shown = false; let real = false;
+    const show = (t, isReal) => {
+      if (!live || (real && !isReal)) return;
+      if (isReal) real = true;
       setThread(t); onThread?.(t.messages[t.messages.length - 1]);
+      if (shown) return; // keep what the person opened or closed
+      shown = true;
       const last = t.messages[t.messages.length - 1];
       setExpanded(new Set([`${last.folder}:${last.uid}`, ...t.messages.filter((m) => !m.seen).map((m) => `${m.folder}:${m.uid}`), `${folder}:${msg.uid}`]));
-    }).catch((e) => setError(e.message));
+    };
+    // loaded ahead of time? show it now; the real open below marks it read and refreshes it
+    prefetched(folder, msg.uid, conversation)?.then((t) => show(t, false)).catch(() => {});
+    openNow(folder, msg.uid, conversation).then((t) => show(t, true)).catch((e) => { if (live && !shown) setError(e.message); });
+    return () => { live = false; };
   }, [folder, msg?.uid, conversation]);
+
+  // iMessage-style status of my emails in this conversation (to other Roammail users), updated live
+  const mine = (thread?.messages || []).filter((m) => m.from?.[0]?.address?.toLowerCase() === me?.email?.toLowerCase() && m.messageId).map((m) => m.messageId);
+  const [chat, setChat] = useState({});
+  useEffect(() => {
+    if (!mine.length) { setChat({}); return; }
+    api.get('/api/msg-status', { ids: mine.join(',') }).then((r) => setChat(r.status || {})).catch(() => {});
+  }, [mine.join(',')]);
+  useEffect(() => {
+    const on = (e) => {
+      const d = e.detail;
+      setChat((c) => (c[d.messageId] ? { ...c, [d.messageId]: c[d.messageId].map((x) => (x.address === d.recipient ? { ...x, read: d.read } : x)) } : c));
+    };
+    window.addEventListener('roammail:status', on); return () => window.removeEventListener('roammail:status', on);
+  }, []);
+  const threadIds = (thread?.messages || []).map((m) => m.messageId).filter(Boolean);
 
   if (!msg) {
     return (
@@ -301,6 +416,7 @@ export default function ReadingPane({ folder, msg, me, prefs, setPrefs, conversa
         </div>
       </div>
       {isJunk && <div className="banner warn">{t("This message was identified as junk. Be careful with links and attachments.")}{' '}<button className="link" onClick={() => act.notJunk(msg.uid, msg.from?.[0]?.address)}>{t("It's not junk")}</button></div>}
+      {team && thread && <TeamBar msg={thread.messages[thread.messages.length - 1]} subject={msg.subject} />}
       <div className="thread">
         {error && <div className="form-error">{error}</div>}
         {!thread && !error && <div className="list-msg"><div className="spinner" /></div>}
@@ -311,9 +427,10 @@ export default function ReadingPane({ folder, msg, me, prefs, setPrefs, conversa
           return (
             <ThreadMessage key={k} m={m} last={i === thread.messages.length - 1} expanded={expanded.has(k)} prefs={prefs} setPrefs={setPrefs}
               onToggle={() => setExpanded((s) => { const n = new Set(s); n.has(k) ? n.delete(k) : n.add(k); return n; })}
-              onReply={onReply} orgDomains={orgDomains} onBlock={act.block} isJunk={isJunk} me={me} onAddTask={onAddTask} onFollowUp={onFollowUp} />
+              onReply={onReply} orgDomains={orgDomains} onBlock={act.block} isJunk={isJunk} me={me} onAddTask={onAddTask} onFollowUp={onFollowUp} chatStatus={chat[m.messageId]} />
           );
         })}
+        {thread && <TypingBubble ids={threadIds} />}
       </div>
       {thread && (
         <div className="reply-bar">

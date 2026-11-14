@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { useDialog } from '../../a11y.js';
 import { api } from '../../api.js';
 import { Icon } from '../../icons.jsx';
 import { useToast } from '../Toast.jsx';
@@ -24,9 +25,10 @@ function GroupEditor({ org, data, group, onClose, onSaved }) {
     } catch (err) { toast(err.message, { error: true }); } finally { setBusy(false); }
   };
   const inDept = data.people.filter((p) => p.department.toLowerCase() === f.department.toLowerCase());
+  const dlg = useDialog(onClose);
   return (
     <div className="modal-wrap" onClick={onClose}>
-      <form className="modal group-editor" onClick={(e) => e.stopPropagation()} onSubmit={save}>
+      <form ref={dlg} data-dialog tabIndex={-1} role="dialog" aria-modal="true" className="modal group-editor" onClick={(e) => e.stopPropagation()} onSubmit={save}>
         <div className="modal-head"><h2>{isNew ? 'New group' : `Edit ${group.address}`}</h2><button type="button" className="icon-btn" onClick={onClose}><Icon name="close" /></button></div>
         <div className="form">
           <label>Group name<input value={f.name} onChange={(e) => setF({ ...f, name: e.target.value, localPart: isNew && (!f.localPart || f.localPart === slug(f.name)) ? slug(e.target.value) : f.localPart })} placeholder="Sales team" autoFocus required /></label>
