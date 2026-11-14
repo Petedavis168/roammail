@@ -359,6 +359,8 @@ async function pgDriver(url) {
     // Verified TLS; the image trusts Amazon RDS's certificate authority (NODE_EXTRA_CA_CERTS)
     ssl: local ? false : { rejectUnauthorized: process.env.DATABASE_SSL_INSECURE !== 'true' },
   });
+  // An idle connection the database closed (restart, failover, maintenance) is replaced on next use; never crash on it
+  pool.on('error', (e) => console.warn('database connection closed:', e.code || e.message));
   // Only one app server at a time creates or upgrades the tables
   const c = await pool.connect();
   try {
@@ -374,12 +376,25 @@ async function pgDriver(url) {
     if (!t) { t = toPg(sql); if (cache.size < 1000) cache.set(sql, t); }
     return t;
   };
+  // The database password is changed automatically every week (RDS-managed secret). This process keeps the password
+  // it started with, so once the database rejects it, exit: ECS starts a fresh copy with the current password.
+  // (Connections already open keep working; only new ones fail. A few failures in a row, not one, triggers it.)
+  let authFails = 0;
+  const query = async (sql, a) => {
+    try { const r = await pool.query(sql, a); authFails = 0; return r; } catch (e) {
+      if (e.code === '28P01' && fromEnv && ++authFails >= 3) {
+        console.error('APP_ERROR database password was changed: restarting to pick up the new one');
+        setTimeout(() => process.exit(1), 500).unref();
+      }
+      throw e;
+    }
+  };
   return {
     dialect: 'postgres', raw: pool,
-    get: async (sql, a) => (await pool.query(tr(sql), a)).rows[0],
-    all: async (sql, a) => (await pool.query(tr(sql), a)).rows,
-    run: async (sql, a) => ({ changes: (await pool.query(tr(sql), a)).rowCount }),
-    insert: async (sql, a) => Number((await pool.query(`${tr(sql)} RETURNING id`, a)).rows[0]?.id),
+    get: async (sql, a) => (await query(tr(sql), a)).rows[0],
+    all: async (sql, a) => (await query(tr(sql), a)).rows,
+    run: async (sql, a) => ({ changes: (await query(tr(sql), a)).rowCount }),
+    insert: async (sql, a) => Number((await query(`${tr(sql)} RETURNING id`, a)).rows[0]?.id),
     close: () => pool.end(),
   };
 }
