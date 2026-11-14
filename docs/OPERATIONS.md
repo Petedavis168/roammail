@@ -168,3 +168,21 @@ also test against a real one:
    ```
 5. Also check by hand: sign up on a phone, add the account with the setup QR code, send to and from Gmail and Outlook,
    and confirm messages aren't landing in their spam folders (see `docs/DELIVERABILITY.md`).
+
+## ⚠ CloudFormation and the app's task definitions (read before any roammail-prod stack update)
+
+The stack `roammail-prod` created the ECS services with placeholder task definitions (`roammail-web:1` and
+`roammail-worker:1`, image `public.ecr.aws/nginx/nginx:stable`). Every real release registers a new task definition
+revision outside CloudFormation (`roammail-web:45` and up) and points the services at it.
+
+So a stack update that touches **WebService, WorkerService, WebTask, WorkerTask or the AppImage parameter** (including
+changing `WebMinTasks`) would put the services back on the placeholder and take the site down. Always create a change
+set first and read it: if it lists any of those resources, don't execute it.
+
+Safe ways to change things the stack also manages:
+- Number of web copies: Application Auto Scaling `RegisterScalableTarget` (MinCapacity) and ECS `UpdateService`
+  (desiredCount) directly. Since Nov 14 2026 the minimum is 2 (the stack parameter still says 1).
+- Alarms, dashboard, WAF: change sets that only list those resources are fine.
+
+Several web copies share live updates (typing, read ticks, team inboxes, sign-out everywhere) through PostgreSQL
+LISTEN/NOTIFY (`server/src/pgbus.js`), or Redis when `REDIS_URL` is set.

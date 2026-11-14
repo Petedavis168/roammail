@@ -33,7 +33,16 @@ export const redis = () => client;
 export function onBroadcast(channel, fn) { local.on(channel, fn); }
 export function broadcast(channel, data) {
   local.emit(channel, data);
-  if (client) client.publish('roammail', JSON.stringify({ from: SERVER_ID, channel, data })).catch((e) => console.error('APP_ERROR redis publish', e.message));
+  const msg = JSON.stringify({ from: SERVER_ID, channel, data });
+  if (client) client.publish('roammail', msg).catch((e) => console.error('APP_ERROR redis publish', e.message));
+  else if (busPublish) busPublish(msg);
+}
+// Without Redis, servers sharing PostgreSQL pass messages through it (LISTEN/NOTIFY; see pgbus.js)
+let busPublish = null;
+export const setBusPublisher = (fn) => { busPublish = fn; };
+/** A message from another server (via the database). */
+export function receiveBus(raw) {
+  try { const { from, channel, data } = JSON.parse(raw); if (from !== SERVER_ID) local.emit(channel, data); } catch { /* ignore malformed */ }
 }
 
 // ---------------------------------------------------------------- rate limiting (drop-in for express-rate-limit)

@@ -19,6 +19,7 @@ import { deliverabilityApi } from './deliverability.js';
 import { idVerifyApi } from './idverify.js';
 import { insightsApi, funnelApi, startWeeklyInsights } from './insights.js';
 import { teamApi } from './team.js';
+import { startPgBus } from './pgbus.js';
 import { sendSystemMail } from './recovery.js';
 import { help } from './help.js';
 import { hosts, siteRouter, ID_PATH, notFound } from './hosts.js';
@@ -255,6 +256,7 @@ setImportNotifier(async (email, n) => {
 startImports();
 startReputationReport();
 startWeeklyInsights();
+startPgBus().then((on) => on && console.log('servers share live updates through the database')).catch((e) => console.warn('pg bus', e.message));
 gauge('push_watchers', () => pushStats().watching);
 if (config.runsBackground) {
   await startJobs();

@@ -408,6 +408,8 @@ const driver = config.databaseUrl ? await pgDriver(config.databaseUrl) : await s
 /** The underlying SQLite database (null on PostgreSQL). */
 export const db = driver.dialect === 'sqlite' ? driver.raw : null;
 export const dialect = driver.dialect;
+/** The PostgreSQL connection pool (null on SQLite), for the message bus between servers. */
+export const pgPool = driver.dialect === 'postgres' ? driver.raw : null;
 const args = (a) => a.map((v) => (v === undefined ? null : typeof v === 'boolean' ? Number(v) : v));
 export const q = {
   get: (sql, ...a) => driver.get(sql, args(a)),

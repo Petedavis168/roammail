@@ -21,6 +21,7 @@ import { attachmentRisk, scanInfo } from './mailsafety.js';
 import { learnRecipients } from './screener.js';
 import { recordDelivered, recordRead, isRoammail } from './status.js';
 import { setLiveSender } from './live.js';
+import { broadcast, onBroadcast } from './shared.js';
 import { groupsFor } from './contactgroups.js';
 import { eventsIn } from './calendar.js';
 import { checkOutgoing } from './scamguard.js';
@@ -759,7 +760,10 @@ api.get('/contacts', wrap(async (req, res) => {
 // ---------- live updates (Server-Sent Events + IMAP IDLE) ----------
 // One IDLE connection per person, shared by all their open tabs and devices (was one per tab).
 const hubs = new Map(); // email -> { subs: Set<fn>, client, ready: Promise }
-setLiveSender((email, event, data) => { const h = hubs.get(email); if (h) for (const fn of h.subs) fn(event, data); });
+// Live events go to every app server (Redis or the database bus); each delivers to the windows it has open
+const deliverLocal = ({ email, event, data }) => { const h = hubs.get(email); if (h) for (const fn of h.subs) fn(event, data); };
+onBroadcast('live', deliverLocal);
+setLiveSender((email, event, data) => broadcast('live', { email, event, data }));
 gauge('live_users', () => hubs.size);
 gauge('preview_cache_entries', () => previewCache.size);
 export const liveStats = () => ({ users: hubs.size, streams: [...hubs.values()].reduce((n, h) => n + h.subs.size, 0) });
