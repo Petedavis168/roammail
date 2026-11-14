@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { prefetched, openNow } from '../fastcache.js';
+import TeamBar from './TeamBar.jsx';
 import { api, mailUrl } from '../api.js';
 import { Icon } from '../icons.jsx';
 import { fmtDate, fmtSize, personName, avatarColor, initials } from '../util.js';
@@ -351,7 +352,9 @@ function ThreadMessage({ m, expanded, onToggle, onReply, prefs, setPrefs, last, 
   );
 }
 
-export default function ReadingPane({ folder, msg, me, prefs, setPrefs, conversation, onReply, act, categories, onClose, isJunk, orgDomains = [], onAddTask, onFollowUp, onThread }) {
+export default function ReadingPane({ folder, msg, me, prefs, setPrefs, conversation, team, onReply: onReplyRaw, act, categories, onClose, isJunk, orgDomains = [], onAddTask, onFollowUp, onThread }) {
+  // in a shared mailbox, starting a reply tells teammates "X is replying"
+  const onReply = (m, how) => { if (team && how !== 'forward') window.dispatchEvent(new CustomEvent('roammail:replying', { detail: m?.messageId })); onReplyRaw(m, how); };
   const [thread, setThread] = useState(null);
   const [error, setError] = useState('');
   const [expanded, setExpanded] = useState(new Set());
@@ -413,6 +416,7 @@ export default function ReadingPane({ folder, msg, me, prefs, setPrefs, conversa
         </div>
       </div>
       {isJunk && <div className="banner warn">{t("This message was identified as junk. Be careful with links and attachments.")}{' '}<button className="link" onClick={() => act.notJunk(msg.uid, msg.from?.[0]?.address)}>{t("It's not junk")}</button></div>}
+      {team && thread && <TeamBar msg={thread.messages[thread.messages.length - 1]} subject={msg.subject} />}
       <div className="thread">
         {error && <div className="form-error">{error}</div>}
         {!thread && !error && <div className="list-msg"><div className="spinner" /></div>}

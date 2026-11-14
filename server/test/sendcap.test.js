@@ -102,4 +102,10 @@ test('100 emails a month on free accounts until a US driver’s license is verif
   const fourth = await verify((await signup(`capd${run}`)).c, 'us');
   assert.equal(fourth.status, 'failed'); assert.match(fourth.reason, /already verified 3/);
   assert.equal((await verify((await signup(`cape${run}`)).c, 'us', 'Someone Else')).status, 'verified', 'a different person is fine');
+
+  // the owner's weekly numbers include what just happened (super-admin only)
+  const ins = (await admin.get('/api/super/insights')).data;
+  assert.ok(ins.cur.signups >= 6, JSON.stringify(ins.cur)); assert.ok(ins.cur.idVerified >= 4); assert.ok(ins.cur.funnel.signup_done >= 6);
+  assert.equal(ins.weeks.length, 8); assert.ok(Array.isArray(ins.funnelSteps));
+  assert.equal((await a.get('/api/super/insights')).status, 403);
 });

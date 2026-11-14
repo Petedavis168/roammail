@@ -15,6 +15,7 @@ import TwoFactorSetup from '../TwoFactorSetup.jsx';
 import Support from './Support.jsx';
 import Abuse from './Abuse.jsx';
 import Deliverability from './Deliverability.jsx';
+import Insights from './Insights.jsx';
 import SharedMailboxes from './SharedMailboxes.jsx';
 import Archive from './Archive.jsx';
 import { TemplatesEditor } from '../settings/Templates.jsx';
@@ -711,7 +712,7 @@ export default function Admin({ me, refreshMe, onExit }) {
 
   const tabs = [
     ...(org ? [['users', 'Users', 'users'], ['groups', 'Groups', 'users'], ['shared', 'Shared mailboxes', 'mail'], ['archive', 'Archive & legal hold', 'lock'], ['signature', 'Signature', 'pen'], ['templates', 'Templates', 'mail'], ['spam', 'Spam filter', 'junk'], ['orgsecurity', 'Security', 'lock'], ['billing', 'Billing', 'tag'], ['aliases', 'Aliases', 'mail'], ['domains', 'Domains', 'globe'], ['activity', 'Activity', 'refresh']] : []),
-    ...(me.superAdmin ? [['platform', 'Platform (super-admin)', 'shield'], ['support', 'Support', 'users'], ['abuse', 'Abuse & sending', 'junk'], ['deliverability', 'Deliverability', 'send'], ['new', 'New business', 'plus']] : []),
+    ...(me.superAdmin ? [['platform', 'Platform (super-admin)', 'shield'], ['support', 'Support', 'users'], ['abuse', 'Abuse & sending', 'junk'], ['insights', 'Insights', 'spark'], ['deliverability', 'Deliverability', 'send'], ['new', 'New business', 'plus']] : []),
   ];
   const current = tabs.some((t) => t[0] === tab) ? tab : tabs[0][0];
 
@@ -729,7 +730,7 @@ export default function Admin({ me, refreshMe, onExit }) {
         <button onClick={onExit}><Icon name="back" /> Back to mail</button>
       </aside>
       <section className="admin-main">
-        <h1>{current === 'platform' ? 'Platform' : current === 'support' ? 'Support' : current === 'abuse' ? 'Abuse & sending' : current === 'deliverability' ? 'Deliverability' : current === 'new' ? 'Add a business' : org?.name} <small className="muted">{tabs.find((t) => t[0] === current)?.[1]}</small></h1>
+        <h1>{current === 'platform' ? 'Platform' : current === 'support' ? 'Support' : current === 'abuse' ? 'Abuse & sending' : current === 'deliverability' ? 'Deliverability' : current === 'insights' ? 'Insights' : current === 'new' ? 'Add a business' : org?.name} <small className="muted">{tabs.find((t) => t[0] === current)?.[1]}</small></h1>
         {current === 'users' && org && <Users key={org.id} org={org} domains={org.domains} />}
         {current === 'signature' && org && <><SignatureTab key={org.id} org={org} /><CompanyFooter key={`f${org.id}`} org={org} /></>}
         {current === 'orgsecurity' && org && <OrgSecurity key={org.id} org={org} reload={load} />}
@@ -747,6 +748,7 @@ export default function Admin({ me, refreshMe, onExit }) {
         {current === 'support' && <Support />}
         {current === 'abuse' && <Abuse />}
         {current === 'deliverability' && <Deliverability />}
+        {current === 'insights' && <Insights />}
         {current === 'new' && <DomainWizard refreshMe={refreshMe} onCreated={load} onDone={() => { load(); setTab('domains'); }} />}
       </section>
     </div>

@@ -114,8 +114,8 @@ hosts.get(ID_PATH, async (req, res, next) => {
 export { ID_RE, ID_PATH, notFound };
 
 // ---------------------------------------------------------------- the public website
-const SITE_PAGES = ['index', 'terms', 'privacy', 'cookies', 'acceptable-use', 'accessibility', 'legal', 'brand'];
-const SITE_FILES = /^\/(style\.css|app\.js|pricing\.js|comparison\.js|setup\.js|privacy-controls\.js)$/;
+const SITE_PAGES = ['index', 'terms', 'privacy', 'cookies', 'acceptable-use', 'accessibility', 'legal', 'brand', 'roammail-vs-gmail', 'roammail-vs-outlook', 'move-from-gmail', 'move-from-outlook'];
+const SITE_FILES = /^\/(style\.css|app\.js|pricing\.js|comparison\.js|setup\.js|privacy-controls\.js|sitemap\.xml)$/;
 export function siteRouter(dir) {
   const r = express.Router();
   // Logos are used by the sign-in pages and the app too, so /assets is served on every host

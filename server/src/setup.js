@@ -118,7 +118,11 @@ setupApi.post('/setup/2fa/remind', wrap(async (req, res) => {
 setupApi.post('/setup/step', wrap(async (req, res) => {
   const step = String(req.body.step || '').replace(/[^a-z0-9-]/g, '').slice(0, 30);
   if (step) await logStep(req, req.user.email, step);
-  if (step === 'done') await q.run('UPDATE account_setup SET onboarded_at = ? WHERE email = ?', Date.now(), req.user.email);
+  if (step === 'done') {
+    const r = await q.run('UPDATE account_setup SET onboarded_at = ? WHERE email = ? AND onboarded_at IS NULL', Date.now(), req.user.email);
+    if (r.changes) (await import('./insights.js')).recordStep('setup_done').catch(() => {});
+    else await q.run('UPDATE account_setup SET onboarded_at = COALESCE(onboarded_at, ?) WHERE email = ?', Date.now(), req.user.email);
+  }
   res.json({ ok: true });
 }));
 

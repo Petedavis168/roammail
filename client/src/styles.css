@@ -1717,3 +1717,18 @@ a { color: var(--accent); }
 .idv-bar span.full { background: #c50f1f; }
 .idv-steps { margin: 6px 0 12px; padding-left: 20px; line-height: 1.6; }
 .idv-privacy { margin-top: 8px; }
+.funnel-bar { height: 12px; border-radius: 0 4px 4px 0; background: var(--accent); }
+
+/* ---------- team inboxes ---------- */
+.team-bar { border: 1px solid var(--border); border-radius: 10px; padding: 8px 12px; margin: 8px 0 12px; display: flex; flex-direction: column; gap: 6px; background: var(--surface, transparent); }
+.team-row { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.team-notes-toggle { margin-left: auto; }
+.team-alert { background: #fff4ce; color: #5c4400; border-radius: 8px; padding: 6px 10px; font-weight: 600; }
+[data-theme='dark'] .team-alert { background: #4a3b00; color: #ffe08a; }
+.team-notes { display: flex; flex-direction: column; gap: 8px; }
+.team-note { background: var(--hover, #f5f7fa); border-radius: 8px; padding: 6px 10px; }
+.team-note .link { margin-left: 8px; }
+.team-note-body { white-space: pre-wrap; margin-top: 2px; }
+.team-note-add { display: flex; gap: 6px; } .team-note-add input { flex: 1; }
+.team-chip { font-size: 11px; padding: 0 6px; border-radius: 999px; background: var(--hover, #eef1f5); color: var(--text-2, #444); white-space: nowrap; }
+.team-chip.mine { background: #dbe7fd; color: #1d4ed8; } [data-theme='dark'] .team-chip.mine { background: #1e3a6b; color: #cfe0ff; }

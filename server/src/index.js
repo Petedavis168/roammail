@@ -1,5 +1,6 @@
 import express from 'express';
 import helmet from 'helmet';
+import { systemStatus } from './ops.js';
 import { rateLimit } from './shared.js';
 import cookieParser from 'cookie-parser';
 import path from 'node:path';
@@ -16,6 +17,8 @@ import { phoneApi } from './phone.js';
 import { reputationApi, startReputationReport } from './reputation.js';
 import { deliverabilityApi } from './deliverability.js';
 import { idVerifyApi } from './idverify.js';
+import { insightsApi, funnelApi, startWeeklyInsights } from './insights.js';
+import { teamApi } from './team.js';
 import { sendSystemMail } from './recovery.js';
 import { help } from './help.js';
 import { hosts, siteRouter, ID_PATH, notFound } from './hosts.js';
@@ -102,6 +105,16 @@ app.use('/api', (req, res, next) => {
   next();
 });
 app.get('/healthz', (req, res) => res.json({ ok: true }));
+// Deep check for the outside uptime monitor: the database must answer (the mail server is reported, not required,
+// so a mail-server problem shows on the status page without taking the website down)
+app.get('/healthz/deep', async (req, res) => {
+  const t0 = Date.now();
+  let db = false;
+  try { await Promise.race([q.get('SELECT 1 AS x'), new Promise((_, rej) => setTimeout(() => rej(new Error('timeout')), 4000))]); db = true; } catch { /* down */ }
+  const s = await systemStatus().catch(() => null);
+  const part = (name) => s?.components?.find((c) => c.name === name)?.ok ?? null;
+  res.set('Cache-Control', 'no-store').status(db ? 200 : 503).json({ ok: db, db, dbMs: Date.now() - t0, mail: { receiving: part('Receiving and reading mail'), sending: part('Sending mail') } });
+});
 app.use(appLinks); // before host routing: these must be served on every host, never redirected
 app.use(bookingPages); // public booking pages, same on every host
 app.use(securePages); // password-protected email page, same on every host
@@ -132,6 +145,7 @@ app.use('/api/setup', requireAuth);
 app.use('/api', setupApi);
 app.use('/api', phoneApi);
 app.use('/api', publicAccounts);
+app.use('/api', funnelApi);
 app.use('/api', api);
 app.use('/api', accounts);
 app.use('/api', signatures);
@@ -164,6 +178,8 @@ app.use('/api', tasksApi);
 app.use('/api', reputationApi);
 app.use('/api', deliverabilityApi);
 app.use('/api', idVerifyApi);
+app.use('/api', insightsApi);
+app.use('/api', teamApi);
 app.use('/api', importsApi);
 app.use('/api', calendar);
 app.use('/api', contacts);
@@ -209,7 +225,7 @@ app.get('/robots.txt', staticLimiter, (req, res) => {
   const body = config.adminHost && host === config.adminHost ? 'User-agent: *\nDisallow: /\n' // admin dashboard: never indexed
     : config.loginHost && host === config.loginHost
     ? 'User-agent: *\nAllow: /$\nAllow: /signup\nDisallow: /\n' // sign-in host: only the sign-in and sign-up pages
-    : 'User-agent: *\nDisallow: /api/\nDisallow: /app\nDisallow: /help/contact\n'; // the website; mailbox pages need a sign-in anyway
+    : 'User-agent: *\nDisallow: /api/\nDisallow: /app\nDisallow: /help/contact\nSitemap: https://roammail.net/sitemap.xml\n'; // the website; mailbox pages need a sign-in anyway
   res.type('text/plain').set('Cache-Control', 'public, max-age=86400').send(body);
 });
 if (fs.existsSync(dist)) {
@@ -238,6 +254,7 @@ setImportNotifier(async (email, n) => {
 });
 startImports();
 startReputationReport();
+startWeeklyInsights();
 gauge('push_watchers', () => pushStats().watching);
 if (config.runsBackground) {
   await startJobs();

@@ -68,6 +68,13 @@ export default function Login({ onLogin, mode = 'signin' }) {
   const captchaRef = useRef(); const timer = useRef();
   const set = (k) => (e) => { setError(''); setF((x) => ({ ...x, [k]: e.target.type === 'checkbox' ? e.target.checked : e.target.value })); };
   const go = (s) => { setError(''); setInfo(''); setStep(s); };
+  // count how far people get in sign-up (just the step, nothing about them), once per visit
+  useEffect(() => {
+    const f = { name: 'signup_view', address: 'signup_address', 'password-new': 'signup_password', recovery: 'signup_recovery', review: 'signup_review' }[step];
+    if (!f || sessionStorage.getItem(`funnel:${f}`)) return;
+    sessionStorage.setItem(`funnel:${f}`, '1');
+    fetch('/api/funnel', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'mailcow-client' }, body: JSON.stringify({ step: f }), keepalive: true }).catch(() => {});
+  }, [step]);
   useEffect(() => { api.signupConfig().then(setCfg).catch(() => {}); }, []);
   const fullEmail = f.email.includes('@') ? f.email.trim() : `${f.email.trim()}@${cfg.domain}`;
 

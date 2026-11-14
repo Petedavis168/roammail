@@ -8,7 +8,7 @@ import { attachGestures, SWIPE_ACTIONS } from '../swipe.js';
 import { t } from '../i18n.js';
 
 export default function MessageList({ list, title, search, onClearSearch, folderUse, filter, setFilter, selected, setSelected,
-  active, onOpen, act, categories, density, onLoadMore, onEmpty, onMarkAllRead, snoozeMap, allInboxes, isInbox, onBump, inboxTab, setInboxTab, onSwipe, swipe = {}, onRefresh, unreadInbox = 0, onCatchUp, onHover }) {
+  active, onOpen, act, categories, density, onLoadMore, onEmpty, onMarkAllRead, snoozeMap, allInboxes, isInbox, onBump, inboxTab, setInboxTab, onSwipe, swipe = {}, onRefresh, unreadInbox = 0, onCatchUp, onHover, team, meEmail }) {
   const ref = useRef();
   const hoverT = useRef();
   const { messages, loading, total } = list;
@@ -142,6 +142,10 @@ export default function MessageList({ list, title, search, onClearSearch, folder
                 <div className="row-top">
                   <span className="from">{showTo ? 'To: ' : ''}{who?.length ? who.map(personName).join(', ') : '(unknown)'}</span>
                   <span className="row-icons">
+                    {(() => { const k = String(m.messageId || '').replace(/^<|>$/g, '').toLowerCase(); const a = team?.assign?.[k]; const n = team?.notes?.[k]; return <>
+                      {a && <span className={`team-chip ${a.email === String(meEmail || '').toLowerCase() ? 'mine' : ''}`} title={`${t('Assigned to')} ${a.name}`}>→ {a.email === String(meEmail || '').toLowerCase() ? t('Me') : a.name}</span>}
+                      {n > 0 && <span className="team-chip notes" title={t('Team notes')}>✎ {n}</span>}
+                    </>; })()}
                     {m.hasAttachments && <Icon name="clip" size={14} />}
                     {m.answered && <Icon name="reply" size={14} />}
                   </span>

@@ -94,6 +94,10 @@ async function mailcowCheck() {
   } catch { return { ok: false, ms: Date.now() - t0 }; }
 }
 let statusCache = { at: 0, value: null };
+let mailMs = { imap: null, smtp: null };
+export const mailLatency = () => mailMs;
+gauge('LatencyMailImap', () => mailMs.imap ?? 0);
+gauge('LatencyMailSmtp', () => mailMs.smtp ?? 0);
 let statusRun = null;
 /** Current status. Answers at once from the last check (refreshing it in the background when it's over 30s old),
  *  so the status page and uptime monitors never wait on the mail servers. */
@@ -113,6 +117,7 @@ async function runChecks() {
     mailcowCheck(),
   ]);
   let db = true; try { await q.get('SELECT 1'); } catch { db = false; }
+  mailMs = { imap: imap.ok ? imap.ms : null, smtp: smtp.ok ? smtp.ms : null }; // how far away the mail server is (connect + greeting)
   const components = [
     { name: 'Web app', ok: db },
     { name: 'Receiving and reading mail', ok: imap.ok },

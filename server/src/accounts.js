@@ -191,6 +191,7 @@ publicAccounts.post('/signup', rateLimit({ windowMs: 60 * 60_000, limit: 10 }), 
   await q.run('INSERT INTO signups(email, ip, recovery_email, terms_version, phone_hash) VALUES(?, ?, ?, ?, ?) ON CONFLICT(email) DO UPDATE SET ip = excluded.ip, recovery_email = excluded.recovery_email, terms_version = excluded.terms_version, created_at = excluded.created_at, phone_hash = excluded.phone_hash', email, req.ip, String(req.body.recoveryEmail || '').slice(0, 200) || null, config.legal.termsVersion, phoneHash);
   await audit(email, null, 'signup', { ip: req.ip, phoneVerified: !!phoneHash });
   if (req.body.ref) await recordReferral(email, req.body.ref, { ip: req.ip, phoneHash }).catch(() => {}); // refer a friend
+  (await import('./insights.js')).recordStep('signup_done').catch(() => {});
   if (biz) await createOrgWithDomain(email, biz.domain, biz.orgName, biz.local);
   await saveProfile(email, { name });
   await setRecoveryEmail(email, String(req.body.recoveryEmail || '').trim());

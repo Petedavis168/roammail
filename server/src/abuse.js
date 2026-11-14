@@ -56,8 +56,10 @@ export async function checkSendQuota(email, recipientCount, messageId) {
   if (cap !== null && (await monthlySent(email)) + 1 > cap) {
     throw Object.assign(fail(429, `Free accounts can send ${cap} emails a month. Verify your identity with a US driver’s license to send more (Settings → Account). Your limit resets on the 1st.`), { code: 'monthly_cap' });
   }
+  const firstEver = !k.business && !(await q.get('SELECT 1 FROM monthly_sends WHERE email = ? LIMIT 1', email.toLowerCase()));
   await q.run('INSERT INTO send_counts(email, day, count) VALUES(?, ?, 1) ON CONFLICT(email, day) DO UPDATE SET count = send_counts.count + 1', email, day);
   await q.run("DELETE FROM send_counts WHERE day < date('now', '-40 days')");
+  if (firstEver) (await import('./insights.js')).recordStep('first_send').catch(() => {});
   if (!k.business) {
     await countMonthly(email);
     // the outbound log scan counts mail sent from phone/desktop apps; it skips the ones the web app already counted

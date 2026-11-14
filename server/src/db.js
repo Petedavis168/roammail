@@ -204,6 +204,11 @@ CREATE TABLE IF NOT EXISTS monthly_sends (email TEXT NOT NULL, month TEXT NOT NU
 CREATE TABLE IF NOT EXISTS webmail_msgids (msgid TEXT PRIMARY KEY, at INTEGER NOT NULL);
 CREATE TABLE IF NOT EXISTS counted_qids (qid TEXT PRIMARY KEY, at INTEGER NOT NULL);
 CREATE TABLE IF NOT EXISTS id_verifications (email TEXT PRIMARY KEY, status TEXT NOT NULL, session_id TEXT, country TEXT, doc_type TEXT, person_hash TEXT, reason TEXT, verified_at INTEGER, updated_at INTEGER NOT NULL);
+CREATE TABLE IF NOT EXISTS team_assign (mailbox TEXT NOT NULL, msgid TEXT NOT NULL, assignee TEXT NOT NULL, by_email TEXT NOT NULL, at INTEGER NOT NULL, PRIMARY KEY (mailbox, msgid));
+CREATE TABLE IF NOT EXISTS team_notes (id INTEGER PRIMARY KEY AUTOINCREMENT, mailbox TEXT NOT NULL, msgid TEXT NOT NULL, author TEXT NOT NULL, body TEXT NOT NULL, at INTEGER NOT NULL);
+CREATE INDEX IF NOT EXISTS team_notes_msg ON team_notes(mailbox, msgid);
+CREATE TABLE IF NOT EXISTS team_presence (mailbox TEXT NOT NULL, msgid TEXT NOT NULL, email TEXT NOT NULL, state TEXT NOT NULL, at INTEGER NOT NULL, PRIMARY KEY (mailbox, msgid, email));
+CREATE TABLE IF NOT EXISTS funnel_days (day TEXT NOT NULL, step TEXT NOT NULL, count INTEGER NOT NULL DEFAULT 0, PRIMARY KEY (day, step));
 CREATE TABLE IF NOT EXISTS deliverability_days (day TEXT PRIMARY KEY, sent INTEGER, bounced INTEGER, deferred INTEGER, complaints INTEGER, listed INTEGER, held INTEGER, by_provider TEXT, google TEXT, microsoft TEXT);
 CREATE TABLE IF NOT EXISTS referral_codes (email TEXT PRIMARY KEY, code TEXT NOT NULL UNIQUE, created_at INTEGER NOT NULL);
 CREATE TABLE IF NOT EXISTS referrals (referee TEXT PRIMARY KEY, referrer TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'pending', reason TEXT, created_at INTEGER NOT NULL, rewarded_at INTEGER);

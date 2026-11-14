@@ -59,6 +59,8 @@ export default function Mail({ me, route, refreshMe, theme, setTheme, themePref 
   const mailbox = route.id; // the mailbox ID in the URL
   const [sharedBoxes, setSharedBoxes] = useState([]);
   useEffect(() => { api.get('/api/shared-mailboxes').then(setSharedBoxes).catch(() => {}); }, []);
+  const isTeamBox = sharedBoxes.some((b) => b.mailboxId === route.id && !b.archive); // a shared mailbox the team works from
+  const [teamInfo, setTeamInfo] = useState(null); // who each email in the list is assigned to
   // Notifications: in the installed app (and on phones), ask once with a clear button. iPhone only allows this
   // from a tap inside the Home Screen app, which is why it's a button and not an automatic prompt.
   const [askPush, setAskPush] = useState(false);
@@ -198,6 +200,16 @@ export default function Mail({ me, route, refreshMe, theme, setTheme, themePref 
   const isAdmin = me.superAdmin || me.orgs?.some((o) => o.role === 'admin');
   const inOrg = me.orgs?.length > 0;
   const listFolder = list.folder;
+  useEffect(() => {
+    if (!isTeamBox || !list.messages?.length) { setTeamInfo(null); return undefined; }
+    const ids = list.messages.map((m) => String(m.messageId || '').replace(/^<|>$/g, '')).filter(Boolean).join(',');
+    const get = () => api.get('/api/team', { ids }).then(setTeamInfo).catch(() => {});
+    get();
+    const on = () => get();
+    window.addEventListener('roammail:team', on);
+    const iv = setInterval(get, 30000);
+    return () => { window.removeEventListener('roammail:team', on); clearInterval(iv); };
+  }, [isTeamBox, list.messages]);
   const msgs = list.messages;
   const activeMsg = msgs.find((m) => m.uid === active) || null;
   const special = (use) => folders.find((f) => f.specialUse === use)?.path;
@@ -303,6 +315,7 @@ export default function Mail({ me, route, refreshMe, theme, setTheme, themePref 
       // iMessage-style status from other Roammail users
       es.addEventListener('status', (e) => window.dispatchEvent(new CustomEvent('roammail:status', { detail: JSON.parse(e.data) })));
       es.addEventListener('typing', (e) => window.dispatchEvent(new CustomEvent('roammail:typing', { detail: JSON.parse(e.data) })));
+      es.addEventListener('team', (e) => window.dispatchEvent(new CustomEvent('roammail:team', { detail: JSON.parse(e.data) })));
       // Reconnect quickly (2s, 4s, 8s… up to 30s) so new mail keeps arriving after a network blip
       es.onerror = () => { es.close(); clearTimeout(retry); retry = setTimeout(connect, Math.min(30000, 2000 * 2 ** fails++)); };
     };
@@ -768,7 +781,7 @@ export default function Mail({ me, route, refreshMe, theme, setTheme, themePref 
                 unreadInbox={folders.find((f) => f.specialUse === '\\Inbox')?.unread || 0} onCatchUp={() => { setFolder('@catchup'); setActive(null); }}
                 swipe={{ left: prefs.swipeLeft, right: prefs.swipeRight }} onRefresh={() => { loadFolders(); load({ quiet: true }); }}
                 folderUse={currentFolderObj?.specialUse} filter={filter} setFilter={setFilter}
-                selected={selected} setSelected={setSelected} active={active} onOpen={openMessage}
+                selected={selected} setSelected={setSelected} active={active} onOpen={openMessage} team={teamInfo} meEmail={me.email}
                 onHover={folder === '@all' ? undefined : (m) => prefetch(listFolder, m.uid, prefs.conversation)}
                 act={act} categories={prefs.categories} density={prefs.density} allInboxes={folder === '@all'}
                 onLoadMore={() => !search && list.messages.length < list.total && !list.loading && load({ page: list.page + 1, append: true })}
@@ -777,7 +790,7 @@ export default function Mail({ me, route, refreshMe, theme, setTheme, themePref 
               {(!folder.startsWith('@')) && (prefs.readingPane !== 'off' || active) ? (
                 <ReadingPane
                   key={`${listFolder}:${active}`} folder={listFolder} msg={activeMsg} me={me} prefs={prefs} setPrefs={setPrefs}
-                  conversation={prefs.conversation} onReply={reply} act={act} categories={prefs.categories}
+                  conversation={prefs.conversation} team={isTeamBox} onReply={reply} act={act} categories={prefs.categories}
                   onClose={() => setActive(null)} isJunk={currentFolderObj?.specialUse === '\\Junk'} orgDomains={me.orgDomains || []}
                   onAddTask={addTaskFrom} onFollowUp={followUp} onThread={setOpenThreadMsg}
                 />
